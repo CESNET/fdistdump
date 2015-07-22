@@ -2,6 +2,7 @@
  * \file common.c
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
+ * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
 
@@ -146,11 +147,11 @@ void create_task_info_mpit(MPI_Datatype *task_info_mpit,
                 MPI_Datatype agg_params_mpit)
 {
         int block_lengths[INITIAL_INTO_T_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
-                1};
+                1, 1};
         MPI_Aint displacements[INITIAL_INTO_T_ELEMS];
         MPI_Datatype types[INITIAL_INTO_T_ELEMS] = {MPI_INT, agg_params_mpit,
                 MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
-                MPI_UNSIGNED_LONG};
+                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG};
 
         displacements[0] = offsetof(task_info_t, working_mode);
         displacements[1] = offsetof(task_info_t, agg_params);
@@ -158,6 +159,7 @@ void create_task_info_mpit(MPI_Datatype *task_info_mpit,
         displacements[3] = offsetof(task_info_t, filter_str_len);
         displacements[4] = offsetof(task_info_t, dir_str_len);
         displacements[5] = offsetof(task_info_t, rec_limit);
+        displacements[6] = offsetof(task_info_t, slave_cnt);
 
         MPI_Type_create_struct(INITIAL_INTO_T_ELEMS, block_lengths,
                         displacements, types, task_info_mpit);
@@ -198,6 +200,41 @@ int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
                         lnf_mem_free(*agg);
                         return E_LNF;
                 }
+        }
+
+        return E_OK;
+}
+
+/* Prepare statistics memory structure */
+int stats_init(lnf_mem_t **stats)
+{
+        int ret;
+
+        ret = lnf_mem_init(stats);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_init() returned %d (stats).", ret);
+                return E_LNF;
+        }
+
+        ret = lnf_mem_fadd(stats, LNF_FLD_AGGR_FLOWS, LNF_AGGR_SUM, 0, 0);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_fadd() error (statistics, flows).");
+                lnf_mem_free(*stats);
+                return E_LNF;
+        }
+
+        lnf_mem_fadd(stats, LNF_FLD_DPKTS, LNF_AGGR_SUM, 0, 0);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_fadd() error (statistics, packets).");
+                lnf_mem_free(*stats);
+                return E_LNF;
+        }
+
+        lnf_mem_fadd(stats, LNF_FLD_DOCTETS, LNF_AGGR_SUM, 0, 0);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_fadd() error (statistics, bytes).");
+                lnf_mem_free(*stats);
+                return E_LNF;
         }
 
         return E_OK;

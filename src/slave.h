@@ -55,6 +55,6 @@
  * \param[in] world_size MPI_COMM_WORLD size.
  * \return Number of records read (by one process).
  */
-void slave(int world_rank, int world_size);
+int slave(int world_rank, int world_size);
 
 #endif //SLAVE_H

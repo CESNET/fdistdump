@@ -86,7 +86,7 @@ typedef struct {
 } agg_params_t;
 
 //WATCH OUT: reflect changes also in task_info_mpit
-#define INITIAL_INTO_T_ELEMS 6
+#define INITIAL_INTO_T_ELEMS 7
 typedef struct {
         working_mode_t working_mode; //working mode
 
@@ -97,6 +97,11 @@ typedef struct {
         size_t dir_str_len; //filter string length
 
         size_t rec_limit; //record/aggregation limit
+
+        size_t slave_cnt; //active slave count
+        /* note (MPI): this information has to be sent explicitly, since there
+           could be another framework than MPI used for communication */
+
 } task_info_t;
 
 
@@ -109,6 +114,7 @@ enum { //tags
         TAG_FILTER,
         TAG_AGG,
         TAG_DATA,
+        TAG_TOPN_ID,
 };
 
 enum { //control commands
@@ -158,5 +164,10 @@ void create_task_info_mpit(MPI_Datatype *task_info_mpit,
 void free_task_info_mpit(MPI_Datatype *task_info_mpit);
 int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
                 size_t agg_params_cnt);
+
+/**
+ * \brief Prepare Top-N statistics memory structure.
+ */
+int stats_init(lnf_mem_t **stats);
 
 #endif //COMMON_H

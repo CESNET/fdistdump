@@ -2,6 +2,7 @@
  * \file master.c
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
+ * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
 
@@ -53,6 +54,7 @@
 #include <mpi.h>
 #include <libnf.h>
 
+#define STATISTICS_MEM /// TODO - process statistics with aggreg AND LIST FLOWS
 
 /* Global MPI data types. */
 extern MPI_Datatype task_info_mpit;
@@ -66,9 +68,9 @@ void fill_task_info(task_info_t *ti, const params_t *params, size_t slave_count)
         memcpy(ti->agg_params, params->agg_params,
                         params->agg_params_cnt * sizeof(agg_params_t));
 
-        if (params->rec_limit && params->working_mode == MODE_REC) {
-                ti->rec_limit = params->rec_limit / slave_count + 1;
-        }
+
+        ti->rec_limit = params->rec_limit;
+
         if (params->filter_str == NULL) {
                 ti->filter_str_len = 0;
         } else {
@@ -79,6 +81,35 @@ void fill_task_info(task_info_t *ti, const params_t *params, size_t slave_count)
         } else {
                 ti->dir_str_len = strlen(params->dir_str);
         }
+        ti->slave_cnt = slave_count;
+}
+
+/* Send first top-n identifiers (aggregation field(s) values) to slave nodes */
+int bcast_topn_ids (size_t n, lnf_mem_t **mem)
+{
+        char buff[LNF_MAX_RAW_LEN];
+        int len;
+        int ret;
+
+        /* Send request for Top-N records */
+        for (size_t i = 0; i < n; ++i){
+
+                ret = lnf_mem_read_raw(*mem, buff, &len, LNF_MAX_RAW_LEN);
+
+                if (ret != LNF_OK){
+                    print_err("MOJE: cannot read raw memory record.");
+                    return E_LNF;
+                }
+
+                MPI_Bcast(&len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
+                MPI_Bcast(&buff, len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+
+                printf("MOJE: Record sent.\n");
+        }
+
+//        MPI_Bcast(NULL, 0, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+
+        return E_OK;
 }
 
 
@@ -93,10 +124,12 @@ int master(int world_rank, int world_size, const params_t *params)
         MPI_Status status;
         task_info_t ti = {0};
         lnf_mem_t *agg;
+      #ifdef STATISTICS_MEM
+        lnf_mem_t *stats;
+      #endif // STATISTICS_MEM
 
         char *data_buff[2][slave_cnt]; //two buffers for each slave
         bool data_buff_idx[slave_cnt]; //current buffer index
-
 
         /* Allocate receive buffers. */
         for (size_t i = 0; i < slave_cnt; ++i) {
@@ -120,6 +153,13 @@ int master(int world_rank, int world_size, const params_t *params)
                 }
         }
 
+    #ifdef STATISTICS_MEM
+        ret = agg_init(&stats, params->agg_params, params->agg_params_cnt);
+        if (ret != E_OK) {
+                return E_LNF;
+        }
+    #endif // STATISTICS_MEM
+
         /* Fill task info struct for slaves (working mode etc). */
         fill_task_info(&ti, params, slave_cnt);
 
@@ -138,8 +178,8 @@ int master(int world_rank, int world_size, const params_t *params)
                                 MPI_COMM_WORLD, &requests[i]);
         }
 
-        /* Data receiving loop. */
         while (1) {
+        /* Data receiving loop. */
                 int msg_size;
                 char *full_buff, *free_buff; //shortcuts
 
@@ -175,6 +215,13 @@ int master(int world_rank, int world_size, const params_t *params)
                                 print_err("cannot write raw memory record");
                                 return E_LNF;
                         }
+                    #ifdef STATISTICS_MEM /// TODO - process statistics with aggreg AND LIST FLOWS
+                        ret = lnf_mem_write_raw(stats, full_buff, msg_size);
+                        if (ret != LNF_OK) {
+                                print_err("cannot write raw memory record");
+                                return E_LNF;
+                        }
+                    #endif // STATISTICS_MEM
                 } else {
                         for (size_t i = 0; i < msg_size / sizeof (lnf_brec1_t);
                                         ++i) {
@@ -188,8 +235,75 @@ int master(int world_rank, int world_size, const params_t *params)
                 }
         }
 
-        /* All records received - postprocessing. */
+        /* Received Top-K records from every slave node, request relevant global
+           Top - N records. */
         if (params->working_mode != MODE_REC) {
+
+                ret = bcast_topn_ids (params->rec_limit, &agg);
+                if (ret != E_OK) {
+                        return ret;
+                }
+
+                lnf_mem_read_reset(agg);
+
+                /* Clear agg-memheap */
+                lnf_mem_free(agg);
+                ret = agg_init(&agg, params->agg_params,
+                                params->agg_params_cnt);
+                if (ret != E_OK) {
+                        return E_LNF;
+                }
+
+
+                /* Receive requested Top-N records */
+                /* Start first individual nonblocking data receive from every
+                   slave. */
+                for (size_t i = 0; i < slave_cnt ; ++i) {
+                        char *free_buff = data_buff[data_buff_idx[i]][i];
+
+                        MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1,
+                                  TAG_DATA, MPI_COMM_WORLD, &requests[i]);
+                }
+
+                /* Data receiving loop. */
+                while (1) {
+                        int msg_size;
+                        char *full_buff, *free_buff; //shortcuts
+
+                        /* Wait for message from any slave. */
+                        MPI_Waitany(slave_cnt, requests, &idx, &status);
+                        if (idx == MPI_UNDEFINED) { //no active request anymore
+                                break;
+                        }
+
+                        /* Determine actual size of received message. */
+                        MPI_Get_count(&status, MPI_BYTE, &msg_size);
+                        if (msg_size == 0) {
+                                print_debug("second iteration on %d finished\n",
+                                                status.MPI_SOURCE);
+                                continue; //empty message -> slave finished
+                        }
+
+                        full_buff = data_buff[data_buff_idx[idx]][idx];
+                        data_buff_idx[idx] = !data_buff_idx[idx]; //toggle
+                        free_buff = data_buff[data_buff_idx[idx]][idx];
+
+                        MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE,
+                                        status.MPI_SOURCE, TAG_DATA,
+                                        MPI_COMM_WORLD, &requests[idx]);
+
+                        print_debug("received %d bytes from %d (2)\n", msg_size,
+                                        status.MPI_SOURCE);
+
+                        /* Store or process received records. */
+                        ret = lnf_mem_write_raw(agg, full_buff, msg_size);
+                        if (ret != LNF_OK) {
+                                print_err("cannot write raw memory record");
+                                return E_LNF;
+                        }
+                }
+
+                /* Print result. */
                 lnf_rec_t *rec;
                 lnf_brec1_t brec;
 
@@ -211,9 +325,21 @@ int master(int world_rank, int world_size, const params_t *params)
                         }
                 }
 
+                fflush(stdout);
+                fflush(stderr);
+
                 lnf_rec_free(rec);
                 lnf_mem_free(agg);
         }
+
+
+        /// TODO - process statistics message.
+        /// TODO - process statistics with aggreg AND LIST FLOWS
+
+
+    #ifdef STATISTICS_MEM
+        lnf_mem_free(stats);
+    #endif // STATISTICS_MEM
 
         /* Cleanup. */
         for (size_t i = 0; i < slave_cnt; ++i) {

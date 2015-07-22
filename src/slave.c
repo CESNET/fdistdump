@@ -64,7 +64,7 @@ struct slave_task_t {
         lnf_mem_t *agg;
         DIR *dir;
         char *dirname;
-        size_t rec_limit, read_rec_cntr, proc_rec_cntr;
+        size_t rec_limit, read_rec_cntr, proc_rec_cntr, slave_cnt;
 };
 
 
@@ -100,9 +100,10 @@ static void process_file(struct slave_task_t *t, const char *file_name)
         for (ret = lnf_read(file, t->rec); ret == LNF_OK;
                         ret = lnf_read(file, t->rec)) {
                 /* Break if record limit reached. */
-                if (t->rec_limit && t->proc_rec_cntr == t->rec_limit) {
-                        break;
-                }
+                /// TODO only for MODE_REC
+//                if (t->rec_limit && t->proc_rec_cntr == t->rec_limit) {
+//                        break;
+//                }
                 t->read_rec_cntr++;
                 file_rec_cntr++;
 
@@ -184,6 +185,7 @@ static int task_await_new(struct slave_task_t *t)
                 print_err("calloc error");
                 return E_MEM;
         }
+        t->slave_cnt = ti.slave_cnt;
 
         MPI_Bcast(filter_str, ti.filter_str_len, MPI_CHAR, ROOT_PROC,
                         MPI_COMM_WORLD);
@@ -252,7 +254,41 @@ static void task_free(struct slave_task_t *t)
 }
 
 
-void slave(int world_rank, int world_size)
+/* Receive first top-n identifiers (aggregation field(s) values) from master */
+int recv_topn_ids(size_t n, lnf_mem_t *mem, lnf_mem_cursor_t **cursors)
+{
+        char buff[LNF_MAX_RAW_LEN];
+        int len;
+        int ret;
+
+        for (size_t i = 0; i < n; ++i){
+
+                MPI_Bcast(&len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
+                MPI_Bcast(&buff, len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+
+                ret = lnf_mem_lookup_raw_c(mem, buff, len, &cursors[i]);
+
+                printf("MOJE: Received %d bytes.\n", len);
+
+                if (ret != LNF_OK) {
+                        if (ret == LNF_EOF) {
+                                print_debug("Record not found.");
+                                cursors[i] = NULL;
+                                continue;
+                        } else {
+                                print_err("LNF Lookup error.");
+                                return E_LNF;
+                        }
+                }
+        }
+
+//        MPI_Bcast(NULL, 0, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+
+        return E_OK;
+}
+
+
+int slave(int world_rank, int world_size)
 {
         (void)world_rank; (void)world_size;
         int ret, err = LNF_OK;
@@ -275,6 +311,8 @@ void slave(int world_rank, int world_size)
                 //char *data_buff[2][];
                 int len;
                 MPI_Request req = MPI_REQUEST_NULL;
+                lnf_mem_cursor_t **topn_cursors;
+
 
                 for (ret = lnf_mem_read_raw(task.agg, buff, &len,
                                         LNF_MAX_RAW_LEN); ret == LNF_OK;
@@ -283,10 +321,44 @@ void slave(int world_rank, int world_size)
                         isend_bytes(buff, len, &req);
                         MPI_Wait(&req, MPI_STATUS_IGNORE); //TODO: buffer switching
                 }
+
+                /* first iteration done, notify master by empty TASK message. */
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                         MPI_COMM_WORLD);
+
+                /* second iteration of top-N algorithm */
+                topn_cursors = (lnf_mem_cursor_t **) malloc (task.rec_limit *
+                        sizeof (lnf_mem_cursor_t *));
+                if (topn_cursors == NULL) {
+                        print_err("malloc error");
+                        return E_MEM; //fatal
+                }
+
+                ret = recv_topn_ids(task.rec_limit, task.agg, topn_cursors);
+                if (ret != E_OK) {
+                        return ret;
+                }
+
+                for (size_t i = 0; i < task.rec_limit; ++i) {
+
+                        lnf_mem_read_raw_c(task.agg, &topn_cursors[i], buff,
+                                &len, LNF_MAX_RAW_LEN);
+                        isend_bytes(buff, len, &req);
+                        MPI_Wait(&req, MPI_STATUS_IGNORE); //TODO: buffer switching
+
+                }
+
+                /* first iteration done, notify master by empty TASK message. */
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                         MPI_COMM_WORLD);
+
         }
 
         /* Task done, notify master by empty TASK message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
+
         task_free(&task);
+
+        return E_OK;
 }
