@@ -83,7 +83,8 @@ void fill_task_info(task_info_t *ti, const params_t *params, size_t slave_count)
         }
         ti->slave_cnt = slave_count;
 
-        //TODO: insert time intervals
+        ti->interval_begin = params->interval_begin;
+        ti->interval_end = params->interval_end;
 }
 
 /* Send first top-n identifiers (aggregation field(s) values) to slave nodes */

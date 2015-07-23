@@ -52,7 +52,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
-#include <math.h> //NAN
+#include <limits.h> //PATH_MAX, NAME_MAX
 
 #include <getopt.h>
 #include <libnf.h>
@@ -85,22 +85,6 @@ static int str_to_tm(struct tm *time, const char *time_str)
         }
 
         return E_ARG; //conversion failure
-}
-
-
-double diff_tm(struct tm end_tm, struct tm begin_tm)
-{
-        time_t begin_time_t, end_time_t;
-
-        begin_time_t = mktime(&begin_tm);
-        end_time_t = mktime(&end_tm);
-
-        if (begin_time_t == -1 || end_time_t == -1) {
-                printf("mktime() error\n");
-                return NAN;
-        }
-
-         return difftime(end_time_t, begin_time_t);
 }
 
 
@@ -146,7 +130,7 @@ static int set_interval(params_t *params, char *interval_arg_str)
         }
 
         /* Align begining time to closest greater rotation interval. */
-        while (mktime(&params->interval_begin) % FILE_ROTATION_INTERVAL) {
+        while (mktime(&params->interval_begin) % FLOW_FILE_ROTATION_INTERVAL) {
                 params->interval_begin.tm_sec++;;
         }
 
@@ -405,7 +389,6 @@ static int set_limit(params_t *params, char *limit_str)
         char *endptr;
         long long int limit;
 
-        errno = 0;
         limit = strtoll(limit_str, &endptr, 0);
 
         /* Check for various possible errors. */
@@ -526,6 +509,11 @@ int arg_parse(params_t *params, int argc, char **argv)
                 fprintf(stderr, usage_string, argv[0]);
                 return E_ARG;
         }
+        if (params->path_str && (strlen(params->path_str) >= PATH_MAX)) {
+                errno = ENAMETOOLONG;
+                perror(params->path_str);
+                return E_ARG;
+        }
 
 
 #ifdef DEBUG
@@ -546,9 +534,9 @@ int arg_parse(params_t *params, int argc, char **argv)
 
         while (diff_tm(params->interval_end, params->interval_begin) > 0.0) {
                 strftime(buff_from, sizeof(buff_from), "%Y/%m/%d/"
-                                FILE_NAME_FORMAT, &params->interval_begin);
+                                FLOW_FILE_NAME_FORMAT, &params->interval_begin);
                 printf("%s\n", buff_from);
-                params->interval_begin.tm_sec += FILE_ROTATION_INTERVAL;
+                params->interval_begin.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
                 mktime(&params->interval_begin); //normalization
         }
 #endif //DEBUG

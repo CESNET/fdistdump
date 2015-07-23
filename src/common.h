@@ -46,6 +46,7 @@
 #define COMMON_H
 
 #include <stddef.h> //size_t
+#include <time.h> //struct tm
 
 #include <libnf.h>
 #include <mpi.h>
@@ -57,6 +58,16 @@
 #define XCHG_BUFF_ELEMS (XCHG_BUFF_MAX_SIZE / sizeof(lnf_brec1_t))
 #define XCHG_BUFF_SIZE (XCHG_BUFF_ELEMS * sizeof(lnf_brec1_t))
 
+#define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
+#define FLOW_FILE_BASE_DIR "/data/profiles_data/"
+#define FLOW_FILE_PROFILE "live"
+#define FLOW_FILE_SOURCE "telia"
+#define FLOW_FILE_PATH_FORMAT "%Y/%m/%d/"
+#define FLOW_FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"
+#define FLOW_FILE_PATH (FLOW_FILE_BASE_DIR FLOW_FILE_PROFILE "/" \
+                FLOW_FILE_SOURCE "/" FLOW_FILE_PATH_FORMAT \
+                FLOW_FILE_NAME_FORMAT)
+
 
 /* Enumerations. */
 enum {
@@ -67,6 +78,7 @@ enum {
         E_INTERNAL,
         E_ARG,
         E_HELP,
+        E_EOF,
 };
 
 typedef enum { //working modes
@@ -86,7 +98,7 @@ typedef struct {
 } agg_params_t;
 
 //WATCH OUT: reflect changes also in task_info_mpit
-#define INITIAL_INTO_T_ELEMS 7
+#define TASK_INFO_T_ELEMS 9
 typedef struct {
         working_mode_t working_mode; //working mode
 
@@ -102,8 +114,12 @@ typedef struct {
         /* note (MPI): this information has to be sent explicitly, since there
            could be another framework than MPI used for communication */
 
+        struct tm interval_begin; //begin and end of time interval
+        struct tm interval_end;
 } task_info_t;
 
+//WATCH OUT: reflect changes in struct tm from time.h also in struct_tm_mpit
+#define STRUCT_TM_ELEMS 9
 
 /* MPI related */
 #define ROOT_PROC 0
@@ -157,11 +173,13 @@ void print_brec(const lnf_brec1_t brec);
 void print_err(const char *format, ...);
 
 
-void create_agg_params_mpit(MPI_Datatype *agg_params_mpit);
-void free_agg_params_mpit(MPI_Datatype *agg_params_mpit);
-void create_task_info_mpit(MPI_Datatype *task_info_mpit,
-                MPI_Datatype agg_params_mpit);
-void free_task_info_mpit(MPI_Datatype *task_info_mpit);
+void create_agg_params_mpit(void);
+void free_agg_params_mpit(void);
+void create_struct_tm_mpit(void);
+void free_struct_tm_mpit(void);
+void create_task_info_mpit(void);
+void free_task_info_mpit(void);
+
 int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
                 size_t agg_params_cnt);
 
@@ -169,5 +187,7 @@ int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
  * \brief Prepare Top-N statistics memory structure.
  */
 int stats_init(lnf_mem_t **stats);
+
+double diff_tm(struct tm end_tm, struct tm begin_tm);
 
 #endif //COMMON_H
