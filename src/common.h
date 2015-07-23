@@ -93,8 +93,8 @@ typedef struct {
         agg_params_t agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
         size_t agg_params_cnt; //aggregation parameters count
 
-        size_t filter_str_len; //dir_str string length
-        size_t dir_str_len; //filter string length
+        size_t filter_str_len; //filter expression string length
+        size_t path_str_len; //path string length
 
         size_t rec_limit; //record/aggregation limit
 

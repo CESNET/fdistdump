@@ -157,7 +157,7 @@ void create_task_info_mpit(MPI_Datatype *task_info_mpit,
         displacements[1] = offsetof(task_info_t, agg_params);
         displacements[2] = offsetof(task_info_t, agg_params_cnt);
         displacements[3] = offsetof(task_info_t, filter_str_len);
-        displacements[4] = offsetof(task_info_t, dir_str_len);
+        displacements[4] = offsetof(task_info_t, path_str_len);
         displacements[5] = offsetof(task_info_t, rec_limit);
         displacements[6] = offsetof(task_info_t, slave_cnt);
 

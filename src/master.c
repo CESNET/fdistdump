@@ -76,12 +76,14 @@ void fill_task_info(task_info_t *ti, const params_t *params, size_t slave_count)
         } else {
                 ti->filter_str_len = strlen(params->filter_str);
         }
-        if (params->dir_str == NULL) {
-                ti->dir_str_len = 0;
+        if (params->path_str == NULL) {
+                ti->path_str_len = 0;
         } else {
-                ti->dir_str_len = strlen(params->dir_str);
+                ti->path_str_len = strlen(params->path_str);
         }
         ti->slave_cnt = slave_count;
+
+        //TODO: insert time intervals
 }
 
 /* Send first top-n identifiers (aggregation field(s) values) to slave nodes */
@@ -163,12 +165,16 @@ int master(int world_rank, int world_size, const params_t *params)
         /* Fill task info struct for slaves (working mode etc). */
         fill_task_info(&ti, params, slave_cnt);
 
-        /* Broadcast task info, filter string and directory string. */
+        /* Broadcast task info, filter string and path string. */
         MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
-        MPI_Bcast(params->filter_str, ti.filter_str_len, MPI_CHAR, ROOT_PROC,
-                        MPI_COMM_WORLD);
-        MPI_Bcast(params->dir_str, ti.dir_str_len, MPI_CHAR, ROOT_PROC,
-                        MPI_COMM_WORLD);
+        if (ti.filter_str_len > 0) {
+                MPI_Bcast(params->filter_str, ti.filter_str_len, MPI_CHAR,
+                                ROOT_PROC, MPI_COMM_WORLD);
+        }
+        if (ti.path_str_len > 0) {
+                MPI_Bcast(params->path_str, ti.path_str_len, MPI_CHAR,
+                                ROOT_PROC, MPI_COMM_WORLD);
+        }
 
         /* Start first individual nonblocking data receive from every slave. */
         for (size_t i = 0; i < slave_cnt ; ++i) {

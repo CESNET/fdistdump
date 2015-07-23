@@ -63,7 +63,7 @@ struct slave_task_t {
         lnf_filter_t *filter;
         lnf_mem_t *agg;
         DIR *dir;
-        char *dirname;
+        char *pathname;
         size_t rec_limit, read_rec_cntr, proc_rec_cntr, slave_cnt;
 };
 
@@ -173,24 +173,35 @@ static int task_init_filter(lnf_filter_t **filter, char *filter_str)
 static int task_await_new(struct slave_task_t *t)
 {
         int ret;
-        char *filter_str;
         task_info_t ti;
 
         MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
+
         t->working_mode = ti.working_mode;
         t->rec_limit = ti.rec_limit;
-        filter_str = calloc(ti.filter_str_len + 1, sizeof(char));
-        t->dirname = calloc(ti.dir_str_len + 1, sizeof(char));
-        if (filter_str == NULL || t->dirname == NULL) {
-                print_err("calloc error");
-                return E_MEM;
-        }
         t->slave_cnt = ti.slave_cnt;
 
-        MPI_Bcast(filter_str, ti.filter_str_len, MPI_CHAR, ROOT_PROC,
-                        MPI_COMM_WORLD);
-        MPI_Bcast(t->dirname, ti.dir_str_len, MPI_CHAR, ROOT_PROC,
-                        MPI_COMM_WORLD);
+        if (ti.filter_str_len > 0) { //have filter epxression
+                char filter_str[ti.filter_str_len + 1];
+
+                MPI_Bcast(filter_str, ti.filter_str_len, MPI_CHAR, ROOT_PROC,
+                                MPI_COMM_WORLD);
+
+                filter_str[ti.filter_str_len] = '\0';
+                task_init_filter(&t->filter, filter_str);
+        }
+
+        if (ti.path_str_len > 0) { //have path string
+                t->pathname = calloc(ti.path_str_len + 1, sizeof(char));
+                if (t->pathname == NULL) {
+                        print_err("calloc error");
+                        return E_MEM;
+                }
+
+                MPI_Bcast(t->pathname, ti.path_str_len, MPI_CHAR, ROOT_PROC,
+                                MPI_COMM_WORLD);
+        }
+
 
         switch (t->working_mode) {
         case MODE_REC:
@@ -203,8 +214,6 @@ static int task_await_new(struct slave_task_t *t)
         }
 
         /* Filter. */
-        task_init_filter(&t->filter, filter_str);
-        free(filter_str);
 
         /* Initialize empty LNF record to future reading. */
         ret = lnf_rec_init(&t->rec);
@@ -213,8 +222,8 @@ static int task_await_new(struct slave_task_t *t)
                 t->rec = NULL;
         }
 
-        if ((t->dir = opendir(t->dirname)) == NULL) {
-                print_err("cannot open directory \"%s\"", t->dirname);
+        if ((t->dir = opendir(t->pathname)) == NULL) {
+                print_err("cannot open directory \"%s\"", t->pathname);
                 return E_INTERNAL;
         }
 
@@ -231,7 +240,7 @@ const char* task_next_file(struct slave_task_t *t)
         } while (ent && ent->d_type != DT_REG);
 
         if (ent) {
-                strcpy(path, t->dirname);
+                strcpy(path, t->pathname);
                 return strcat(path, ent->d_name);
         }
 
@@ -240,7 +249,7 @@ const char* task_next_file(struct slave_task_t *t)
 
 static void task_free(struct slave_task_t *t)
 {
-        free(t->dirname);
+        free(t->pathname);
         closedir(t->dir);
         if (t->rec) {
                 lnf_rec_free(t->rec);

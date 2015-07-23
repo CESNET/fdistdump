@@ -48,11 +48,17 @@
 #include "common.h"
 
 #include <stddef.h> //size_t
+#include <time.h> //struct tm
 
-#define TOKEN_SEPARATOR ","
-#define STAT_SEPARATOR "/"
+#define AGG_SEPARATOR "," //srcport,srcip
+#define STAT_SEPARATOR "/" //statistic/order
+#define INTERVAL_SEPARATOR "#" //begin#end
+
 #define DEFAULT_STAT_ORD "flows"
 #define DEFAULT_STAT_LIMIT 10
+
+#define FILE_ROTATION_INTERVAL 300 //seconds
+#define FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"
 
 typedef struct {
         working_mode_t working_mode; //working mode (records, aggregation, topN)
@@ -63,7 +69,8 @@ typedef struct {
         char *filter_str; //filter expression string
         size_t rec_limit; //read/aggregate/topN record limit
 
-        char *dir_str;
+        char *path_str; //path string
+        struct tm interval_begin, interval_end; //begin and end of interval
 } params_t;
 
 

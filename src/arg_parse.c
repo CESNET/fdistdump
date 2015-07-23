@@ -42,6 +42,8 @@
  *
  */
 
+#define _XOPEN_SOURCE //strptime()
+
 #include "arg_parse.h"
 
 #include <stdio.h>
@@ -50,9 +52,106 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <math.h> //NAN
 
 #include <getopt.h>
 #include <libnf.h>
+
+
+static const char *const time_formats[] = {
+        "%H:%M %d.%m.%Y", //23:59 31.12.2015
+        "%H:%M:%S %d.%m.%Y", //23:59:59 31.12.2015
+
+        "%d.%m.%Y %H:%M", //31.12.2015 23:59
+        "%d.%m.%Y %H:%M:%S", //31.12.2015 23:59:59
+};
+
+
+static int str_to_tm(struct tm *time, const char *time_str)
+{
+        size_t idx;
+        char *ret;
+        static const size_t time_formats_cnt = sizeof(time_formats) /
+                sizeof(*time_formats);
+
+        memset(time, 0, sizeof(struct tm));
+
+        for (idx = 0; idx < time_formats_cnt; ++idx) {
+                ret = strptime(time_str, time_formats[idx], time);
+
+                if (ret != NULL && *ret == '\0') {
+                        return E_OK; //conversion successfull
+                }
+        }
+
+        return E_ARG; //conversion failure
+}
+
+
+double diff_tm(struct tm end_tm, struct tm begin_tm)
+{
+        time_t begin_time_t, end_time_t;
+
+        begin_time_t = mktime(&begin_tm);
+        end_time_t = mktime(&end_tm);
+
+        if (begin_time_t == -1 || end_time_t == -1) {
+                printf("mktime() error\n");
+                return NAN;
+        }
+
+         return difftime(end_time_t, begin_time_t);
+}
+
+
+static int set_interval(params_t *params, char *interval_arg_str)
+{
+        char *begin_str, *end_str, *remaining_str, *saveptr;
+        int ret;
+
+        /* Split time interval string. */
+        begin_str = strtok_r(interval_arg_str, INTERVAL_SEPARATOR, &saveptr);
+        if (begin_str == NULL) {
+                printf("invalid interval string \"%s\"\n", interval_arg_str);
+                return E_ARG;
+        }
+        end_str = strtok_r(NULL, INTERVAL_SEPARATOR, &saveptr); //NULL is valid
+        remaining_str = strtok_r(NULL, INTERVAL_SEPARATOR, &saveptr);
+        if (remaining_str != NULL) {
+                printf("invalid interval string \"%s\"\n", interval_arg_str);
+                return E_ARG;
+        }
+
+        /* Convert time strings to struct tm. */
+        ret = str_to_tm(&params->interval_begin, begin_str);
+        if (ret != E_OK) {
+                printf("invalid date format \"%s\"\n", begin_str);
+                return E_ARG;
+        }
+        if (end_str == NULL) { //NULL means until now
+                const time_t now = time(NULL);
+                localtime_r(&now, &params->interval_end);
+        } else {
+                ret = str_to_tm(&params->interval_end, end_str);
+                if (ret != E_OK) {
+                        printf("invalid date format \"%s\"\n", end_str);
+                        return E_ARG;
+                }
+        }
+
+        /* Check interval sanity. */
+        if (diff_tm(params->interval_end, params->interval_begin) <= 0.0) {
+                printf("invalid interval duration\n");
+                return E_ARG;
+        }
+
+        /* Align begining time to closest greater rotation interval. */
+        while (mktime(&params->interval_begin) % FILE_ROTATION_INTERVAL) {
+                params->interval_begin.tm_sec++;;
+        }
+
+        return E_OK;
+}
 
 
 /** \brief Parse aggregation string and save aggregation parameters.
@@ -78,7 +177,7 @@ static int set_agg(params_t *params, char *agg_arg_str)
         char *token, *saveptr;
         int ret, fld, nb, nb6, agg;
 
-        token = strtok_r(agg_arg_str, TOKEN_SEPARATOR, &saveptr); //first token
+        token = strtok_r(agg_arg_str, AGG_SEPARATOR, &saveptr); //first token
         while (token != NULL) {
                 size_t idx;
 
@@ -120,7 +219,7 @@ static int set_agg(params_t *params, char *agg_arg_str)
                         params->agg_params_cnt++;
                 }
 
-                token = strtok_r(NULL, TOKEN_SEPARATOR, &saveptr); //next token
+                token = strtok_r(NULL, AGG_SEPARATOR, &saveptr); //next token
         }
 
         return E_OK;
@@ -336,6 +435,7 @@ int arg_parse(params_t *params, int argc, char **argv)
 
         int opt, ret = E_OK;
         bool help = false, bad_arg = false;
+        size_t input_arg_cnt = 0;
 
         char usage_string[] = "Usage: %s options\n";
         char help_string[] = "help\n";
@@ -343,6 +443,7 @@ int arg_parse(params_t *params, int argc, char **argv)
         static struct option long_opts[] = {
                 {"aggregation", required_argument, NULL, 'a'},
                 {"filter", required_argument, NULL, 'f'},
+                {"time-interval", required_argument, NULL, 'i'},
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
                 {"statistic", required_argument, NULL, 's'},
@@ -351,7 +452,7 @@ int arg_parse(params_t *params, int argc, char **argv)
                 {"help", no_argument, NULL, 'h'},
                 {0, 0, 0, 0} //required by getopt_long()
         };
-        char *short_opts = "a:f:l:o:s:r:h";
+        char *short_opts = "a:f:i:l:o:s:r:h";
 
         while (!bad_arg && !help) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
@@ -367,6 +468,10 @@ int arg_parse(params_t *params, int argc, char **argv)
                 case 'f'://filter expression
                         ret = set_filter(params, optarg);
                         break;
+                case 'i'://time interval
+                        ret = set_interval(params, optarg);
+                        input_arg_cnt++;
+                        break;
                 case 'l'://limit
                         ret = set_limit(params, optarg);
                         break;
@@ -378,8 +483,9 @@ int arg_parse(params_t *params, int argc, char **argv)
                         params->working_mode = MODE_AGG;
                         ret = set_stat(params, optarg);
                         break;
-                case 'r'://read
-                        params->dir_str = optarg;
+                case 'r'://path to read file(s) from
+                        params->path_str = optarg;
+                        input_arg_cnt++;
                         break;
                 case 'h'://help
                         help = true;
@@ -409,19 +515,43 @@ int arg_parse(params_t *params, int argc, char **argv)
                 fprintf(stderr, usage_string, argv[0]);
                 return E_ARG;
         }
-        if (params->dir_str == NULL) { //missing mandatory arguments
+
+        /* Correct data input check. */
+        if (input_arg_cnt == 0) {
+                fprintf(stderr, "Missing -i or -r.\n");
+                fprintf(stderr, usage_string, argv[0]);
+                return E_ARG;
+        } else if (input_arg_cnt > 1) {
+                fprintf(stderr, "-i and -r are mutually exclusive.\n");
                 fprintf(stderr, usage_string, argv[0]);
                 return E_ARG;
         }
 
 
-        printf("Aggregation: \n");
+#ifdef DEBUG
+        char buff_from[255], buff_to[255];
+
+        printf("aggregation: \n");
         for (size_t i = 0; i < params->agg_params_cnt; ++i) {
                 agg_params_t *ap = params->agg_params + i;
-                printf("%d, 0x%x, (%d, %d)\n", ap->field, ap->flags,
+                printf("\t%d, 0x%x, (%d, %d)\n", ap->field, ap->flags,
                                 ap->numbits, ap->numbits6);
         }
-        printf("Filter: %s\n", params->filter_str);
+        printf("filter: %s\n", params->filter_str);
+
+        strftime(buff_from, sizeof(buff_from), "%c", &params->interval_begin);
+        strftime(buff_to, sizeof(buff_to), "%c", &params->interval_end);
+
+        printf("interval: %s - %s\n", buff_from, buff_to);
+
+        while (diff_tm(params->interval_end, params->interval_begin) > 0.0) {
+                strftime(buff_from, sizeof(buff_from), "%Y/%m/%d/"
+                                FILE_NAME_FORMAT, &params->interval_begin);
+                printf("%s\n", buff_from);
+                params->interval_begin.tm_sec += FILE_ROTATION_INTERVAL;
+                mktime(&params->interval_begin); //normalization
+        }
+#endif //DEBUG
 
         return E_OK;
 }
