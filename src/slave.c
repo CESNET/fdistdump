@@ -318,7 +318,7 @@ int task_next_file(struct slave_task_t *t)
                         printf("warning: skipping nonexistent file \"%s\"\n",
                                         t->cur_file_path);
                 }
-                return E_EOF; //whole interval 
+                return E_EOF; //whole interval
 
         default:
                 assert(!"unknown data source");

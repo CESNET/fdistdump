@@ -58,6 +58,7 @@
 #define XCHG_BUFF_ELEMS (XCHG_BUFF_MAX_SIZE / sizeof(lnf_brec1_t))
 #define XCHG_BUFF_SIZE (XCHG_BUFF_ELEMS * sizeof(lnf_brec1_t))
 
+//TODO: move to configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
 #define FLOW_FILE_BASE_DIR "/data/profiles_data/"
 #define FLOW_FILE_PROFILE "live"
