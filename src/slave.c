@@ -2,6 +2,7 @@
  * \file slave.c
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
+ * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
 
@@ -277,8 +278,6 @@ int recv_topn_ids(size_t n, lnf_mem_t *mem, lnf_mem_cursor_t **cursors)
 
                 ret = lnf_mem_lookup_raw_c(mem, buff, len, &cursors[i]);
 
-                printf("MOJE: Received %d bytes.\n", len);
-
                 if (ret != LNF_OK) {
                         if (ret == LNF_EOF) {
                                 print_debug("Record not found.");
@@ -349,8 +348,10 @@ int slave(int world_rank, int world_size)
                 }
 
                 for (size_t i = 0; i < task.rec_limit; ++i) {
-
-                        lnf_mem_read_raw_c(task.agg, &topn_cursors[i], buff,
+                        if (topn_cursors[i] == NULL) {
+                                continue;
+                        }
+                        lnf_mem_read_raw_c(task.agg, topn_cursors[i], buff,
                                 &len, LNF_MAX_RAW_LEN);
                         isend_bytes(buff, len, &req);
                         MPI_Wait(&req, MPI_STATUS_IGNORE); //TODO: buffer switching
