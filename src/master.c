@@ -68,7 +68,6 @@ void fill_task_info(task_info_t *ti, const params_t *params, size_t slave_count)
         memcpy(ti->agg_params, params->agg_params,
                         params->agg_params_cnt * sizeof(agg_params_t));
 
-
         ti->rec_limit = params->rec_limit;
 
         if (params->filter_str == NULL) {
@@ -120,7 +119,7 @@ int master(int world_rank, int world_size, const params_t *params)
 {
         (void)world_rank;
         const size_t slave_cnt = world_size - 1; //all nodes without master
-        int idx, ret = E_OK;
+        int ret = E_OK;
         size_t rec_cntr = 0; //printed records
 
         MPI_Request requests[slave_cnt];
@@ -166,7 +165,9 @@ int master(int world_rank, int world_size, const params_t *params)
         /* Fill task info struct for slaves (working mode etc). */
         fill_task_info(&ti, params, slave_cnt);
 
-        /* Broadcast task info, filter string and path string. */
+        /* Initialization phase.
+         * Broadcast task info, optional filter string and optional path string.
+         */
         MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
         if (ti.filter_str_len > 0) {
                 MPI_Bcast(params->filter_str, ti.filter_str_len, MPI_CHAR,
@@ -185,14 +186,14 @@ int master(int world_rank, int world_size, const params_t *params)
                                 MPI_COMM_WORLD, &requests[i]);
         }
 
-        while (1) {
         /* Data receiving loop. */
-                int msg_size;
+        while (1) {
+                int msg_size, slave_idx;
                 char *full_buff, *free_buff; //shortcuts
 
                 /* Wait for message from any slave. */
-                MPI_Waitany(slave_cnt, requests, &idx, &status);
-                if (idx == MPI_UNDEFINED) { //no active request anymore
+                MPI_Waitany(slave_cnt, requests, &slave_idx, &status);
+                if (slave_idx == MPI_UNDEFINED) { //no active slave anymore
                         break;
                 }
 
@@ -204,13 +205,15 @@ int master(int world_rank, int world_size, const params_t *params)
                         continue; //empty message -> slave finished
                 }
 
-                full_buff = data_buff[data_buff_idx[idx]][idx];
-                data_buff_idx[idx] = !data_buff_idx[idx]; //toggle free buff idx
-                free_buff = data_buff[data_buff_idx[idx]][idx];
+                /* Determine which buffer is free and which is currently used.*/
+                full_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
+                data_buff_idx[slave_idx] = !data_buff_idx[slave_idx]; //toggle
+                free_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
 
+                /* Receive into free buffer. */
                 MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE,
                                 status.MPI_SOURCE, TAG_DATA, MPI_COMM_WORLD,
-                                &requests[idx]);
+                                &requests[slave_idx]);
 
                 print_debug("received %d bytes from %d\n", msg_size,
                                 status.MPI_SOURCE);
@@ -245,7 +248,6 @@ int master(int world_rank, int world_size, const params_t *params)
         /* Received Top-K records from every slave node, request relevant global
            Top - N records. */
         if (params->working_mode != MODE_REC) {
-
                 ret = bcast_topn_ids (params->rec_limit, &agg);
                 if (ret != E_OK) {
                         return ret;
@@ -274,12 +276,12 @@ int master(int world_rank, int world_size, const params_t *params)
 
                 /* Data receiving loop. */
                 while (1) {
-                        int msg_size;
+                        int msg_size, slave_idx;
                         char *full_buff, *free_buff; //shortcuts
 
                         /* Wait for message from any slave. */
-                        MPI_Waitany(slave_cnt, requests, &idx, &status);
-                        if (idx == MPI_UNDEFINED) { //no active request anymore
+                        MPI_Waitany(slave_cnt, requests, &slave_idx, &status);
+                        if (slave_idx == MPI_UNDEFINED) { //no active slaves
                                 break;
                         }
 
@@ -291,13 +293,13 @@ int master(int world_rank, int world_size, const params_t *params)
                                 continue; //empty message -> slave finished
                         }
 
-                        full_buff = data_buff[data_buff_idx[idx]][idx];
-                        data_buff_idx[idx] = !data_buff_idx[idx]; //toggle
-                        free_buff = data_buff[data_buff_idx[idx]][idx];
+                        full_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
+                        data_buff_idx[slave_idx] = !data_buff_idx[slave_idx]; //toggle
+                        free_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
 
                         MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE,
                                         status.MPI_SOURCE, TAG_DATA,
-                                        MPI_COMM_WORLD, &requests[idx]);
+                                        MPI_COMM_WORLD, &requests[slave_idx]);
 
                         print_debug("received %d bytes from %d (2)\n", msg_size,
                                         status.MPI_SOURCE);

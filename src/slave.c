@@ -73,7 +73,9 @@ struct slave_task_t {
         lnf_rec_t *rec;
         lnf_filter_t *filter;
         lnf_mem_t *agg;
-        size_t rec_limit, read_rec_cntr, proc_rec_cntr, slave_cnt;
+        size_t rec_limit; //record limit
+        size_t proc_rec_cntr; //processed record counter
+        size_t slave_cnt; //slave count
 
         data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX];
@@ -82,6 +84,8 @@ struct slave_task_t {
         struct tm interval_end; //end of time interval
 
         char cur_file_path[PATH_MAX]; //current flow file absolute path
+
+        int sort_key; //LNF field set as key for sorting in memory
 };
 
 
@@ -93,9 +97,9 @@ static void isend_bytes(void *src, size_t bytes, MPI_Request *req)
 }
 
 
-static void process_file(struct slave_task_t *t)
+static void task_process_file(struct slave_task_t *t)
 {
-        size_t file_rec_cntr = 0, file_filter_cntr = 0;
+        size_t file_rec_cntr = 0, file_proc_rec_cntr = 0;
         int ret, err = LNF_OK;
 
         lnf_file_t *file;
@@ -116,12 +120,7 @@ static void process_file(struct slave_task_t *t)
         /* Read all records from file. */
         for (ret = lnf_read(file, t->rec); ret == LNF_OK;
                         ret = lnf_read(file, t->rec)) {
-                /* Break if record limit reached. */
-                /// TODO only for MODE_REC
-//                if (t->rec_limit && t->proc_rec_cntr == t->rec_limit) {
-//                        break;
-//                }
-                t->read_rec_cntr++;
+
                 file_rec_cntr++;
 
                 /* Apply filter (if there is any). */
@@ -129,31 +128,35 @@ static void process_file(struct slave_task_t *t)
                         continue;
                 }
                 t->proc_rec_cntr++;
-                file_filter_cntr++;
+                file_proc_rec_cntr++;
 
-                /* If mode is aggreagation, write record to heap. */
+                /* Aggreagation -> write record to mem (ignore record limit). */
                 if (t->agg) {
                         ret = lnf_mem_write(t->agg, t->rec);
-                        assert(ret == LNF_OK); //TODO
+                        assert(ret == LNF_OK); //TODO: return value
                         continue;
                 }
 
-                /* Pick required data from record. */
+                /* No aggregation -> store to buffer and send if buffer full. */
                 ret = lnf_rec_fget(t->rec, LNF_FLD_BREC1, data_buff[buff_idx] +
                                 data_idx++);
                 assert(ret == LNF_OK); //should'n happen
 
-                if (data_idx == XCHG_BUFF_ELEMS) {
+                if (data_idx == XCHG_BUFF_ELEMS) { //buffer full -> send
                         isend_bytes(data_buff[buff_idx], XCHG_BUFF_SIZE,
                                         &request);
                         data_idx = 0;
-                        buff_idx = !buff_idx;
+                        buff_idx = !buff_idx; //toggle buffers
+                }
+
+                if (t->proc_rec_cntr == t->rec_limit) {
+                        break; //record limit reached
                 }
         }
-        err = (ret == LNF_EOF) ? err : ret; //if error during lnf_red ()
+        err = (ret == LNF_EOF) ? err : ret; //if error during lnf_read()
 
-        /* Send remaining records. */
-        if (data_idx) {
+        /* Send remaining records (if there are any). */
+        if (data_idx != 0) {
                 isend_bytes(data_buff[buff_idx], data_idx * sizeof(lnf_brec1_t),
                                 &request);
         }
@@ -161,8 +164,8 @@ static void process_file(struct slave_task_t *t)
         /* Per file cleanup. */
         lnf_close(file);
 
-        print_debug("slave: file %s\tread %lu\tmatched %lu\n",
-                        t->cur_file_path, file_rec_cntr, file_filter_cntr);
+        print_debug("slave: file %s\tread %lu\tprocessed %lu\n",
+                        t->cur_file_path, file_rec_cntr, file_proc_rec_cntr);
 }
 
 
@@ -222,6 +225,13 @@ static int task_await_new(struct slave_task_t *t)
                 break;
         case MODE_AGG:
                 ret = agg_init(&t->agg, ti.agg_params, ti.agg_params_cnt);
+
+                /* Find and store sort key. */
+                for (size_t i = 0; i < ti.agg_params_cnt; ++i) {
+                        if (ti.agg_params[i].flags & LNF_SORT_FLAGS) {
+                                t->sort_key = ti.agg_params[i].field;
+                        }
+                }
                 break;
         default:
                 assert(!"unknown working mode received");
@@ -390,36 +400,66 @@ int slave(int world_rank, int world_size)
         }
 
         while (task_next_file(&task) == E_OK) {
-                process_file(&task);
+                task_process_file(&task);
 
-                /* Break if record limit reached. */
-                if (task.rec_limit && task.proc_rec_cntr == task.rec_limit) {
-                        break;
+                if (task.rec_limit && task.rec_limit == task.proc_rec_cntr) {
+                        break; //record limit reached, don't read next file
                 }
         }
         //TODO task_next_file() return code
 
         if (task.agg) {
-                char buff[LNF_MAX_RAW_LEN];
-                //char *data_buff[2][];
-                int len;
-                MPI_Request req = MPI_REQUEST_NULL;
+                char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
+                int rec_len;
+                size_t send_cnt = 0;
+                lnf_mem_cursor_t *read_cursor;
                 lnf_mem_cursor_t **topn_cursors;
 
 
-                for (ret = lnf_mem_read_raw(task.agg, buff, &len,
-                                        LNF_MAX_RAW_LEN); ret == LNF_OK;
-                                ret = lnf_mem_read_raw(task.agg, buff, &len,
-                                        LNF_MAX_RAW_LEN)) {
-                        isend_bytes(buff, len, &req);
-                        MPI_Wait(&req, MPI_STATUS_IGNORE); //TODO: buffer switching
+                ret = lnf_mem_first_c(task.agg, &read_cursor);
+                if (ret != LNF_OK) {
+                        print_err("LNF - cannot initialise cursor");
+                        return E_LNF;
                 }
 
-                /* first iteration done, notify master by empty TASK message. */
-                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                         MPI_COMM_WORLD);
+                /*
+                 * Top-N phase 1.
+                 */
+                /* Send first N records. */
+                while (true) {
+                        ret = lnf_mem_read_raw_c(task.agg, read_cursor,
+                                        rec_buff, &rec_len, LNF_MAX_RAW_LEN);
+                        if (ret != LNF_OK) {
+                                print_err("LNF - lnf_mem_read_raw_c()");
+                                return E_LNF;
+                        }
 
-                /* second iteration of top-N algorithm */
+                        MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC,
+                                        TAG_DATA, MPI_COMM_WORLD);
+
+                        if (++send_cnt == task.rec_limit) {
+                                break; //Nth record sent
+                        }
+
+                        ret = lnf_mem_next_c(task.agg, &read_cursor);
+                        if (ret == LNF_EOF) {
+                                break; //we run out of records
+                        } else if (ret != LNF_OK) {
+                                print_err("LNF - cannot move cursor");
+                                return E_LNF;
+                        }
+                }
+                /* Compute treshold from Nth record. */
+                //TODO
+                /* Send N+1 to treshold records. */
+                //TODO
+                /* Phase 1 done, notify master by empty TASK message. */
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                MPI_COMM_WORLD);
+
+                /*
+                 * Top-N phase 3.
+                 */
                 topn_cursors = (lnf_mem_cursor_t **) malloc (task.rec_limit *
                         sizeof (lnf_mem_cursor_t *));
                 if (topn_cursors == NULL) {
@@ -433,18 +473,15 @@ int slave(int world_rank, int world_size)
                 }
 
                 for (size_t i = 0; i < task.rec_limit; ++i) {
-
-                        lnf_mem_read_raw_c(task.agg, &topn_cursors[i], buff,
-                                &len, LNF_MAX_RAW_LEN);
-                        isend_bytes(buff, len, &req);
-                        MPI_Wait(&req, MPI_STATUS_IGNORE); //TODO: buffer switching
-
+                        lnf_mem_read_raw_c(task.agg, &topn_cursors[i], rec_buff,
+                                &rec_len, LNF_MAX_RAW_LEN);
+                        MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC,
+                                        TAG_DATA, MPI_COMM_WORLD);
                 }
 
-                /* first iteration done, notify master by empty TASK message. */
+                /* Phase 3 done, notify master by empty TASK message. */
                 MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
                          MPI_COMM_WORLD);
-
         }
 
 task_done_lbl:

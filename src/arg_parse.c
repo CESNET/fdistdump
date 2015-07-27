@@ -389,6 +389,7 @@ static int set_limit(params_t *params, char *limit_str)
         char *endptr;
         long long int limit;
 
+        errno = 0;
         limit = strtoll(limit_str, &endptr, 0);
 
         /* Check for various possible errors. */
