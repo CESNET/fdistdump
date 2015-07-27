@@ -99,14 +99,13 @@ int bcast_topn_ids (size_t n, lnf_mem_t **mem)
                 ret = lnf_mem_read_raw(*mem, buff, &len, LNF_MAX_RAW_LEN);
 
                 if (ret != LNF_OK){
-                    print_err("MOJE: cannot read raw memory record.");
+                    print_err("cannot read raw memory record.");
                     return E_LNF;
                 }
 
                 MPI_Bcast(&len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
                 MPI_Bcast(&buff, len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
 
-                printf("MOJE: Record sent.\n");
         }
 
 //        MPI_Bcast(NULL, 0, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
@@ -253,12 +252,12 @@ int master(int world_rank, int world_size, const params_t *params)
                         return ret;
                 }
 
-                lnf_mem_read_reset(agg);
+//                lnf_mem_read_reset(agg);
 
                 /* Clear agg-memheap */
                 lnf_mem_free(agg);
                 ret = agg_init(&agg, params->agg_params,
-                                params->agg_params_cnt);
+                        params->agg_params_cnt);
                 if (ret != E_OK) {
                         return E_LNF;
                 }
