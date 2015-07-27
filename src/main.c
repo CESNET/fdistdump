@@ -59,7 +59,7 @@
 
 
 /* Global MPI data types. */
-MPI_Datatype agg_params_mpit, task_info_mpit;
+MPI_Datatype agg_params_mpit, task_info_mpit, struct_tm_mpit;
 
 int main(int argc, char **argv)
 {
@@ -94,9 +94,10 @@ int main(int argc, char **argv)
         MPI_Barrier(MPI_COMM_WORLD);
         duration = -MPI_Wtime();
 
-        /* Create MPI data types. */
-        create_agg_params_mpit(&agg_params_mpit);
-        create_task_info_mpit(&task_info_mpit, agg_params_mpit);
+        /* Create MPI data types (global variables). */
+        create_agg_params_mpit();
+        create_struct_tm_mpit();
+        create_task_info_mpit();
 
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
@@ -114,9 +115,10 @@ int main(int argc, char **argv)
                 printf("%d\t%d\t%f\n", world_size, world_size - 1, duration);
         }
 
-        /* Free MPI data types. */
-        free_task_info_mpit(&task_info_mpit);
-        free_agg_params_mpit(&agg_params_mpit);
+        /* Free MPI data types (global variables). */
+        free_task_info_mpit();
+        free_struct_tm_mpit();
+        free_agg_params_mpit();
 
         MPI_Finalize();
         return EXIT_SUCCESS;

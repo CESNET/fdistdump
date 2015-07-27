@@ -49,9 +49,14 @@
 #include <stdarg.h> //variable argument list
 #include <assert.h>
 #include <stddef.h> //offsetof()
+#include <math.h> //NAN
 
 #include <mpi.h>
 #include <arpa/inet.h> //inet_ntop()
+
+
+/* Global MPI data types. */
+extern MPI_Datatype agg_params_mpit, task_info_mpit, struct_tm_mpit;
 
 
 /** \brief Convert libnf address to string.
@@ -121,7 +126,7 @@ void print_err(const char *format, ...)
 }
 
 
-void create_agg_params_mpit(MPI_Datatype *agg_params_mpit)
+void create_agg_params_mpit(void)
 {
         int block_lengths[AGG_PARAMS_T_ELEMS] = {1, 1, 1, 1};
         MPI_Aint displacements[AGG_PARAMS_T_ELEMS];
@@ -134,24 +139,39 @@ void create_agg_params_mpit(MPI_Datatype *agg_params_mpit)
         displacements[3] = offsetof(agg_params_t, numbits6);
 
         MPI_Type_create_struct(AGG_PARAMS_T_ELEMS, block_lengths, displacements,
-                        types, agg_params_mpit);
-        MPI_Type_commit(agg_params_mpit);
+                        types, &agg_params_mpit);
+        MPI_Type_commit(&agg_params_mpit);
 }
 
-void free_agg_params_mpit(MPI_Datatype *agg_params_mpit)
+
+void free_agg_params_mpit(void)
 {
-        MPI_Type_free(agg_params_mpit);
+        MPI_Type_free(&agg_params_mpit);
 }
 
-void create_task_info_mpit(MPI_Datatype *task_info_mpit,
-                MPI_Datatype agg_params_mpit)
+
+void create_struct_tm_mpit(void)
 {
-        int block_lengths[INITIAL_INTO_T_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
-                1, 1};
-        MPI_Aint displacements[INITIAL_INTO_T_ELEMS];
-        MPI_Datatype types[INITIAL_INTO_T_ELEMS] = {MPI_INT, agg_params_mpit,
+        MPI_Type_contiguous(STRUCT_TM_ELEMS, MPI_INT, &struct_tm_mpit);
+        MPI_Type_commit(&struct_tm_mpit);
+}
+
+
+void free_struct_tm_mpit(void)
+{
+        MPI_Type_free(&struct_tm_mpit);
+}
+
+
+void create_task_info_mpit(void)
+{
+        int block_lengths[TASK_INFO_T_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
+                1, 1, 1, 1};
+        MPI_Aint displacements[TASK_INFO_T_ELEMS];
+        MPI_Datatype types[TASK_INFO_T_ELEMS] = {MPI_INT, agg_params_mpit,
                 MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
-                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG};
+                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, struct_tm_mpit,
+                struct_tm_mpit};
 
         displacements[0] = offsetof(task_info_t, working_mode);
         displacements[1] = offsetof(task_info_t, agg_params);
@@ -160,16 +180,20 @@ void create_task_info_mpit(MPI_Datatype *task_info_mpit,
         displacements[4] = offsetof(task_info_t, path_str_len);
         displacements[5] = offsetof(task_info_t, rec_limit);
         displacements[6] = offsetof(task_info_t, slave_cnt);
+        displacements[7] = offsetof(task_info_t, interval_begin);
+        displacements[8] = offsetof(task_info_t, interval_end);
 
-        MPI_Type_create_struct(INITIAL_INTO_T_ELEMS, block_lengths,
-                        displacements, types, task_info_mpit);
-        MPI_Type_commit(task_info_mpit);
+        MPI_Type_create_struct(TASK_INFO_T_ELEMS, block_lengths,
+                        displacements, types, &task_info_mpit);
+        MPI_Type_commit(&task_info_mpit);
 }
 
-void free_task_info_mpit(MPI_Datatype *task_info_mpit)
+
+void free_task_info_mpit(void)
 {
-        MPI_Type_free(task_info_mpit);
+        MPI_Type_free(&task_info_mpit);
 }
+
 
 int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
                 size_t agg_params_cnt)
@@ -205,6 +229,7 @@ int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
         return E_OK;
 }
 
+
 /* Prepare statistics memory structure */
 int stats_init(lnf_mem_t **stats)
 {
@@ -239,3 +264,20 @@ int stats_init(lnf_mem_t **stats)
 
         return E_OK;
 }
+
+
+double diff_tm(struct tm end_tm, struct tm begin_tm)
+{
+        time_t begin_time_t, end_time_t;
+
+        begin_time_t = mktime(&begin_tm);
+        end_time_t = mktime(&end_tm);
+
+        if (begin_time_t == -1 || end_time_t == -1) {
+                printf("mktime() error\n");
+                return NAN;
+        }
+
+         return difftime(end_time_t, begin_time_t);
+}
+

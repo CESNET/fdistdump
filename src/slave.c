@@ -51,21 +51,38 @@
 #include <string.h> //strlen()
 #include <assert.h>
 #include <stdbool.h>
+#include <time.h>
+#include <errno.h>
+#include <limits.h> //PATH_MAX
+#include <unistd.h> //access
 
 #include <mpi.h>
 #include <libnf.h>
-#include <dirent.h>
+#include <dirent.h> //list directory
+#include <sys/stat.h>
 
 extern MPI_Datatype task_info_mpit;
+
+typedef enum {
+        DATA_SOURCE_FILE,
+        DATA_SOURCE_DIR,
+        DATA_SOURCE_INTERVAL,
+} data_source_t;
 
 struct slave_task_t {
         working_mode_t working_mode;
         lnf_rec_t *rec;
         lnf_filter_t *filter;
         lnf_mem_t *agg;
-        DIR *dir;
-        char *pathname;
         size_t rec_limit, read_rec_cntr, proc_rec_cntr, slave_cnt;
+
+        data_source_t data_source; //how flow files are obtained
+        char path_str[PATH_MAX];
+        DIR *dir_ctx; //used in case of directory as data source
+        struct tm interval_begin; //begin of time interval
+        struct tm interval_end; //end of time interval
+
+        char cur_file_path[PATH_MAX]; //current flow file absolute path
 };
 
 
@@ -77,7 +94,7 @@ static void isend_bytes(void *src, size_t bytes, MPI_Request *req)
 }
 
 
-static void process_file(struct slave_task_t *t, const char *file_name)
+static void process_file(struct slave_task_t *t)
 {
         size_t file_rec_cntr = 0, file_filter_cntr = 0;
         int ret, err = LNF_OK;
@@ -90,9 +107,9 @@ static void process_file(struct slave_task_t *t, const char *file_name)
         MPI_Request request = MPI_REQUEST_NULL;
 
         /* Open flow file. */
-        ret = lnf_open(&file, file_name, LNF_READ, NULL);
+        ret = lnf_open(&file, t->cur_file_path, LNF_READ, NULL);
         if (ret != LNF_OK) {
-                print_err("cannot open file %s", file_name);
+                print_err("cannot open file %s", t->cur_file_path);
                 err = ret;
                 return;
         }
@@ -146,7 +163,7 @@ static void process_file(struct slave_task_t *t, const char *file_name)
         lnf_close(file);
 
         print_debug("slave: file %s\tread %lu\tmatched %lu\n",
-                        file_name, file_rec_cntr, file_filter_cntr);
+                        t->cur_file_path, file_rec_cntr, file_filter_cntr);
 }
 
 
@@ -178,10 +195,6 @@ static int task_await_new(struct slave_task_t *t)
 
         MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
 
-        t->working_mode = ti.working_mode;
-        t->rec_limit = ti.rec_limit;
-        t->slave_cnt = ti.slave_cnt;
-
         if (ti.filter_str_len > 0) { //have filter epxression
                 char filter_str[ti.filter_str_len + 1];
 
@@ -193,16 +206,17 @@ static int task_await_new(struct slave_task_t *t)
         }
 
         if (ti.path_str_len > 0) { //have path string
-                t->pathname = calloc(ti.path_str_len + 1, sizeof(char));
-                if (t->pathname == NULL) {
-                        print_err("calloc error");
-                        return E_MEM;
-                }
-
-                MPI_Bcast(t->pathname, ti.path_str_len, MPI_CHAR, ROOT_PROC,
+                //PATH_MAX length check on master side
+                MPI_Bcast(t->path_str, ti.path_str_len, MPI_CHAR, ROOT_PROC,
                                 MPI_COMM_WORLD);
+                t->path_str[ti.path_str_len] = '\0';
         }
 
+        t->working_mode = ti.working_mode;
+        t->rec_limit = ti.rec_limit;
+        t->slave_cnt = ti.slave_cnt;
+        t->interval_begin = ti.interval_begin;
+        t->interval_end = ti.interval_end;
 
         switch (t->working_mode) {
         case MODE_REC:
@@ -214,8 +228,6 @@ static int task_await_new(struct slave_task_t *t)
                 assert(!"unknown working mode received");
         }
 
-        /* Filter. */
-
         /* Initialize empty LNF record to future reading. */
         ret = lnf_rec_init(&t->rec);
         if (ret != LNF_OK) {
@@ -223,35 +235,102 @@ static int task_await_new(struct slave_task_t *t)
                 t->rec = NULL;
         }
 
-        if ((t->dir = opendir(t->pathname)) == NULL) {
-                print_err("cannot open directory \"%s\"", t->pathname);
-                return E_INTERNAL;
+        if (ti.path_str_len > 0) { //have path string (file or directory)
+                struct stat stat_buff;
+
+                ret = stat(t->path_str, &stat_buff);
+                if (ret == -1) {
+                        print_err("%s \"%s\"", strerror(errno), t->path_str);
+                        return E_ARG;
+                }
+
+                if (S_ISDIR(stat_buff.st_mode)) { //path is directory
+                        t->data_source = DATA_SOURCE_DIR;
+
+                        t->dir_ctx = opendir(t->path_str);
+                        if (t->dir_ctx == NULL) {
+                                print_err("cannot open directory \"%s\"",
+                                                t->path_str);
+                                return E_ARG;
+                        }
+                        if (ti.path_str_len >= (PATH_MAX - NAME_MAX)) {
+                                errno = ENAMETOOLONG;
+                                print_err("%s \"%s\"", strerror(errno),
+                                                t->path_str);
+                                return E_ARG;
+                        }
+
+                        //check and add missing terminating slash
+                        if (t->path_str[ti.path_str_len - 1] != '/') {
+                                t->path_str[ti.path_str_len] = '/';
+                                ti.path_str_len++;
+                        }
+                } else { //path is file
+                        t->data_source = DATA_SOURCE_FILE;
+                }
+        } else { //don't have path string - create file names from time interval
+                t->data_source = DATA_SOURCE_INTERVAL;
         }
 
         return E_OK;
 }
 
-const char* task_next_file(struct slave_task_t *t)
+int task_next_file(struct slave_task_t *t)
 {
-        struct dirent *ent;
-        static char path[1000]; //TODO
+        struct dirent *dir_entry;
+        int ret;
 
-        do {
-                ent = readdir(t->dir);
-        } while (ent && ent->d_type != DT_REG);
+        switch (t->data_source) {
+        case DATA_SOURCE_FILE:
+                if (strlen(t->cur_file_path) == 0) {
+                        strcpy(t->cur_file_path, t->path_str);
+                } else {
+                        return E_EOF;
+                }
+                break;
 
-        if (ent) {
-                strcpy(path, t->pathname);
-                return strcat(path, ent->d_name);
+        case DATA_SOURCE_DIR:
+                do { //in directory skip everything but regular files
+                        dir_entry = readdir(t->dir_ctx);
+                } while (dir_entry && dir_entry->d_type != DT_REG);
+
+                if (dir_entry != NULL) { //found regular file
+                        strcpy(t->cur_file_path, t->path_str); //copy dirname
+                        strcat(t->cur_file_path, dir_entry->d_name); //+filename
+                } else { //didn't find next regular file
+                        return E_EOF;
+                }
+                break;
+
+        case DATA_SOURCE_INTERVAL:
+                /* Loop through entire interval, modify interval_begin. */
+                while (diff_tm(t->interval_end, t->interval_begin) > 0.0) {
+                        //TODO: meaningfull path check and error report
+                        strftime(t->cur_file_path, sizeof(t->cur_file_path),
+                                        FLOW_FILE_PATH, &t->interval_begin);
+                        t->interval_begin.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
+                        mktime(&t->interval_begin); //struct tm normalization
+
+                        ret = access(t->cur_file_path, F_OK);
+                        if (ret == 0) {
+                                return E_OK; //file exists
+                        }
+
+                        printf("warning: skipping nonexistent file \"%s\"\n",
+                                        t->cur_file_path);
+                }
+                return E_EOF; //whole interval
+
+        default:
+                assert(!"unknown data source");
         }
 
-        return NULL;
+        return E_OK;
 }
 
 static void task_free(struct slave_task_t *t)
 {
-        free(t->pathname);
-        closedir(t->dir);
+        closedir(t->dir_ctx);
         if (t->rec) {
                 lnf_rec_free(t->rec);
         }
@@ -302,17 +381,22 @@ int slave(int world_rank, int world_size)
         int ret, err = LNF_OK;
 
         struct slave_task_t task = { 0 };
-        task_await_new(&task);
 
-        for (const char *fn = task_next_file(&task); fn != NULL;
-                        fn = task_next_file(&task)) {
-                process_file(&task, fn);
+        ret = task_await_new(&task);
+        if (ret != E_OK) {
+                err = ret;
+                goto task_done_lbl;
+        }
+
+        while (task_next_file(&task) == E_OK) {
+                process_file(&task);
 
                 /* Break if record limit reached. */
                 if (task.rec_limit && task.proc_rec_cntr == task.rec_limit) {
                         break;
                 }
         }
+        //TODO task_next_file() return code
 
         if (task.agg) {
                 char buff[LNF_MAX_RAW_LEN];
@@ -339,7 +423,7 @@ int slave(int world_rank, int world_size)
                         sizeof (lnf_mem_cursor_t *));
                 if (topn_cursors == NULL) {
                         print_err("malloc error");
-                        return E_MEM; //fatal
+                        return E_MEM;
                 }
 
                 ret = recv_topn_ids(task.rec_limit, task.agg, topn_cursors);
@@ -364,11 +448,11 @@ int slave(int world_rank, int world_size)
 
         }
 
-        /* Task done, notify master by empty TASK message. */
+task_done_lbl:
+        /* Task done, notify master by empty message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
-
 
         task_free(&task);
 
-        return E_OK;
+        return err;
 }
