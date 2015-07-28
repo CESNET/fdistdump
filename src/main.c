@@ -65,14 +65,14 @@ int main(int argc, char **argv)
 {
         double duration;
         int world_rank, world_size, ret;
-        params_t params = { 0 };
+        struct cmdline_args args = { 0 };
 
         MPI_Init(&argc, &argv);
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
         if (world_rank == ROOT_PROC) {
-                ret = arg_parse(&params, argc, argv);
+                ret = arg_parse(&args, argc, argv);
                 switch (ret) {
                 case E_OK:
                         break;
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
 
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
-                master(world_rank, world_size, &params);
+                master(world_rank, world_size, &args);
         } else {
                 slave(world_rank, world_size);
         }

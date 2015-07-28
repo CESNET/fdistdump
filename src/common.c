@@ -133,10 +133,10 @@ void create_agg_params_mpit(void)
         MPI_Datatype types[AGG_PARAMS_T_ELEMS] = {MPI_INT, MPI_INT, MPI_INT,
                 MPI_INT};
 
-        displacements[0] = offsetof(agg_params_t, field);
-        displacements[1] = offsetof(agg_params_t, flags);
-        displacements[2] = offsetof(agg_params_t, numbits);
-        displacements[3] = offsetof(agg_params_t, numbits6);
+        displacements[0] = offsetof(struct agg_params, field);
+        displacements[1] = offsetof(struct agg_params, flags);
+        displacements[2] = offsetof(struct agg_params, numbits);
+        displacements[3] = offsetof(struct agg_params, numbits6);
 
         MPI_Type_create_struct(AGG_PARAMS_T_ELEMS, block_lengths, displacements,
                         types, &agg_params_mpit);
@@ -166,12 +166,12 @@ void free_struct_tm_mpit(void)
 void create_task_info_mpit(void)
 {
         int block_lengths[TASK_INFO_T_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
-                1, 1, 1, 1};
+                1, 1, 1, 1, 1};
         MPI_Aint displacements[TASK_INFO_T_ELEMS];
         MPI_Datatype types[TASK_INFO_T_ELEMS] = {MPI_INT, agg_params_mpit,
                 MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
                 MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, struct_tm_mpit,
-                struct_tm_mpit};
+                struct_tm_mpit, MPI_C_BOOL};
 
         displacements[0] = offsetof(task_info_t, working_mode);
         displacements[1] = offsetof(task_info_t, agg_params);
@@ -182,6 +182,7 @@ void create_task_info_mpit(void)
         displacements[6] = offsetof(task_info_t, slave_cnt);
         displacements[7] = offsetof(task_info_t, interval_begin);
         displacements[8] = offsetof(task_info_t, interval_end);
+        displacements[9] = offsetof(task_info_t, use_fast_topn);
 
         MPI_Type_create_struct(TASK_INFO_T_ELEMS, block_lengths,
                         displacements, types, &task_info_mpit);
@@ -195,38 +196,63 @@ void free_task_info_mpit(void)
 }
 
 
-int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
-                size_t agg_params_cnt)
+int mem_setup(lnf_mem_t *mem, const struct agg_params *ap, size_t ap_cnt)
 {
         int ret;
 
-        ret = lnf_mem_init(agg);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_init() returned %d", ret);
-                return E_LNF;
-        }
-
         /* Default aggragation fields: first, last, flows, packets, bytes. */
-        ret = lnf_mem_fastaggr(*agg, LNF_FAST_AGGR_BASIC);
+        ret = lnf_mem_fastaggr(mem, LNF_FAST_AGGR_BASIC);
         if (ret != LNF_OK) {
                 print_err("LNF - lnf_mem_fastaggr() returned %d", ret);
-                lnf_mem_free(*agg);
                 return E_LNF;
         }
 
-        for (size_t i = 0; i < agg_params_cnt; ++i) {
-                const agg_params_t *ap = agg_params + i; //shortcut
-
-                ret = lnf_mem_fadd(*agg, ap->field, ap->flags, ap->numbits,
+        for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
+                ret = lnf_mem_fadd(mem, ap->field, ap->flags, ap->numbits,
                                 ap->numbits6);
                 if (ret != LNF_OK) {
                         print_err("LNF - lnf_mem_fadd() error");
-                        lnf_mem_free(*agg);
                         return E_LNF;
                 }
         }
 
         return E_OK;
+}
+
+
+int mem_print(lnf_mem_t *mem, size_t limit)
+{
+        int ret, err = E_OK;
+        size_t rec_cntr = 0;
+        lnf_rec_t *rec;
+        lnf_brec1_t brec;
+
+        ret = lnf_rec_init(&rec);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_rec_init()");
+                return E_LNF;
+        }
+
+        for (ret = lnf_mem_read(mem, rec); ret == LNF_OK;
+                        ret = lnf_mem_read(mem, rec)) {
+                ret = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
+                if (ret != LNF_OK) {
+                        print_err("LNF - lnf_rec_fget()");
+                        err = E_LNF;
+                        break;
+                }
+
+                print_brec(brec);
+                rec_cntr++;
+
+                if (rec_cntr == limit) {
+                        break;
+                }
+        }
+
+        lnf_rec_free(rec);
+
+        return err;
 }
 
 

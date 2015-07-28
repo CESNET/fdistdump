@@ -58,6 +58,11 @@
 #include <libnf.h>
 
 
+enum { //command line options
+        OPT_NO_FAST_TOPN = 256, //above ASCII
+};
+
+
 static const char *const time_formats[] = {
         "%H:%M %d.%m.%Y", //23:59 31.12.2015
         "%H:%M:%S %d.%m.%Y", //23:59:59 31.12.2015
@@ -88,7 +93,7 @@ static int str_to_tm(struct tm *time, const char *time_str)
 }
 
 
-static int set_interval(params_t *params, char *interval_arg_str)
+static int set_interval(struct cmdline_args *args, char *interval_arg_str)
 {
         char *begin_str, *end_str, *remaining_str, *saveptr;
         int ret;
@@ -107,16 +112,16 @@ static int set_interval(params_t *params, char *interval_arg_str)
         }
 
         /* Convert time strings to struct tm. */
-        ret = str_to_tm(&params->interval_begin, begin_str);
+        ret = str_to_tm(&args->interval_begin, begin_str);
         if (ret != E_OK) {
                 printf("invalid date format \"%s\"\n", begin_str);
                 return E_ARG;
         }
         if (end_str == NULL) { //NULL means until now
                 const time_t now = time(NULL);
-                localtime_r(&now, &params->interval_end);
+                localtime_r(&now, &args->interval_end);
         } else {
-                ret = str_to_tm(&params->interval_end, end_str);
+                ret = str_to_tm(&args->interval_end, end_str);
                 if (ret != E_OK) {
                         printf("invalid date format \"%s\"\n", end_str);
                         return E_ARG;
@@ -124,14 +129,14 @@ static int set_interval(params_t *params, char *interval_arg_str)
         }
 
         /* Check interval sanity. */
-        if (diff_tm(params->interval_end, params->interval_begin) <= 0.0) {
+        if (diff_tm(args->interval_end, args->interval_begin) <= 0.0) {
                 printf("invalid interval duration\n");
                 return E_ARG;
         }
 
         /* Align begining time to closest greater rotation interval. */
-        while (mktime(&params->interval_begin) % FLOW_FILE_ROTATION_INTERVAL) {
-                params->interval_begin.tm_sec++;;
+        while (mktime(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL) {
+                args->interval_begin.tm_sec++;;
         }
 
         return E_OK;
@@ -150,13 +155,13 @@ static int set_interval(params_t *params, char *interval_arg_str)
  * If all arguments are successfully parsed, E_OK is returned. On error, content
  * of agg_params and agg_params_cnt is undefined and E_ARG is returned.
  *
- * \param[in,out] params Structure with parsed command line parameters and other
+ * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
  * \param[in] agg_arg_str Aggregation string, usually gathered from command
  *                        line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_agg(params_t *params, char *agg_arg_str)
+static int set_agg(struct cmdline_args *args, char *agg_arg_str)
 {
         char *token, *saveptr;
         int ret, fld, nb, nb6, agg;
@@ -165,7 +170,7 @@ static int set_agg(params_t *params, char *agg_arg_str)
         while (token != NULL) {
                 size_t idx;
 
-                if (params->agg_params_cnt >= MAX_AGG_PARAMS) {
+                if (args->agg_params_cnt >= MAX_AGG_PARAMS) {
                         printf("agg count err\n");
                         return E_ARG;
                 }
@@ -186,21 +191,21 @@ static int set_agg(params_t *params, char *agg_arg_str)
                 assert(ret == LNF_OK); //should not happen
 
                 /* Look if this field is allready in. */
-                for (idx = 0; idx < params->agg_params_cnt; ++idx) {
-                        if (params->agg_params[idx].field == fld) {
+                for (idx = 0; idx < args->agg_params_cnt; ++idx) {
+                        if (args->agg_params[idx].field == fld) {
                                 break; //found the same field -> overwrite it
                         }
                 }
 
                 /* Add/overwrite field and info. */
-                params->agg_params[idx].field = fld;
-                params->agg_params[idx].flags |= agg; //don't overwrite sort flg
-                params->agg_params[idx].numbits = nb;
-                params->agg_params[idx].numbits6 = nb6;
+                args->agg_params[idx].field = fld;
+                args->agg_params[idx].flags |= agg; //don't overwrite sort flg
+                args->agg_params[idx].numbits = nb;
+                args->agg_params[idx].numbits6 = nb6;
 
                 /* In case of new parameter, increment counter. */
-                if (idx == params->agg_params_cnt) {
-                        params->agg_params_cnt++;
+                if (idx == args->agg_params_cnt) {
+                        args->agg_params_cnt++;
                 }
 
                 token = strtok_r(NULL, AGG_SEPARATOR, &saveptr); //next token
@@ -223,17 +228,17 @@ static int set_agg(params_t *params, char *agg_arg_str)
  * numbers of bits, ...), content of agg_params and agg_params_cnt is kept
  * untouched and E_ARG is returned.
  *
- * \param[in,out] params Structure with parsed command line parameters and other
+ * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
  * \param[in] order_str Order string, usually gathered from command line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_order(params_t *params, char *order_str)
+static int set_order(struct cmdline_args *args, char *order_str)
 {
         int ret, fld, nb, nb6, agg, sort;
         size_t idx;
 
-        if (params->agg_params_cnt >= MAX_AGG_PARAMS) {
+        if (args->agg_params_cnt >= MAX_AGG_PARAMS) {
                 printf("agg count err\n");
                 return E_ARG;
         }
@@ -262,21 +267,21 @@ static int set_order(params_t *params, char *order_str)
         assert(ret == LNF_OK); //should not happen
 
         /* Look for sort flag in existing parameters. */
-        for (idx = 0; idx < params->agg_params_cnt; ++idx) {
-                if (params->agg_params[idx].flags & LNF_SORT_FLAGS) {
+        for (idx = 0; idx < args->agg_params_cnt; ++idx) {
+                if (args->agg_params[idx].flags & LNF_SORT_FLAGS) {
                         break; //sort flag found -> overwrite it
                 }
         }
 
         /* Save/overwrite field and info. */
-        params->agg_params[idx].field = fld;
-        params->agg_params[idx].flags = agg | sort;
-        params->agg_params[idx].numbits = nb;
-        params->agg_params[idx].numbits6 = nb6;
+        args->agg_params[idx].field = fld;
+        args->agg_params[idx].flags = agg | sort;
+        args->agg_params[idx].numbits = nb;
+        args->agg_params[idx].numbits6 = nb6;
 
         /* In case of new parameter, increment counter. */
-        if (idx == params->agg_params_cnt) {
-                params->agg_params_cnt++;
+        if (idx == args->agg_params_cnt) {
+                args->agg_params_cnt++;
         }
 
         return E_OK;
@@ -295,13 +300,13 @@ static int set_order(params_t *params, char *order_str)
  * it is overwritten. On error, content of agg_params and agg_params_cnt is
  * undefined and E_ARG is returned.
  *
- * \param[in,out] params Structure with parsed command line parameters and other
+ * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
  * \param[in] stat_arg_str Statistic string, usually gathered from command
  *                        line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_stat(params_t *params, char *stat_arg_str)
+static int set_stat(struct cmdline_args *args, char *stat_arg_str)
 {
         char *stat_str, *order_str, *saveptr;
         int ret;
@@ -312,7 +317,7 @@ static int set_stat(params_t *params, char *stat_arg_str)
                 return E_ARG;
         }
 
-        ret = set_agg(params, stat_str);
+        ret = set_agg(args, stat_str);
         if (ret != E_OK) {
                 return E_ARG;
         }
@@ -322,7 +327,7 @@ static int set_stat(params_t *params, char *stat_arg_str)
                 order_str = DEFAULT_STAT_ORD;
         }
 
-        ret = set_order(params, order_str);
+        ret = set_order(args, order_str);
         if (ret != E_OK) {
                 return E_ARG;
         }
@@ -333,8 +338,8 @@ static int set_stat(params_t *params, char *stat_arg_str)
                 return E_ARG;
         }
 
-        if (params->rec_limit == 0) {
-                params->rec_limit = DEFAULT_STAT_LIMIT;
+        if (args->rec_limit == 0) {
+                args->rec_limit = DEFAULT_STAT_LIMIT;
         }
 
         return E_OK;
@@ -344,17 +349,17 @@ static int set_stat(params_t *params, char *stat_arg_str)
 /** \brief Check and save filter expression string.
  *
  * Function checks filter by initialising it using libnf lnf_filter_init(). If
- * filter syntax is correct, pointer to filter string is stored in params struct
- * and E_OK is returned. Otherwise params struct remains untouched and E_ARG is
+ * filter syntax is correct, pointer to filter string is stored in args struct
+ * and E_OK is returned. Otherwise args struct remains untouched and E_ARG is
  * returned.
  *
- * \param[in,out] params Structure with parsed command line parameters and other
+ * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
  * \param[in] filter_str Filter expression string, usually gathered from command
  *                       line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_filter(params_t *params, char *filter_str)
+static int set_filter(struct cmdline_args *args, char *filter_str)
 {
         int ret;
         lnf_filter_t *filter;
@@ -367,7 +372,7 @@ static int set_filter(params_t *params, char *filter_str)
         }
 
         lnf_filter_free(filter);
-        params->filter_str = filter_str;
+        args->filter_str = filter_str;
         return E_OK;
 }
 
@@ -375,16 +380,16 @@ static int set_filter(params_t *params, char *filter_str)
 /** \brief Check, convert and save limit string.
  *
  * Function converts limit string into unsigned integer. If string is correct
- * and conversion was successfull, params->limit is set and E_OK is returned.
- * On error (overflow, invalid characters, negative value, ...) params struct is
+ * and conversion was successfull, args->limit is set and E_OK is returned.
+ * On error (overflow, invalid characters, negative value, ...) args struct is
  * kept untouched and E_ARG is returned.
  *
- * \param[in,out] params Structure with parsed command line parameters and other
+ * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
  * \param[in] limit_str Limit string, usually gathered from command line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_limit(params_t *params, char *limit_str)
+static int set_limit(struct cmdline_args *args, char *limit_str)
 {
         char *endptr;
         long long int limit;
@@ -408,35 +413,44 @@ static int set_limit(params_t *params, char *limit_str)
                 return E_ARG;
         }
 
-        params->rec_limit = (size_t)limit;
+        args->rec_limit = (size_t)limit;
         return E_OK;
 }
 
 
-int arg_parse(params_t *params, int argc, char **argv)
+void set_defaults(struct cmdline_args *args)
 {
-        params->working_mode = MODE_REC; //default mode
+        args->working_mode = MODE_REC;
+        args->use_fast_topn = true;
+}
 
-        int opt, ret = E_OK;
+
+int arg_parse(struct cmdline_args *args, int argc, char **argv)
+{
+        int opt, ret = E_OK, sort_key = LNF_FLD_ZERO_;
         bool help = false, bad_arg = false;
         size_t input_arg_cnt = 0;
 
-        char usage_string[] = "Usage: %s options\n";
-        char help_string[] = "help\n";
+        const char usage_string[] = "Usage: %s options\n";
+        const char help_string[] = "help\n";
 
-        static struct option long_opts[] = {
+        const struct option long_opts[] = {
                 {"aggregation", required_argument, NULL, 'a'},
                 {"filter", required_argument, NULL, 'f'},
                 {"time-interval", required_argument, NULL, 'i'},
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
                 {"statistic", required_argument, NULL, 's'},
-
                 {"read", required_argument, NULL, 'r'},
+
+                {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+
                 {"help", no_argument, NULL, 'h'},
                 {0, 0, 0, 0} //required by getopt_long()
         };
-        char *short_opts = "a:f:i:l:o:s:r:h";
+        const char *short_opts = "a:f:i:l:o:s:r:h";
+
+        set_defaults(args);
 
         while (!bad_arg && !help) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
@@ -446,34 +460,39 @@ int arg_parse(params_t *params, int argc, char **argv)
 
                 switch (opt) {
                 case 'a'://aggregation
-                        params->working_mode = MODE_AGG;
-                        ret = set_agg(params, optarg);
+                        args->working_mode = MODE_AGG;
+                        ret = set_agg(args, optarg);
                         break;
                 case 'f'://filter expression
-                        ret = set_filter(params, optarg);
+                        ret = set_filter(args, optarg);
                         break;
                 case 'i'://time interval
-                        ret = set_interval(params, optarg);
+                        ret = set_interval(args, optarg);
                         input_arg_cnt++;
                         break;
                 case 'l'://limit
-                        ret = set_limit(params, optarg);
+                        ret = set_limit(args, optarg);
                         break;
                 case 'o'://order
-                        params->working_mode = MODE_AGG;
-                        ret = set_order(params, optarg);
+                        args->working_mode = MODE_AGG;
+                        ret = set_order(args, optarg);
                         break;
                 case 's'://statistic
-                        params->working_mode = MODE_AGG;
-                        ret = set_stat(params, optarg);
+                        args->working_mode = MODE_AGG;
+                        ret = set_stat(args, optarg);
                         break;
                 case 'r'://path to read file(s) from
-                        params->path_str = optarg;
+                        args->path_str = optarg;
                         input_arg_cnt++;
                         break;
                 case 'h'://help
                         help = true;
                         break;
+
+                case OPT_NO_FAST_TOPN: //disable fast top-N algorithm
+                        args->use_fast_topn = false;
+                        break;
+
                 default: /* '?' or '0' */
                         bad_arg = true;
                         break;
@@ -510,10 +529,25 @@ int arg_parse(params_t *params, int argc, char **argv)
                 fprintf(stderr, usage_string, argv[0]);
                 return E_ARG;
         }
-        if (params->path_str && (strlen(params->path_str) >= PATH_MAX)) {
+        if (args->path_str && (strlen(args->path_str) >= PATH_MAX)) {
                 errno = ENAMETOOLONG;
-                perror(params->path_str);
+                perror(args->path_str);
                 return E_ARG;
+        }
+
+        /* Under certain conditions, regular topN algorithm is more suitable. */
+        if (args->rec_limit == 0) { //no record limit
+                args->use_fast_topn = false;
+        }
+        for (size_t i = 0; i < args->agg_params_cnt; ++i) {
+                if (args->agg_params[i].flags & LNF_SORT_FLAGS) {
+                        sort_key = args->agg_params[i].field;
+                }
+        }
+        /* Fast aggregation makes sense only for statistical items. */
+        if (sort_key < LNF_FLD_DOCTETS ||
+                        sort_key > LNF_FLD_AGGR_FLOWS) {
+                args->use_fast_topn = false;
         }
 
 
@@ -521,24 +555,24 @@ int arg_parse(params_t *params, int argc, char **argv)
         char buff_from[255], buff_to[255];
 
         printf("aggregation: \n");
-        for (size_t i = 0; i < params->agg_params_cnt; ++i) {
-                agg_params_t *ap = params->agg_params + i;
+        for (size_t i = 0; i < args->agg_params_cnt; ++i) {
+                struct agg_params *ap = args->agg_params + i;
                 printf("\t%d, 0x%x, (%d, %d)\n", ap->field, ap->flags,
                                 ap->numbits, ap->numbits6);
         }
-        printf("filter: %s\n", params->filter_str);
+        printf("filter: %s\n", args->filter_str);
 
-        strftime(buff_from, sizeof(buff_from), "%c", &params->interval_begin);
-        strftime(buff_to, sizeof(buff_to), "%c", &params->interval_end);
+        strftime(buff_from, sizeof(buff_from), "%c", &args->interval_begin);
+        strftime(buff_to, sizeof(buff_to), "%c", &args->interval_end);
 
         printf("interval: %s - %s\n", buff_from, buff_to);
 
-        while (diff_tm(params->interval_end, params->interval_begin) > 0.0) {
+        while (diff_tm(args->interval_end, args->interval_begin) > 0.0) {
                 strftime(buff_from, sizeof(buff_from), "%Y/%m/%d/"
-                                FLOW_FILE_NAME_FORMAT, &params->interval_begin);
+                                FLOW_FILE_NAME_FORMAT, &args->interval_begin);
                 printf("%s\n", buff_from);
-                params->interval_begin.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
-                mktime(&params->interval_begin); //normalization
+                args->interval_begin.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
+                mktime(&args->interval_begin); //normalization
         }
 #endif //DEBUG
 
@@ -549,9 +583,9 @@ int arg_parse(params_t *params, int argc, char **argv)
 int main(int argc, char **argv)
 {
         int ret, err = EXIT_SUCCESS;
-        params_t params;
+        struct cmdline_args args;
 
-        ret = arg_parse(&params, argc, argv);
+        ret = arg_parse(&args, argc, argv);
         switch (ret) {
         case E_OK:
                 //continue

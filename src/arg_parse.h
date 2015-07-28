@@ -48,6 +48,7 @@
 #include "common.h"
 
 #include <stddef.h> //size_t
+#include <stdbool.h>
 
 #define AGG_SEPARATOR "," //srcport,srcip
 #define STAT_SEPARATOR "/" //statistic/order
@@ -56,10 +57,10 @@
 #define DEFAULT_STAT_ORD "flows"
 #define DEFAULT_STAT_LIMIT 10
 
-typedef struct {
+struct cmdline_args {
         working_mode_t working_mode; //working mode (records, aggregation, topN)
 
-        agg_params_t agg_params[MAX_AGG_PARAMS]; //aggregation parameters
+        struct agg_params agg_params[MAX_AGG_PARAMS]; //aggregation parameters
         size_t agg_params_cnt; //aggregation parameters count
 
         char *filter_str; //filter expression string
@@ -67,7 +68,9 @@ typedef struct {
 
         char *path_str; //path string
         struct tm interval_begin, interval_end; //begin and end of interval
-} params_t;
+
+        bool use_fast_topn; //disables fast top-N algorithm
+};
 
 
 /** \brief Parse command line arguments and fill params struct.
@@ -83,6 +86,6 @@ typedef struct {
  * \param[in] argv Command line argument strings.
  * \return Error code. E_OK, E_HELP or E_ARG.
  */
-int arg_parse(params_t *params, int argc, char **argv);
+int arg_parse(struct cmdline_args *args, int argc, char **argv);
 
 #endif //ARG_PARSE_H

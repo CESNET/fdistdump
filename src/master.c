@@ -50,131 +50,144 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#include <libgen.h> //basename()
 #include <mpi.h>
 #include <libnf.h>
 
-#define STATISTICS_MEM /// TODO - process statistics with aggreg AND LIST FLOWS
 
 /* Global MPI data types. */
 extern MPI_Datatype task_info_mpit;
 
 
-void fill_task_info(task_info_t *ti, const params_t *params, size_t slave_count)
+static void fill_task_info(task_info_t *ti, const struct cmdline_args *args,
+                size_t slave_cnt)
 {
-        ti->working_mode = params->working_mode;
-        ti->agg_params_cnt = params->agg_params_cnt;
+        ti->working_mode = args->working_mode;
+        ti->agg_params_cnt = args->agg_params_cnt;
 
-        memcpy(ti->agg_params, params->agg_params,
-                        params->agg_params_cnt * sizeof(agg_params_t));
+        memcpy(ti->agg_params, args->agg_params, args->agg_params_cnt *
+                        sizeof(struct agg_params));
 
-        ti->rec_limit = params->rec_limit;
+        ti->rec_limit = args->rec_limit;
 
-        if (params->filter_str == NULL) {
+        if (args->filter_str == NULL) {
                 ti->filter_str_len = 0;
         } else {
-                ti->filter_str_len = strlen(params->filter_str);
+                ti->filter_str_len = strlen(args->filter_str);
         }
-        if (params->path_str == NULL) {
+        if (args->path_str == NULL) {
                 ti->path_str_len = 0;
         } else {
-                ti->path_str_len = strlen(params->path_str);
+                ti->path_str_len = strlen(args->path_str);
         }
-        ti->slave_cnt = slave_count;
+        ti->slave_cnt = slave_cnt;
 
-        ti->interval_begin = params->interval_begin;
-        ti->interval_end = params->interval_end;
+        ti->interval_begin = args->interval_begin;
+        ti->interval_end = args->interval_end;
+
+        ti->use_fast_topn = args->use_fast_topn;
 }
 
-/* Send first top-n identifiers (aggregation field(s) values) to slave nodes */
-int bcast_topn_ids (size_t n, lnf_mem_t **mem)
+
+static int fast_topn_bcast_all(lnf_mem_t *mem)
 {
-        char buff[LNF_MAX_RAW_LEN];
-        int len;
-        int ret;
+        int ret, rec_len;
+        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
+        lnf_mem_cursor_t *read_cursor;
 
-        /* Send request for Top-N records */
-        for (size_t i = 0; i < n; ++i){
-
-                ret = lnf_mem_read_raw(*mem, buff, &len, LNF_MAX_RAW_LEN);
-
-                if (ret != LNF_OK){
-                    print_err("cannot read raw memory record.");
-                    return E_LNF;
-                }
-
-                MPI_Bcast(&len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
-                MPI_Bcast(&buff, len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
-
+        ret = lnf_mem_first_c(mem, &read_cursor);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_first_c()");
+                return E_LNF;
         }
 
-//        MPI_Bcast(NULL, 0, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+        /* Broadcast all records. */
+        while (true) {
+                ret = lnf_mem_read_raw_c(mem, read_cursor, rec_buff, &rec_len,
+                                LNF_MAX_RAW_LEN);
+                assert(ret != LNF_EOF);
+                if (ret != LNF_OK) {
+                        print_err("LNF - lnf_mem_read_raw_c()");
+                        return E_LNF;
+                }
+
+                MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
+                MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC,
+                                MPI_COMM_WORLD);
+
+                ret = lnf_mem_next_c(mem, &read_cursor);
+                if (ret == LNF_EOF) {
+                        break; //all records sent
+                } else if (ret != LNF_OK) {
+                        print_err("LNF - lnf_mem_next_c()");
+                        return E_LNF;
+                }
+        }
+
+        /* Phase 2 done, notify slaves by zero record length. */
+        rec_len = 0;
+        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
 
         return E_OK;
 }
 
 
-int master(int world_rank, int world_size, const params_t *params)
+static int mode_agg_recv_all(lnf_mem_t *mem, size_t slave_cnt)
 {
-        (void)world_rank;
-        const size_t slave_cnt = world_size - 1; //all nodes without master
-        int ret = E_OK;
-        size_t rec_cntr = 0; //printed records
+        int ret, rec_len;
+        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: receive mutliple records
+        MPI_Status status;
+        size_t active_slaves = slave_cnt; //every slave is active
 
+        /* Data receiving loop. */
+        while (active_slaves) {
+                /* Receive message from any slave. */
+                MPI_Recv(rec_buff, LNF_MAX_RAW_LEN, MPI_BYTE, MPI_ANY_SOURCE,
+                                TAG_DATA, MPI_COMM_WORLD, &status);
+
+                /* Determine actual size of received message. */
+                MPI_Get_count(&status, MPI_BYTE, &rec_len);
+                if (rec_len == 0) {
+                        active_slaves--;
+                        continue; //empty message -> slave finished
+                }
+
+                /* Store received record. */
+                ret = lnf_mem_write_raw(mem, rec_buff, rec_len);
+                if (ret != LNF_OK) {
+                        print_err("LNF - lnf_mem_write_raw()");
+                        return E_LNF;
+                }
+        }
+
+        return E_OK;
+}
+
+
+static int mode_rec_main(size_t slave_cnt, size_t rec_limit)
+{
+        int err = E_OK;
+        char *data_buff[2][slave_cnt]; //two buffers per slave
+        bool data_buff_idx[slave_cnt]; //current buffer index
         MPI_Request requests[slave_cnt];
         MPI_Status status;
-        task_info_t ti = {0};
-        lnf_mem_t *agg;
-      #ifdef STATISTICS_MEM
-        lnf_mem_t *stats;
-      #endif // STATISTICS_MEM
-
-        char *data_buff[2][slave_cnt]; //two buffers for each slave
-        bool data_buff_idx[slave_cnt]; //current buffer index
+        size_t rec_cntr = 0; //printed records
+        bool print = true;
 
         /* Allocate receive buffers. */
         for (size_t i = 0; i < slave_cnt; ++i) {
                 requests[i] = MPI_REQUEST_NULL;
                 data_buff_idx[i] = 0;
 
+                data_buff[0][i] = NULL; //in case of malloc failure
+                data_buff[1][i] = NULL;
+
                 data_buff[0][i] = malloc(XCHG_BUFF_SIZE);
                 data_buff[1][i] = malloc(XCHG_BUFF_SIZE);
                 if (data_buff[0][i] == NULL || data_buff[1][i] == NULL) {
                         print_err("malloc error");
-                        return E_MEM; //fatal
+                        err = E_MEM;
+                        goto cleanup;
                 }
-        }
-
-        /* Initialize memory for aggregation on master. */
-        if (params->working_mode != MODE_REC) {
-                ret = agg_init(&agg, params->agg_params,
-                                params->agg_params_cnt);
-                if (ret != E_OK) {
-                        return E_LNF;
-                }
-        }
-
-    #ifdef STATISTICS_MEM
-        ret = agg_init(&stats, params->agg_params, params->agg_params_cnt);
-        if (ret != E_OK) {
-                return E_LNF;
-        }
-    #endif // STATISTICS_MEM
-
-        /* Fill task info struct for slaves (working mode etc). */
-        fill_task_info(&ti, params, slave_cnt);
-
-        /* Initialization phase.
-         * Broadcast task info, optional filter string and optional path string.
-         */
-        MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
-        if (ti.filter_str_len > 0) {
-                MPI_Bcast(params->filter_str, ti.filter_str_len, MPI_CHAR,
-                                ROOT_PROC, MPI_COMM_WORLD);
-        }
-        if (ti.path_str_len > 0) {
-                MPI_Bcast(params->path_str, ti.path_str_len, MPI_CHAR,
-                                ROOT_PROC, MPI_COMM_WORLD);
         }
 
         /* Start first individual nonblocking data receive from every slave. */
@@ -186,7 +199,7 @@ int master(int world_rank, int world_size, const params_t *params)
         }
 
         /* Data receiving loop. */
-        while (1) {
+        while (true) {
                 int msg_size, slave_idx;
                 char *full_buff, *free_buff; //shortcuts
 
@@ -209,151 +222,146 @@ int master(int world_rank, int world_size, const params_t *params)
                 data_buff_idx[slave_idx] = !data_buff_idx[slave_idx]; //toggle
                 free_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
 
-                /* Receive into free buffer. */
+                /* Start receive of next message into free buffer. */
                 MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE,
                                 status.MPI_SOURCE, TAG_DATA, MPI_COMM_WORLD,
                                 &requests[slave_idx]);
 
-                print_debug("received %d bytes from %d\n", msg_size,
-                                status.MPI_SOURCE);
-
-                /* Either store or process received records. */
-                if (params->working_mode != MODE_REC) {
-                        ret = lnf_mem_write_raw(agg, full_buff, msg_size);
-                        if (ret != LNF_OK) {
-                                print_err("cannot write raw memory record");
-                                return E_LNF;
-                        }
-                    #ifdef STATISTICS_MEM /// TODO - process statistics with aggreg AND LIST FLOWS
-                        ret = lnf_mem_write_raw(stats, full_buff, msg_size);
-                        if (ret != LNF_OK) {
-                                print_err("cannot write raw memory record");
-                                return E_LNF;
-                        }
-                    #endif // STATISTICS_MEM
-                } else {
-                        for (size_t i = 0; i < msg_size / sizeof (lnf_brec1_t);
-                                        ++i) {
-                                if (params->rec_limit &&
-                                                rec_cntr == params->rec_limit) {
-                                        break;
-                                }
-                                print_brec(((lnf_brec1_t*)full_buff)[i]);
-                                rec_cntr++;
+                /* Print. */
+                if (!print) continue;
+                for (size_t i = 0; i < msg_size / sizeof (lnf_brec1_t); ++i) {
+                        print_brec(((lnf_brec1_t*)full_buff)[i]);
+                        if (++rec_cntr == rec_limit) {
+                                print = false;
+                                break;
                         }
                 }
         }
 
-        /* Received Top-K records from every slave node, request relevant global
-           Top - N records. */
-        if (params->working_mode != MODE_REC) {
-                ret = bcast_topn_ids (params->rec_limit, &agg);
-                if (ret != E_OK) {
-                        return ret;
-                }
-
-//                lnf_mem_read_reset(agg);
-
-                /* Clear agg-memheap */
-                lnf_mem_free(agg);
-                ret = agg_init(&agg, params->agg_params,
-                        params->agg_params_cnt);
-                if (ret != E_OK) {
-                        return E_LNF;
-                }
-
-
-                /* Receive requested Top-N records */
-                /* Start first individual nonblocking data receive from every
-                   slave. */
-                for (size_t i = 0; i < slave_cnt ; ++i) {
-                        char *free_buff = data_buff[data_buff_idx[i]][i];
-
-                        MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1,
-                                  TAG_DATA, MPI_COMM_WORLD, &requests[i]);
-                }
-
-                /* Data receiving loop. */
-                while (1) {
-                        int msg_size, slave_idx;
-                        char *full_buff, *free_buff; //shortcuts
-
-                        /* Wait for message from any slave. */
-                        MPI_Waitany(slave_cnt, requests, &slave_idx, &status);
-                        if (slave_idx == MPI_UNDEFINED) { //no active slaves
-                                break;
-                        }
-
-                        /* Determine actual size of received message. */
-                        MPI_Get_count(&status, MPI_BYTE, &msg_size);
-                        if (msg_size == 0) {
-                                print_debug("second iteration on %d finished\n",
-                                                status.MPI_SOURCE);
-                                continue; //empty message -> slave finished
-                        }
-
-                        full_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
-                        data_buff_idx[slave_idx] = !data_buff_idx[slave_idx]; //toggle
-                        free_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
-
-                        MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE,
-                                        status.MPI_SOURCE, TAG_DATA,
-                                        MPI_COMM_WORLD, &requests[slave_idx]);
-
-                        print_debug("received %d bytes from %d (2)\n", msg_size,
-                                        status.MPI_SOURCE);
-
-                        /* Store or process received records. */
-                        ret = lnf_mem_write_raw(agg, full_buff, msg_size);
-                        if (ret != LNF_OK) {
-                                print_err("cannot write raw memory record");
-                                return E_LNF;
-                        }
-                }
-
-                /* Print result. */
-                lnf_rec_t *rec;
-                lnf_brec1_t brec;
-
-                ret = lnf_rec_init(&rec);
-                if (ret != LNF_OK) {
-                        print_err("cannot initialise empty record object");
-                        return E_LNF;
-                }
-
-                for (ret = lnf_mem_read(agg, rec); ret == LNF_OK;
-                                ret = lnf_mem_read(agg, rec)) {
-                        rec_cntr++;
-                        ret = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
-                        print_brec(brec);
-
-                        if (params->rec_limit &&
-                                        rec_cntr == params->rec_limit) {
-                                break;
-                        }
-                }
-
-                fflush(stdout);
-                fflush(stderr);
-
-                lnf_rec_free(rec);
-                lnf_mem_free(agg);
-        }
-
-
-        /// TODO - process statistics message.
-        /// TODO - process statistics with aggreg AND LIST FLOWS
-
-
-    #ifdef STATISTICS_MEM
-        lnf_mem_free(stats);
-    #endif // STATISTICS_MEM
-
-        /* Cleanup. */
+cleanup:
         for (size_t i = 0; i < slave_cnt; ++i) {
                 free(data_buff[1][i]);
                 free(data_buff[0][i]);
         }
 
-        return E_OK;
+        return err;
+}
+
+
+static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
+                const struct agg_params *ap, size_t ap_cnt, bool use_fast_topn)
+{
+        int ret, err = E_OK;
+        lnf_mem_t *mem;
+
+        /* Initialize aggregation memory. */
+        ret = lnf_mem_init(&mem);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_init()");
+                mem = NULL;
+                err = E_LNF;
+                goto cleanup;
+        }
+        ret = mem_setup(mem, ap, ap_cnt);
+        if (ret != E_OK) {
+                err = E_LNF;
+                goto cleanup;
+        }
+
+        ret = mode_agg_recv_all(mem, slave_cnt);
+        if (ret != E_OK) {
+                err = ret;
+                goto cleanup;
+        }
+
+        if (use_fast_topn) {
+                ret = fast_topn_bcast_all(mem);
+                if (ret != E_OK) {
+                        err = ret;
+                        goto cleanup;
+                }
+
+                /* Reset memory - all records will be received again. */
+                //TODO: optimalization - add records to memory, don't reset
+                lnf_mem_free(mem);
+                ret = lnf_mem_init(&mem);
+                if (ret != LNF_OK) {
+                        print_err("LNF - lnf_mem_init()");
+                        mem = NULL;
+                        err = E_LNF;
+                        goto cleanup;
+                }
+
+                ret = mem_setup(mem, ap, ap_cnt);
+                if (ret != E_OK) {
+                        err = ret;
+                        goto cleanup;
+                        return E_LNF;
+                }
+
+                ret = mode_agg_recv_all(mem, slave_cnt);
+                if (ret != E_OK) {
+                        err = ret;
+                        goto cleanup;
+                        return ret;
+                }
+        }
+
+        ret = mem_print(mem, rec_limit);
+        if (ret != E_OK) {
+                return ret;
+        }
+
+cleanup:
+        if (mem != NULL) {
+                lnf_mem_free(mem);
+        }
+
+        return err;
+}
+
+
+int master(int world_rank, int world_size, const struct cmdline_args *args)
+{
+        (void)world_rank;
+        int ret, err = E_OK;
+        const size_t slave_cnt = world_size - 1; //all nodes without master
+
+        task_info_t ti = {0};
+
+        /* Fill task info struct for slaves (working mode etc). */
+        fill_task_info(&ti, args, slave_cnt);
+
+        /* Broadcast task info, optional filter string and path string. */
+        MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
+        if (ti.filter_str_len > 0) {
+                MPI_Bcast(args->filter_str, ti.filter_str_len, MPI_CHAR,
+                                ROOT_PROC, MPI_COMM_WORLD);
+        }
+        if (ti.path_str_len > 0) {
+                MPI_Bcast(args->path_str, ti.path_str_len, MPI_CHAR,
+                                ROOT_PROC, MPI_COMM_WORLD);
+        }
+
+        /* Send, receive, process. */
+        switch (args->working_mode) {
+        case MODE_REC:
+                ret = mode_rec_main(slave_cnt, args->rec_limit);
+                if (ret != E_OK) {
+                        err = ret;
+                }
+                break;
+        case MODE_AGG:
+                ret = mode_agg_main(slave_cnt, args->rec_limit,
+                                args->agg_params, args->agg_params_cnt,
+                                args->use_fast_topn);
+                if (ret != E_OK) {
+                        err = ret;
+                }
+                break;
+        default:
+                assert(!"unknown working mode");
+        }
+
+        return err;
 }

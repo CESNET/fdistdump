@@ -48,6 +48,7 @@
 
 #include <stddef.h> //size_t
 #include <time.h> //struct tm
+#include <stdbool.h>
 
 #include <libnf.h>
 #include <mpi.h>
@@ -92,19 +93,19 @@ typedef enum { //working modes
 /* Data types. */
 //WATCH OUT: reflect changes also in agg_params_mpit
 #define AGG_PARAMS_T_ELEMS 4
-typedef struct {
+struct agg_params {
         int field;
         int flags;
         int numbits;
         int numbits6;
-} agg_params_t;
+};
 
 //WATCH OUT: reflect changes also in task_info_mpit
-#define TASK_INFO_T_ELEMS 9
+#define TASK_INFO_T_ELEMS 10
 typedef struct {
         working_mode_t working_mode; //working mode
 
-        agg_params_t agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
+        struct agg_params agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
         size_t agg_params_cnt; //aggregation parameters count
 
         size_t filter_str_len; //filter expression string length
@@ -118,6 +119,8 @@ typedef struct {
 
         struct tm interval_begin; //begin and end of time interval
         struct tm interval_end;
+
+        bool use_fast_topn;
 } task_info_t;
 
 //WATCH OUT: reflect changes in struct tm from time.h also in struct_tm_mpit
@@ -182,8 +185,8 @@ void free_struct_tm_mpit(void);
 void create_task_info_mpit(void);
 void free_task_info_mpit(void);
 
-int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
-                size_t agg_params_cnt);
+int mem_setup(lnf_mem_t *mem, const struct agg_params *ap, size_t ap_cnt);
+int mem_print(lnf_mem_t *mem, size_t limit);
 
 /**
  * \brief Prepare Top-N statistics memory structure.
