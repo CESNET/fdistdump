@@ -73,20 +73,21 @@
 
 
 /* Enumerations. */
-enum {
-        E_OK,
-        E_MEM,
-        E_MPI,
-        E_LNF,
-        E_INTERNAL,
-        E_ARG,
-        E_HELP,
-        E_EOF,
+enum { //error return codes
+        E_OK, //no error
+        E_MEM, //memory
+        E_MPI, //MPI
+        E_LNF, //libnf
+        E_INTERNAL, //internal
+        E_ARG, //command line arguments
+        E_HELP, //print help
+        E_EOF, //end of file
 };
 
 typedef enum { //working modes
-        MODE_REC,
-        MODE_AGG,
+        MODE_REC, //list unmodified flow records
+        MODE_ORD, //list ordered flow records
+        MODE_AGG, //aggregation and statistic
 } working_mode_t;
 
 
@@ -164,8 +165,9 @@ enum { //control commands
  * Prints instance of lnf_brec1_t as one line.
  *
  * \param[in] brec Basic record.
+ * \return Error code. E_OK or E_MEM.
  */
-void print_brec(const lnf_brec1_t brec);
+int print_brec(const lnf_brec1_t *brec);
 
 
 /** \brief Print error message.

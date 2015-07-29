@@ -300,6 +300,8 @@ static int task_await_new(struct slave_task *st)
         switch (st->working_mode) {
         case MODE_REC:
                 break;
+        case MODE_ORD:
+                break;
         case MODE_AGG:
                 ret = lnf_mem_init(&st->agg);
                 if (ret != LNF_OK) {
@@ -421,7 +423,7 @@ int fast_topn_send_k(struct slave_task *st)
         int ret, err = E_OK, rec_len;
         lnf_mem_cursor_t *read_cursor;
         char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
-        size_t send_cnt = 0;
+        size_t sent_cnt = 0;
         uint64_t threshold;
 
         ret = lnf_mem_first_c(st->agg, &read_cursor);
@@ -445,7 +447,7 @@ int fast_topn_send_k(struct slave_task *st)
                 MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD);
 
-                if (++send_cnt == st->rec_limit) {
+                if (++sent_cnt == st->rec_limit) {
                         break; //Nth record sent
                 }
 
@@ -510,6 +512,7 @@ int fast_topn_send_k(struct slave_task *st)
 
                 MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD);
+                sent_cnt++; //only informative
         }
 
 cleanup:

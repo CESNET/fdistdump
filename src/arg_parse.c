@@ -254,19 +254,13 @@ static int set_order(struct cmdline_args *args, char *order_str)
                 return E_ARG;
         }
 
-        /* TODO: neprisel jsem na zpusob, jak sortit bez agregace. Pokud
-         * soucasti flagu neni zadny agregacni flag (pouze radici), tak
-         * lnf_mem_fadd() prida LNF_AGGR_KEY i pro pole jako bytes, pkts, flows,
-         * kde to nedava zadny smysl (ma byt LNF_AGGR_SUM). Coz je samozrejme
-         * nezadouci.
-         */
-        /* Lookup default aggregation and sort key for field. */
+        /* Get default aggregation and sort key for this field. */
         ret = lnf_fld_info(fld, LNF_FLD_INFO_AGGR, &agg, sizeof (agg));
-        assert(ret == LNF_OK); //should not happen
+        assert(ret == LNF_OK);
         ret = lnf_fld_info(fld, LNF_FLD_INFO_SORT, &sort, sizeof(sort));
-        assert(ret == LNF_OK); //should not happen
+        assert(ret == LNF_OK);
 
-        /* Look for sort flag in existing parameters. */
+        /* Lookup sort flag in existing parameters. */
         for (idx = 0; idx < args->agg_params_cnt; ++idx) {
                 if (args->agg_params[idx].flags & LNF_SORT_FLAGS) {
                         break; //sort flag found -> overwrite it
@@ -460,7 +454,6 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 switch (opt) {
                 case 'a'://aggregation
-                        args->working_mode = MODE_AGG;
                         ret = set_agg(args, optarg);
                         break;
                 case 'f'://filter expression
@@ -474,11 +467,9 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                         ret = set_limit(args, optarg);
                         break;
                 case 'o'://order
-                        args->working_mode = MODE_AGG;
                         ret = set_order(args, optarg);
                         break;
                 case 's'://statistic
-                        args->working_mode = MODE_AGG;
                         ret = set_stat(args, optarg);
                         break;
                 case 'r'://path to read file(s) from
@@ -533,6 +524,20 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                 errno = ENAMETOOLONG;
                 perror(args->path_str);
                 return E_ARG;
+        }
+
+        /* Determine working mode. */
+        if (args->agg_params_cnt == 0) { //no aggregation -> list records
+                args->working_mode = MODE_REC;
+        } else if (args->agg_params_cnt == 1) { //aggregation or ordering
+                if (args->agg_params[0].flags & LNF_SORT_FLAGS) {
+                        args->working_mode = MODE_ORD;
+                        args->use_fast_topn = false; //TODO: pouzivat i fast
+                } else {
+                        args->working_mode = MODE_AGG;
+                }
+        } else { //aggregation
+                args->working_mode = MODE_AGG;
         }
 
         /* Under certain conditions, regular topN algorithm is more suitable. */

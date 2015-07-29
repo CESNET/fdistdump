@@ -85,24 +85,36 @@ static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
                 ret = inet_ntop(AF_INET, &addr.data[3], buff, buff_size);
         }
 
-        assert(ret != NULL); //shouldn't happen
+        assert(ret != NULL);
 
         return buff;
 }
 
 
-void print_brec(const lnf_brec1_t brec)
+int print_brec(const lnf_brec1_t *brec)
 {
+        char *ret;
+
         static char srcaddr_str[INET6_ADDRSTRLEN];
         static char dstaddr_str[INET6_ADDRSTRLEN];
 
-        addr_to_str(brec.srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
-        addr_to_str(brec.dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
+        ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
+        if (ret == NULL) {
+                print_err("Internal - addr_to_str()");
+                return E_MEM;
+        }
+        ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
+        if (ret == NULL) {
+                print_err("Internal - addr_to_str()");
+                return E_MEM;
+        }
 
-        printf("%lu -> %lu\t", brec.first, brec.last);
-        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec.srcport,
-                        dstaddr_str, brec.dstport);
-        printf("%lu\t%lu\t%lu\n", brec.pkts, brec.bytes, brec.flows);
+        printf("%lu -> %lu\t", brec->first, brec->last);
+        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec->srcport,
+                        dstaddr_str, brec->dstport);
+        printf("%lu\t%lu\t%lu\n", brec->pkts, brec->bytes, brec->flows);
+
+        return E_OK;
 }
 
 
@@ -242,7 +254,7 @@ int mem_print(lnf_mem_t *mem, size_t limit)
                         break;
                 }
 
-                print_brec(brec);
+                print_brec(&brec);
                 rec_cntr++;
 
                 if (rec_cntr == limit) {
