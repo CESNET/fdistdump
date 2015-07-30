@@ -121,7 +121,7 @@ typedef struct {
         struct tm interval_begin; //begin and end of time interval
         struct tm interval_end;
 
-        bool use_fast_topn;
+        bool use_fast_topn; //enables fast top-N algorithm
 } task_info_t;
 
 //WATCH OUT: reflect changes in struct tm from time.h also in struct_tm_mpit

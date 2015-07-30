@@ -93,7 +93,7 @@ struct slave_task {
 
         int sort_key; //LNF field set as key for sorting in memory
 
-        bool use_fast_topn; //disable fast top-N algorithm
+        bool use_fast_topn; //enables fast top-N algorithm
 };
 
 
@@ -301,11 +301,32 @@ static int task_await_new(struct slave_task *st)
         case MODE_REC:
                 break;
         case MODE_ORD:
+                if (st->rec_limit == 0) {
+                        break; //don't need memory, local sort would be useless
+                }
+
+                /* Sort all records localy, then send fist rec_limit records. */
+                ret = lnf_mem_init(&st->agg);
+                if (ret != LNF_OK) {
+                        print_err("LNF - lnf_mem_init()");
+                        return E_LNF;
+                }
+
+                ret = lnf_mem_setopt(st->agg, LNF_OPT_LISTMODE, NULL, 0);
+                if (ret != LNF_OK) {
+                        print_err("LNF - lnf_mem_setopt()");
+                        return E_LNF;
+                }
+
+                ret = mem_setup(st->agg, ti.agg_params, ti.agg_params_cnt);
+                if (ret != E_OK) {
+                        return E_LNF;
+                }
                 break;
         case MODE_AGG:
                 ret = lnf_mem_init(&st->agg);
                 if (ret != LNF_OK) {
-                        print_err("LNF - lnf_mem_init() returned %d", ret);
+                        print_err("LNF - lnf_mem_init()");
                         return E_LNF;
                 }
 
@@ -373,7 +394,7 @@ static int task_await_new(struct slave_task *st)
 }
 
 
-int topn_send(struct slave_task *st)
+int send_loop(struct slave_task *st)
 {
         int ret, err = E_OK, rec_len;
         lnf_mem_cursor_t *read_cursor;
@@ -625,12 +646,24 @@ int slave(int world_rank, int world_size)
         }
         //TODO task_next_file() return code
 
-        if (st.agg) {
-                /* Reasons to disable fast top-N algorithm:
-                 * - user request by command line argument
-                 * - no record limit (all records would be exchanged anyway)
-                 * - sort key isn't statistical fld (flows, packets, bytes, ...)
-                 */
+        /* Reasons to disable fast top-N algorithm:
+         * - user request by command line argument
+         * - no record limit (all records would be exchanged anyway)
+         * - sort key isn't statistical fld (flows, packets, bytes, ...)
+         */
+        switch (st.working_mode) {
+        case MODE_REC: //all records allready sent while reading
+                break;
+        case MODE_ORD:
+                if (st.rec_limit != 0) {
+                        ret = send_loop(&st);
+                        if (ret != E_OK) {
+                                err = ret;
+                                goto task_done_lbl;
+                        }
+                } //if no record limit, all records allready sent while reading
+                break;
+        case MODE_AGG:
                 if (st.use_fast_topn) {
                         ret = fast_topn_send_k(&st);
                         if (ret != E_OK) {
@@ -644,12 +677,15 @@ int slave(int world_rank, int world_size)
                                 goto task_done_lbl;
                         }
                 } else {
-                        ret = topn_send(&st);
+                        ret = send_loop(&st);
                         if (ret != E_OK) {
                                 err = ret;
                                 goto task_done_lbl;
                         }
                 }
+                break;
+        default:
+                assert(!"unknown working mode");
         }
 
 task_done_lbl:

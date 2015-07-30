@@ -69,7 +69,7 @@ struct cmdline_args {
         char *path_str; //path string
         struct tm interval_begin, interval_end; //begin and end of interval
 
-        bool use_fast_topn; //disables fast top-N algorithm
+        bool use_fast_topn; //enables fast top-N algorithm
 };
 
 

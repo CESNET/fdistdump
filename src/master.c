@@ -165,7 +165,7 @@ static int mem_write_raw_callback(char *data, size_t data_len, void *user)
 
         ret = lnf_mem_write_raw((lnf_mem_t *)user, data, data_len);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_write_raw()");
+                print_err("LNF - lnf_mem_write_raw() %X", ret);
                 return E_LNF;
         }
 
@@ -324,7 +324,7 @@ static int mode_rec_main(size_t slave_cnt, size_t rec_limit)
 
 
 static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
-                const struct agg_params *ap, size_t ap_cnt, bool use_fast_topn)
+                const struct agg_params *ap, size_t ap_cnt)
 {
         int ret, err = E_OK;
         struct mem_insert_callback_data callback_data = {0};
@@ -349,6 +349,7 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
         /* Switch memory to linked list (better for sorting). */
         ret = lnf_mem_setopt(callback_data.mem, LNF_OPT_LISTMODE, NULL, 0);
         if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_setopt()");
                 err = E_LNF;
                 goto cleanup;
         }
@@ -361,11 +362,22 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
         }
 
         /* Fill memory with records. */
-        ret = irecv_loop(slave_cnt, rec_limit, mem_write_callback,
-                        &callback_data);
-        if (ret != E_OK) {
-                err = ret;
-                goto cleanup;
+        if (rec_limit != 0) { //fast ordering, minimum of records exchanged
+                printf("Fast ordering mode.\n");
+                ret = recv_loop(slave_cnt, 0, mem_write_raw_callback,
+                                callback_data.mem);
+                if (ret != E_OK) {
+                        err = ret;
+                        goto cleanup;
+                }
+        } else { //slow ordering, all records exchanged
+                printf("Slow ordering mode.\n");
+                ret = irecv_loop(slave_cnt, 0, mem_write_callback,
+                                &callback_data);
+                if (ret != E_OK) {
+                        err = ret;
+                        goto cleanup;
+                }
         }
 
         /* Print all records in memory. */
@@ -436,7 +448,7 @@ static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
                         goto cleanup;
                 }
 
-                ret = recv_loop(slave_cnt, rec_limit, mem_write_raw_callback,
+                ret = recv_loop(slave_cnt, 0, mem_write_raw_callback,
                                 mem);
                 if (ret != E_OK) {
                         err = ret;
@@ -491,8 +503,7 @@ int master(int world_rank, int world_size, const struct cmdline_args *args)
                 break;
         case MODE_ORD:
                 ret = mode_ord_main(slave_cnt, args->rec_limit,
-                                args->agg_params, args->agg_params_cnt,
-                                args->use_fast_topn);
+                                args->agg_params, args->agg_params_cnt);
                 if (ret != E_OK) {
                         err = ret;
                 }

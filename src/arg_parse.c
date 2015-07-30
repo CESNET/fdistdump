@@ -532,7 +532,6 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
         } else if (args->agg_params_cnt == 1) { //aggregation or ordering
                 if (args->agg_params[0].flags & LNF_SORT_FLAGS) {
                         args->working_mode = MODE_ORD;
-                        args->use_fast_topn = false; //TODO: pouzivat i fast
                 } else {
                         args->working_mode = MODE_AGG;
                 }
@@ -540,19 +539,22 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                 args->working_mode = MODE_AGG;
         }
 
-        /* Under certain conditions, regular topN algorithm is more suitable. */
-        if (args->rec_limit == 0) { //no record limit
-                args->use_fast_topn = false;
-        }
-        for (size_t i = 0; i < args->agg_params_cnt; ++i) {
-                if (args->agg_params[i].flags & LNF_SORT_FLAGS) {
-                        sort_key = args->agg_params[i].field;
+        /* Fast top-N makes sense only under certain conditions. */
+        if (args->working_mode == MODE_AGG) {
+                /* No record limit - all records have to be sent. */
+                if (args->rec_limit == 0) { //no record limit
+                        args->use_fast_topn = false;
                 }
-        }
-        /* Fast aggregation makes sense only for statistical items. */
-        if (sort_key < LNF_FLD_DOCTETS ||
-                        sort_key > LNF_FLD_AGGR_FLOWS) {
-                args->use_fast_topn = false;
+                /* Only statistical items makes sense. */
+                for (size_t i = 0; i < args->agg_params_cnt; ++i) {
+                        if (args->agg_params[i].flags & LNF_SORT_FLAGS) {
+                                sort_key = args->agg_params[i].field;
+                        }
+                }
+                if (sort_key < LNF_FLD_DOCTETS ||
+                                sort_key > LNF_FLD_AGGR_FLOWS) {
+                        args->use_fast_topn = false;
+                }
         }
 
 
