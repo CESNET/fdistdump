@@ -131,13 +131,64 @@ static int fast_topn_bcast_all(lnf_mem_t *mem)
 }
 
 
-//TODO: rewrite in recv_loop manner
-static int mode_agg_recv_all(lnf_mem_t *mem, size_t slave_cnt)
+struct mem_insert_callback_data {
+        lnf_mem_t *mem;
+        lnf_rec_t *rec;
+};
+
+typedef int (*recv_callback_t)(char *data, size_t data_len, void *user);
+
+static int mem_write_callback(char *data, size_t data_len, void *user)
 {
-        int ret, rec_len;
+        (void)data_len;
+        int ret;
+        struct mem_insert_callback_data *micd =
+                (struct mem_insert_callback_data *)user;
+
+        ret = lnf_rec_fset(micd->rec, LNF_FLD_BREC1, data);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_rec_fset()");
+                return E_LNF;
+        }
+        ret = lnf_mem_write(micd->mem, micd->rec);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_write()");
+                return E_LNF;
+        }
+
+        return E_OK;
+}
+
+static int mem_write_raw_callback(char *data, size_t data_len, void *user)
+{
+        int ret;
+
+        ret = lnf_mem_write_raw((lnf_mem_t *)user, data, data_len);
+        if (ret != LNF_OK) {
+                print_err("LNF - lnf_mem_write_raw()");
+                return E_LNF;
+        }
+
+        return E_OK;
+}
+
+static int print_brec_callback(char *data, size_t data_len, void *user)
+{
+        (void)data_len;
+        (void)user;
+
+        return print_brec((const lnf_brec1_t *)data);
+}
+
+
+static int recv_loop(size_t slave_cnt, size_t rec_limit,
+                recv_callback_t recv_callback, void *user)
+{
+        int ret, err = E_OK, rec_len;
         char rec_buff[LNF_MAX_RAW_LEN]; //TODO: receive mutliple records
         MPI_Status status;
-        size_t active_slaves = slave_cnt; //every slave is active
+        size_t rec_cntr = 0, active_slaves = slave_cnt; //every slave is active
+        bool limit_exceeded = false;
 
         /* Data receiving loop. */
         while (active_slaves) {
@@ -145,27 +196,34 @@ static int mode_agg_recv_all(lnf_mem_t *mem, size_t slave_cnt)
                 MPI_Recv(rec_buff, LNF_MAX_RAW_LEN, MPI_BYTE, MPI_ANY_SOURCE,
                                 TAG_DATA, MPI_COMM_WORLD, &status);
 
-                /* Determine actual size of received message. */
+                /* Determine actual size of the received message. */
                 MPI_Get_count(&status, MPI_BYTE, &rec_len);
                 if (rec_len == 0) {
                         active_slaves--;
                         continue; //empty message -> slave finished
                 }
 
-                /* Store received record. */
-                ret = lnf_mem_write_raw(mem, rec_buff, rec_len);
-                if (ret != LNF_OK) {
-                        print_err("LNF - lnf_mem_write_raw()");
-                        return E_LNF;
+                if (limit_exceeded) {
+                        continue; //do not process but continue receiving
+                }
+
+                /* Call callback function for each received record. */
+                ret = recv_callback(rec_buff, rec_len, user);
+                if (ret != E_OK) {
+                        err = ret;
+                        break; //don't receive next message
+                }
+
+                if (++rec_cntr == rec_limit) {
+                        limit_exceeded = true;
                 }
         }
 
-        return E_OK;
+        return err;
 }
 
-int recv_loop(size_t slave_cnt, size_t rec_limit,
-                int (*rec_callback)(const lnf_brec1_t *rec, void *user),
-                void *user)
+static int irecv_loop(size_t slave_cnt, size_t rec_limit,
+                recv_callback_t recv_callback, void *user)
 {
         int ret, err = E_OK;
         char *data_buff[2][slave_cnt]; //two buffers per slave
@@ -235,10 +293,11 @@ int recv_loop(size_t slave_cnt, size_t rec_limit,
 
                 /* Call callback function for each received record. */
                 for (size_t i = 0; i < msg_size / sizeof (lnf_brec1_t); ++i) {
-                        ret = rec_callback(((lnf_brec1_t*)full_buff) + i, user);
+                        ret = recv_callback(full_buff + i * sizeof(lnf_brec1_t),
+                                        sizeof (lnf_brec1_t), user);
                         if (ret != E_OK) {
                                 err = ret;
-                                goto cleanup;
+                                goto cleanup; //don't receive next message
                         }
 
                         if (++rec_cntr == rec_limit) {
@@ -258,43 +317,9 @@ cleanup:
 }
 
 
-int print_brec_callback(const lnf_brec1_t *rec, void *user)
-{
-        (void)user;
-
-        return print_brec(rec);
-}
-
-
 static int mode_rec_main(size_t slave_cnt, size_t rec_limit)
 {
-        return recv_loop(slave_cnt, rec_limit, print_brec_callback, NULL);
-}
-
-
-struct mem_insert_callback_data {
-        lnf_mem_t *mem;
-        lnf_rec_t *rec;
-};
-
-
-int mem_insert_callback(const lnf_brec1_t *rec,
-                struct mem_insert_callback_data *user)
-{
-        int ret;
-
-        ret = lnf_rec_fset(user->rec, LNF_FLD_BREC1, rec);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_rec_fset()");
-                return E_LNF;
-        }
-        ret = lnf_mem_write(user->mem, user->rec);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_write()");
-                return E_LNF;
-        }
-
-        return E_OK;
+        return irecv_loop(slave_cnt, rec_limit, print_brec_callback, NULL);
 }
 
 
@@ -336,7 +361,7 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
         }
 
         /* Fill memory with records. */
-        ret = recv_loop(slave_cnt, rec_limit, mem_insert_callback,
+        ret = irecv_loop(slave_cnt, rec_limit, mem_write_callback,
                         &callback_data);
         if (ret != E_OK) {
                 err = ret;
@@ -381,7 +406,7 @@ static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
                 goto cleanup;
         }
 
-        ret = mode_agg_recv_all(mem, slave_cnt);
+        ret = recv_loop(slave_cnt, 0, mem_write_raw_callback, mem);
         if (ret != E_OK) {
                 err = ret;
                 goto cleanup;
@@ -411,7 +436,8 @@ static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
                         goto cleanup;
                 }
 
-                ret = mode_agg_recv_all(mem, slave_cnt);
+                ret = recv_loop(slave_cnt, rec_limit, mem_write_raw_callback,
+                                mem);
                 if (ret != E_OK) {
                         err = ret;
                         goto cleanup;
