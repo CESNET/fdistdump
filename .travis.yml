@@ -2,9 +2,10 @@ language: c
 
 before_install:
         - sudo apt-get update -q
-        - sudo apt-get install -q automake
         - sudo apt-get install -q openmpi-bin libopenmpi-dev
         - ./install_dependencies.sh
+        - export OMPI_CC="${CC}" #CC set by travis as MPI underlying compiler
+        - unset CC #unset CC, otherwise ./configure would not set mpicc as CC
 
 install:
         - autoreconf -i
