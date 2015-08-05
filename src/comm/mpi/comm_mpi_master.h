@@ -1,5 +1,5 @@
 /**
- * \file master.h
+ * \file comm_mpi_master.h
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
@@ -43,26 +43,59 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#ifndef COMM_MPI_MASTER_H
+#define COMM_MPI_MASTER_H
+
+#include "../../common.h"
+#include "../../master.h"
 
 #include <stddef.h> //size_t
 
-// Register name
-typedef struct global_context_s global_context_t;
+typedef struct master_params_s{
+        int none;
+} master_params_t;
+
+typedef struct master_context_s{
+        MPI_Request *requests; //[slave_cnt];
+        MPI_Status status;
+        char **data_buff[2]; //[slave_cnt]; //two buffers for each slave
+        bool *data_buff_idx; //[slave_cnt]; //current buffer index
+} master_context_t;
+
+/// Not used here
+int create_m_par_mpi (master_params_t **p_m_par);
+
+/// Not used here
+void free_m_par_mpi (master_params_t *m_par);
+
+/// Not used here, always return E_ARG
+int parse_arg_mpi (int opt, char *optarg, master_params_t *m_par);
 
 /**
- * TODO description
+ * TODO Description
  */
-typedef int (* recv_callback_t) (char *, size_t, void *);
+int init_master_ctx_mpi (master_context_t **m_ctx, master_params_t *m_par,
+                         size_t slave_cnt);
 
-/** \brief Master program function.
- *
- * \param[in] argc Count of program arguments (argc from main).
- * \param[in] argv Array of program arguments (argv from main).
- * \param[in] g_ctx Pointer to filled global_context structure.
- * \return E_OK on success, error code otherwise.
+/**
+ * TODO Description
  */
-int master(int argc, char **argv, global_context_t *g_ctx);
+void destroy_master_ctx_mpi (master_context_t **m_ctx, master_params_t *m_par,
+                         size_t slave_cnt);
 
-#endif //MASTER_H
+/// Broadcast task setup to all slave nodes.
+int bcast_task_setup_mpi(task_setup_t *t_setup);
+
+/**
+ * TODO Description
+ */
+int irecv_loop_mpi(master_context_t *m_ctx, size_t slave_cnt, size_t rec_limit,
+                recv_callback_t recv_callback, void *user);
+
+/**
+ * TODO Description
+ */
+int recv_loop_mpi(master_context_t *m_ctx, size_t slave_cnt, size_t rec_limit,
+                recv_callback_t recv_callback, void *user);
+
+#endif //COMM_MPI_MASTER_H

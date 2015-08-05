@@ -2,6 +2,7 @@
  * \file main.c
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
+ * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
 
@@ -42,84 +43,57 @@
  *
  */
 
+#include "common.h"
 #include "master.h"
 #include "slave.h"
-#include "common.h"
-#include "arg_parse.h"
+#include "comm/communication.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <getopt.h>
-#include <assert.h>
 
-#include <mpi.h>
 #include <libnf.h>
 
+extern inline void comm_interface_init (void);
 
-/* Global MPI data types. */
-MPI_Datatype agg_params_mpit, task_info_mpit, struct_tm_mpit;
-
-int main(int argc, char **argv)
+int main (int argc, char **argv)
 {
-        double duration;
-        int world_rank, world_size, ret;
-        struct cmdline_args args = { 0 };
+        //WATCH OUT: has to be called before any other communication function
+        comm_interface_init();
 
-        MPI_Init(&argc, &argv);
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+        int ret;
+        global_context_t global_ctx;
 
-        if (world_rank == ROOT_PROC) {
-                ret = arg_parse(&args, argc, argv);
-                switch (ret) {
-                case E_OK:
-                        break;
-                case E_HELP:
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_SUCCESS);
-                        return EXIT_SUCCESS;
-                        break;
-                case E_ARG:
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-                        return EXIT_FAILURE;
-                        break;
-                default:
-                        assert(!"unknown error code received");
-                        break;
-                }
+        //Global initialization, need to be done by both, master and slave
+        ret = comm_init_global(argc, argv, &global_ctx);
+        if (ret != E_OK) {
+                comm_fin_global( &global_ctx);
+                print_err("error in global initialization");
+                return EXIT_FAILURE;
         }
 
-        /* Start time measurement. */
-        MPI_Barrier(MPI_COMM_WORLD);
-        duration = -MPI_Wtime();
-
-        /* Create MPI data types (global variables). */
-        create_agg_params_mpit();
-        create_struct_tm_mpit();
-        create_task_info_mpit();
-
+        #ifdef FDD_SPLIT_BINARY_MASTER
+        ret = master(argc, argv, &global_ctx);
+        #elifdef FDD_SPLIT_BINARY_SLAVE
+        ret = slave(argc, argv, &global_ctx);
+        #else
         /* Split master and slave code. */
-        if (world_rank == ROOT_PROC) {
-                master(world_rank, world_size, &args);
+        if (global_ctx.side == FDD_MASTER) {
+                ret = master(argc, argv, &global_ctx);
         } else {
-                slave(world_rank, world_size);
+                ret = slave(argc, argv, &global_ctx);
+        }
+        #endif //FDD_SPLIT_BINARY_MASTER
+        if (ret != E_OK) {
+                comm_fin_global(&global_ctx);
+                return EXIT_FAILURE;
         }
 
-        /* End time measurement. */
-        MPI_Barrier(MPI_COMM_WORLD);
-        duration += MPI_Wtime();
-
-        if (world_rank == ROOT_PROC) {
-                /* CPUs, slaves, duration */
-                printf("%d\t%d\t%f\n", world_size, world_size - 1, duration);
+        //Global finalization, need to be done by both, master and slave
+        ret = comm_fin_global(&global_ctx);
+        if (ret != E_OK) {
+                print_err("error in global finalization");
+                return EXIT_FAILURE;
         }
 
-        /* Free MPI data types (global variables). */
-        free_task_info_mpit();
-        free_struct_tm_mpit();
-        free_agg_params_mpit();
-
-        MPI_Finalize();
         return EXIT_SUCCESS;
 }

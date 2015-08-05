@@ -1,5 +1,5 @@
 /**
- * \file master.h
+ * \file comm_mpi_slave.h
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
@@ -43,26 +43,53 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#ifndef COMM_MPI_SLAVE_H
+#define COMM_MPI_SLAVE_H
 
-#include <stddef.h> //size_t
+//#include "comm_mpi.h"
+#include "../../slave.h"
+//
+//#include <mpi.h>
+//#include <stdbool.h>
+//
+typedef struct slave_params_s{
+        int none;
+} slave_params_t;
+//
+//typedef struct slave_context{
+//        MPI_Request *requests;//[slave_cnt];
+//        MPI_Status status;
+//        char **data_buff[2];//[slave_cnt]; //two buffers for each slave
+//        bool *data_buff_idx;//[slave_cnt]; //current buffer index
+//} slave_context;
 
-// Register name
-typedef struct global_context_s global_context_t;
+/// Not used here
+int create_s_par_mpi (slave_params_t **p_s_par);
+
+/// Not used here
+void free_s_par_mpi (slave_params_t *s_par);
+
+/// Not used here, always return E_ARG
+int parse_arg_slave_mpi (int opt, char *optarg, slave_params_t *s_par);
+
+/// Receive (static size) part of task setup. Internally using bcast.
+int recv_task_static_setup_mpi(task_setup_static_t *t_setup);
 
 /**
  * TODO description
  */
-typedef int (* recv_callback_t) (char *, size_t, void *);
+int isend_bytes_mpi(void *src, size_t bytes);
 
-/** \brief Master program function.
- *
- * \param[in] argc Count of program arguments (argc from main).
- * \param[in] argv Array of program arguments (argv from main).
- * \param[in] g_ctx Pointer to filled global_context structure.
- * \return E_OK on success, error code otherwise.
+/**
+ * TODO description
  */
-int master(int argc, char **argv, global_context_t *g_ctx);
+int send_loop_mpi(slave_task_t *st);
 
-#endif //MASTER_H
+//int send_top_k_records_mpi(slave_task *task, global_context_t *g_ctx);
+//int send_all_sent_mpi();
+//int recv_topn_ids_mpi(size_t n, lnf_mem_t *mem, lnf_mem_cursor_t **cursors);
+//int send_topn_records_mpi(size_t n, lnf_mem_t *mem, lnf_mem_cursor_t **cursors);
+//int task_await_new_mpi(slave_task *t);
+//
+
+#endif //COMM_MPI_SLAVE_H

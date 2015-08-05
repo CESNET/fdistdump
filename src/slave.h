@@ -46,16 +46,56 @@
 #ifndef SLAVE_H
 #define SLAVE_H
 
+#include "common.h"
+
 #include <stddef.h> //size_t
+#include <limits.h> //PATH_MAX
+#include <dirent.h> //DIR
+
+#include <libnf.h>
+
+
+// Register name
+typedef struct global_context_s global_context_t;
+
+
+/**
+ * TODO: Desc
+*/
+typedef enum {
+        DATA_SOURCE_FILE,
+        DATA_SOURCE_DIR,
+        DATA_SOURCE_INTERVAL,
+} data_source_t;
+
+/**
+ * TODO: Desc
+*/
+typedef struct slave_task_s {
+        task_setup_static_t setup;
+
+        lnf_rec_t *rec;
+        lnf_filter_t *filter;
+        lnf_mem_t *agg;
+
+        size_t proc_rec_cntr; //processed record counter
+
+        data_source_t data_source; //how flow files are obtained
+        char path_str[PATH_MAX];
+        DIR *dir_ctx; //used in case of directory as data source
+
+        char cur_file_path[PATH_MAX]; //current flow file absolute path
+
+        int sort_key; //LNF field set as key for sorting in memory
+}slave_task_t;
 
 /** \brief Slave program function.
  *
- * Code executed by slave processes, usually with rank != 0.
- *
- * \param[in] world_rank MPI_COMM_WORLD rank.
- * \param[in] world_size MPI_COMM_WORLD size.
- * \return Number of records read (by one process).
+ * \param[in] argc Count of program arguments (argc from main).
+ * \param[in] argv Array of program arguments (argv from main).
+ * \param[in] g_ctx Pointer to filled global_context structure.
+ * \return E_OK on success, error code otherwise.
  */
-int slave(int world_rank, int world_size);
+int slave(int argc, char **argv, global_context_t *g_ctx);
 
 #endif //SLAVE_H

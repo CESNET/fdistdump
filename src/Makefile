@@ -1,5 +1,6 @@
 #file: Makefile
 #author: Jan Wrona, <wrona@cesnet.cz>
+#author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 #date: 2015
 
 #Copyright (C) 2015 CESNET
@@ -39,11 +40,16 @@
 ################################################################################
 # files
 TARGET = fdistdump
-SOURCES = main.c master.c slave.c common.c arg_parse.c
-HEADERS = $(SOURCES:.c=.h)
+SOURCES = main.c common.c master.c slave.c arg_parse.c
+HEADERS = $(SOURCES:.c=.h) comm/communication.h
 OBJECTS = $(SOURCES:.c=.o)
 OTHER_FILES = Makefile
 
+# communication
+MPI_SOURCES = comm/mpi/comm_mpi.c comm/mpi/comm_mpi_master.c \
+	 comm/mpi/comm_mpi_slave.c
+MPI_HEADERS = $(MPI_SOURCES:.c=.h)
+MPI_OBJECTS = $(MPI_SOURCES:.c=.o)
 ################################################################################
 # compiler, linker and options
 CC = mpicc
@@ -63,7 +69,9 @@ LIBS = -lnf
 
 ################################################################################
 #build rules
-all: $(SOURCES) $(TARGET)
+all: mpi $(SOURCES) $(TARGET)
+
+mpi: $(MPI_SOURCES) $(MPI_OBJECTS)
 
 debug: CCFLAGS += -DDEBUG
 debug: all
@@ -71,12 +79,15 @@ debug: all
 ndebug: CCFLAGS += -DNDEBUG
 ndebug: all
 
-$(TARGET): $(OBJECTS)
-	$(LINK) $(LINKFLAGS) $(LIBS) -o $(TARGET) $(OBJECTS)
+$(TARGET): $(OBJECTS) $(MPI_OBJECTS)
+	$(LINK) $(LINKFLAGS) $(LIBS) -o $(TARGET) $(OBJECTS) $(MPI_OBJECTS)
 
 ################################################################################
 #other rules
-clean:
+clean_mpi:
+	rm -f $(MPI_OBJECTS)
+
+clean: clean_mpi
 	rm -f $(OBJECTS)
 
 distclean: clean

@@ -46,9 +46,8 @@
 #define ARG_PARSE_H
 
 #include "common.h"
+#include "comm/communication.h"
 
-#include <stddef.h> //size_t
-#include <stdbool.h>
 
 #define AGG_SEPARATOR "," //srcport,srcip
 #define STAT_SEPARATOR "/" //statistic/order
@@ -57,35 +56,42 @@
 #define DEFAULT_STAT_ORD "flows"
 #define DEFAULT_STAT_LIMIT 10
 
-struct cmdline_args {
-        working_mode_t working_mode; //working mode (records, aggregation, topN)
 
-        struct agg_params agg_params[MAX_AGG_PARAMS]; //aggregation parameters
-        size_t agg_params_cnt; //aggregation parameters count
-
-        char *filter_str; //filter expression string
-        size_t rec_limit; //read/aggregate/topN record limit
-
-        char *path_str; //path string
-        struct tm interval_begin, interval_end; //begin and end of interval
-
-        bool use_fast_topn; //enables fast top-N algorithm
-};
-
-
-/** \brief Parse command line arguments and fill params struct.
+/** \brief Parse command line arguments and fill task setup and master params.
  *
  * If all arguments are successfully parsed and stored, E_OK is returned.
  * If help was required, help string is printed and E_HELP is returned.
  * On error (invalid options or arguments, ...), error string is printed and
  * E_ARG is returned.
  *
- * \param[out] params Structure with parsed command line parameters and other
- *                   program settings.
  * \param[in] argc Argument count.
  * \param[in] argv Command line argument strings.
+  * \param[out] t_setup Structure with task setup filled according to program
+               arguments.
+ * \param[out] m_par Structure for master specific parameters (depends on used
+                     communication implementation).
  * \return Error code. E_OK, E_HELP or E_ARG.
  */
-int arg_parse(struct cmdline_args *args, int argc, char **argv);
+int arg_parse(int argc, char **argv, task_setup_t *t_setup,
+              master_params_t *m_par);
+
+#ifdef FDD_SPLIT_BINARY_SLAVE
+/** \brief Parse command line arguments for slave part and fill slave params.
+ *
+ * If all arguments are successfully parsed and stored, E_OK is returned.
+ * If help was required, help string is printed and E_HELP is returned.
+ * On error (invalid options or arguments, ...), error string is printed and
+ * E_ARG is returned.
+ *
+ * \param[in] argc Argument count.
+ * \param[in] argv Command line argument strings.
+  * \param[out] t_setup Structure with task setup filled according to program
+               arguments.
+ * \param[out] s_par Structure for slave specific parameters (depends on used
+                     communication implementation).
+ * \return Error code. E_OK, E_HELP or E_ARG.
+ */
+int arg_parse_slave(int argc, char **argv, slave_params_t *s_par);
+#endif // FDD_SPLIT_BINARY_SLAVE
 
 #endif //ARG_PARSE_H
