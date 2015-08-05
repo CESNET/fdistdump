@@ -1,0 +1,19 @@
+#"autoreconf -i" products
+/Makefile.in
+/aclocal.m4
+/autom4te.cache/
+/config.h.in
+/configure
+/depcomp
+/install-sh
+/missing
+/src/Makefile.in
+
+#"./configure" products
+/Makefile
+/config.h
+/config.log
+/config.status
+/src/.deps/
+/src/Makefile
+/stamp-h1

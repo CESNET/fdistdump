@@ -1,0 +1,18 @@
+language: c
+
+before_install:
+        - sudo apt-get update -q
+        - sudo apt-get install -q automake
+        - sudo apt-get install -q openmpi-bin libopenmpi-dev
+        - ./install_dependencies.sh
+
+install:
+        - autoreconf -i
+        - ./configure
+        - make
+
+#before_script:
+#script:
+#after_success:
+#after_failure:
+#after_script:
