@@ -9,7 +9,9 @@ fi
 
 case $1 in
         mpich)
-                sudo apt-get install -q mpich;;
+                #default MPICH version in Ubuntu 12.10 LTS (1) doesn't comply
+                #MPI 2.2, we need at least MPICH 2
+                sudo apt-get install -q mpich2 libmpich2-dev;;
         openmpi)
                 #default OMPI version in Ubuntu 12.10 LTS (1.4) doesn't comply
                 #MPI 2.2, we need at least OMPI 1.5

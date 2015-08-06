@@ -18,7 +18,6 @@ before_install:
 install:
         - autoreconf -i
         - ./configure
-        - $CC --version
         - make
 
 #before_script:
