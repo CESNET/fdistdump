@@ -92,21 +92,21 @@ typedef enum { //working modes
 
 
 /* Data types. */
-//WATCH OUT: reflect changes also in agg_params_mpit
-#define AGG_PARAMS_T_ELEMS 4
-struct agg_params {
+//WATCH OUT: reflect changes also in mpi_struct_agg_param
+#define STRUCT_AGG_PARAM_ELEMS 4
+struct agg_param {
         int field;
         int flags;
         int numbits;
         int numbits6;
 };
 
-//WATCH OUT: reflect changes also in task_info_mpit
-#define TASK_INFO_T_ELEMS 10
-typedef struct {
+//WATCH OUT: reflect changes also in mpi_struct_task_info
+#define STRUCT_TASK_INFO_ELEMS 9
+struct task_info {
         working_mode_t working_mode; //working mode
 
-        struct agg_params agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
+        struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
         size_t agg_params_cnt; //aggregation parameters count
 
         size_t filter_str_len; //filter expression string length
@@ -114,17 +114,13 @@ typedef struct {
 
         size_t rec_limit; //record/aggregation limit
 
-        size_t slave_cnt; //active slave count
-        /* note (MPI): this information has to be sent explicitly, since there
-           could be another framework than MPI used for communication */
-
         struct tm interval_begin; //begin and end of time interval
         struct tm interval_end;
 
         bool use_fast_topn; //enables fast top-N algorithm
-} task_info_t;
+};
 
-//WATCH OUT: reflect changes in struct tm from time.h also in struct_tm_mpit
+//WATCH OUT: reflect changes in struct tm from time.h also in mpi_struct_tm
 #define STRUCT_TM_ELEMS 9
 
 /* MPI related */
@@ -136,7 +132,6 @@ enum { //tags
         TAG_FILTER,
         TAG_AGG,
         TAG_DATA,
-        TAG_TOPN_ID,
 };
 
 enum { //control commands
@@ -180,14 +175,14 @@ int print_brec(const lnf_brec1_t *brec);
 void print_err(const char *format, ...);
 
 
-void create_agg_params_mpit(void);
-void free_agg_params_mpit(void);
-void create_struct_tm_mpit(void);
-void free_struct_tm_mpit(void);
-void create_task_info_mpit(void);
-void free_task_info_mpit(void);
+void create_mpi_struct_agg_param(void);
+void free_mpi_struct_agg_param(void);
+void create_mpi_struct_tm(void);
+void free_mpi_struct_tm(void);
+void create_mpi_struct_task_info(void);
+void free_mpi_struct_task_info(void);
 
-int mem_setup(lnf_mem_t *mem, const struct agg_params *ap, size_t ap_cnt);
+int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt);
 int mem_print(lnf_mem_t *mem, size_t limit);
 
 /**

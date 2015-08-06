@@ -56,7 +56,8 @@
 
 
 /* Global MPI data types. */
-extern MPI_Datatype agg_params_mpit, task_info_mpit, struct_tm_mpit;
+extern MPI_Datatype mpi_struct_agg_param, mpi_struct_task_info,
+       mpi_struct_tm;
 
 
 /** \brief Convert libnf address to string.
@@ -138,77 +139,78 @@ void print_err(const char *format, ...)
 }
 
 
-void create_agg_params_mpit(void)
+void create_mpi_struct_agg_param(void)
 {
-        int block_lengths[AGG_PARAMS_T_ELEMS] = {1, 1, 1, 1};
-        MPI_Aint displacements[AGG_PARAMS_T_ELEMS];
-        MPI_Datatype types[AGG_PARAMS_T_ELEMS] = {MPI_INT, MPI_INT, MPI_INT,
-                MPI_INT};
+        int block_lengths[STRUCT_AGG_PARAM_ELEMS] = {1, 1, 1, 1 /*, NEW */};
+        MPI_Aint displacements[STRUCT_AGG_PARAM_ELEMS];
+        MPI_Datatype types[STRUCT_AGG_PARAM_ELEMS] = {MPI_INT, MPI_INT, MPI_INT,
+                MPI_INT /*, NEW */};
 
-        displacements[0] = offsetof(struct agg_params, field);
-        displacements[1] = offsetof(struct agg_params, flags);
-        displacements[2] = offsetof(struct agg_params, numbits);
-        displacements[3] = offsetof(struct agg_params, numbits6);
+        displacements[0] = offsetof(struct agg_param, field);
+        displacements[1] = offsetof(struct agg_param, flags);
+        displacements[2] = offsetof(struct agg_param, numbits);
+        displacements[3] = offsetof(struct agg_param, numbits6);
+        /* displacements[NEW] = offsetof(struct agg_param, NEW); */
 
-        MPI_Type_create_struct(AGG_PARAMS_T_ELEMS, block_lengths, displacements,
-                        types, &agg_params_mpit);
-        MPI_Type_commit(&agg_params_mpit);
+        MPI_Type_create_struct(STRUCT_AGG_PARAM_ELEMS, block_lengths,
+                        displacements, types, &mpi_struct_agg_param);
+        MPI_Type_commit(&mpi_struct_agg_param);
 }
 
 
-void free_agg_params_mpit(void)
+void free_mpi_struct_agg_param(void)
 {
-        MPI_Type_free(&agg_params_mpit);
+        MPI_Type_free(&mpi_struct_agg_param);
 }
 
 
-void create_struct_tm_mpit(void)
+void create_mpi_struct_tm(void)
 {
-        MPI_Type_contiguous(STRUCT_TM_ELEMS, MPI_INT, &struct_tm_mpit);
-        MPI_Type_commit(&struct_tm_mpit);
+        MPI_Type_contiguous(STRUCT_TM_ELEMS, MPI_INT, &mpi_struct_tm);
+        MPI_Type_commit(&mpi_struct_tm);
 }
 
 
-void free_struct_tm_mpit(void)
+void free_mpi_struct_tm(void)
 {
-        MPI_Type_free(&struct_tm_mpit);
+        MPI_Type_free(&mpi_struct_tm);
 }
 
 
-void create_task_info_mpit(void)
+void create_mpi_struct_task_info(void)
 {
-        int block_lengths[TASK_INFO_T_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
-                1, 1, 1, 1, 1};
-        MPI_Aint displacements[TASK_INFO_T_ELEMS];
-        MPI_Datatype types[TASK_INFO_T_ELEMS] = {MPI_INT, agg_params_mpit,
-                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
-                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, struct_tm_mpit,
-                struct_tm_mpit, MPI_C_BOOL};
+        int block_lengths[STRUCT_TASK_INFO_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
+                1, 1, 1, 1 /*, NEW */};
+        MPI_Aint displacements[STRUCT_TASK_INFO_ELEMS];
+        MPI_Datatype types[STRUCT_TASK_INFO_ELEMS] = {MPI_INT,
+                mpi_struct_agg_param, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
+                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, mpi_struct_tm,
+                mpi_struct_tm, MPI_C_BOOL /*, NEW */};
 
-        displacements[0] = offsetof(task_info_t, working_mode);
-        displacements[1] = offsetof(task_info_t, agg_params);
-        displacements[2] = offsetof(task_info_t, agg_params_cnt);
-        displacements[3] = offsetof(task_info_t, filter_str_len);
-        displacements[4] = offsetof(task_info_t, path_str_len);
-        displacements[5] = offsetof(task_info_t, rec_limit);
-        displacements[6] = offsetof(task_info_t, slave_cnt);
-        displacements[7] = offsetof(task_info_t, interval_begin);
-        displacements[8] = offsetof(task_info_t, interval_end);
-        displacements[9] = offsetof(task_info_t, use_fast_topn);
+        displacements[0] = offsetof(struct task_info, working_mode);
+        displacements[1] = offsetof(struct task_info, agg_params);
+        displacements[2] = offsetof(struct task_info, agg_params_cnt);
+        displacements[3] = offsetof(struct task_info, filter_str_len);
+        displacements[4] = offsetof(struct task_info, path_str_len);
+        displacements[5] = offsetof(struct task_info, rec_limit);
+        displacements[6] = offsetof(struct task_info, interval_begin);
+        displacements[7] = offsetof(struct task_info, interval_end);
+        displacements[8] = offsetof(struct task_info, use_fast_topn);
+        /* displacements[NEW] = offsetof(struct task_info, NEW); */
 
-        MPI_Type_create_struct(TASK_INFO_T_ELEMS, block_lengths,
-                        displacements, types, &task_info_mpit);
-        MPI_Type_commit(&task_info_mpit);
+        MPI_Type_create_struct(STRUCT_TASK_INFO_ELEMS, block_lengths,
+                        displacements, types, &mpi_struct_task_info);
+        MPI_Type_commit(&mpi_struct_task_info);
 }
 
 
-void free_task_info_mpit(void)
+void free_mpi_struct_task_info(void)
 {
-        MPI_Type_free(&task_info_mpit);
+        MPI_Type_free(&mpi_struct_task_info);
 }
 
 
-int mem_setup(lnf_mem_t *mem, const struct agg_params *ap, size_t ap_cnt)
+int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt)
 {
         int ret;
 

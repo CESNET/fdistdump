@@ -60,7 +60,7 @@
 struct cmdline_args {
         working_mode_t working_mode; //working mode (records, aggregation, topN)
 
-        struct agg_params agg_params[MAX_AGG_PARAMS]; //aggregation parameters
+        struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation parameters
         size_t agg_params_cnt; //aggregation parameters count
 
         char *filter_str; //filter expression string
@@ -75,7 +75,7 @@ struct cmdline_args {
 
 /** \brief Parse command line arguments and fill params struct.
  *
- * If all arguments are successfully parsed and stored, E_OK is returned.
+ * If all arguments are successfuly parsed and stored, E_OK is returned.
  * If help was required, help string is printed and E_HELP is returned.
  * On error (invalid options or arguments, ...), error string is printed and
  * E_ARG is returned.

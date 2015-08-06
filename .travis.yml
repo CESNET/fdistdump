@@ -2,7 +2,8 @@ language: c
 
 before_install:
         - sudo apt-get update -q
-        - sudo apt-get install -q openmpi-bin libopenmpi-dev
+          #default OMPI version (1.4) doesn't comply MPI 2.2, need at least 1.5
+        - sudo apt-get install -q openmpi1.5-bin libopenmpi1.5-dev
         - ./install_dependencies.sh
         - export OMPI_CC="${CC}" #CC set by travis as MPI underlying compiler
         - unset CC #unset CC, otherwise ./configure would not set mpicc as CC

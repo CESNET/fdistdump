@@ -55,17 +55,17 @@
 
 
 /* Global MPI data types. */
-extern MPI_Datatype task_info_mpit;
+extern MPI_Datatype mpi_struct_task_info;
 
 
-static void fill_task_info(task_info_t *ti, const struct cmdline_args *args,
-                size_t slave_cnt)
+static void fill_task_info(struct task_info *ti,
+                const struct cmdline_args *args)
 {
         ti->working_mode = args->working_mode;
         ti->agg_params_cnt = args->agg_params_cnt;
 
         memcpy(ti->agg_params, args->agg_params, args->agg_params_cnt *
-                        sizeof(struct agg_params));
+                        sizeof(struct agg_param));
 
         ti->rec_limit = args->rec_limit;
 
@@ -79,7 +79,6 @@ static void fill_task_info(task_info_t *ti, const struct cmdline_args *args,
         } else {
                 ti->path_str_len = strlen(args->path_str);
         }
-        ti->slave_cnt = slave_cnt;
 
         ti->interval_begin = args->interval_begin;
         ti->interval_end = args->interval_end;
@@ -324,7 +323,7 @@ static int mode_rec_main(size_t slave_cnt, size_t rec_limit)
 
 
 static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
-                const struct agg_params *ap, size_t ap_cnt)
+                const struct agg_param *ap, size_t ap_cnt)
 {
         int ret, err = E_OK;
         struct mem_insert_callback_data callback_data = {0};
@@ -363,7 +362,6 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
 
         /* Fill memory with records. */
         if (rec_limit != 0) { //fast ordering, minimum of records exchanged
-                printf("Fast ordering mode.\n");
                 ret = recv_loop(slave_cnt, 0, mem_write_raw_callback,
                                 callback_data.mem);
                 if (ret != E_OK) {
@@ -371,7 +369,6 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
                         goto cleanup;
                 }
         } else { //slow ordering, all records exchanged
-                printf("Slow ordering mode.\n");
                 ret = irecv_loop(slave_cnt, 0, mem_write_callback,
                                 &callback_data);
                 if (ret != E_OK) {
@@ -399,7 +396,7 @@ cleanup:
 
 
 static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
-                const struct agg_params *ap, size_t ap_cnt, bool use_fast_topn)
+                const struct agg_param *ap, size_t ap_cnt, bool use_fast_topn)
 {
         int ret, err = E_OK;
         lnf_mem_t *mem;
@@ -477,13 +474,13 @@ int master(int world_rank, int world_size, const struct cmdline_args *args)
         int ret, err = E_OK;
         const size_t slave_cnt = world_size - 1; //all nodes without master
 
-        task_info_t ti = {0};
+        struct task_info ti = {0};
 
         /* Fill task info struct for slaves (working mode etc). */
-        fill_task_info(&ti, args, slave_cnt);
+        fill_task_info(&ti, args);
 
         /* Broadcast task info, optional filter string and path string. */
-        MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Bcast(&ti, 1, mpi_struct_task_info, ROOT_PROC, MPI_COMM_WORLD);
         if (ti.filter_str_len > 0) {
                 MPI_Bcast(args->filter_str, ti.filter_str_len, MPI_CHAR,
                                 ROOT_PROC, MPI_COMM_WORLD);

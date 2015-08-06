@@ -66,7 +66,7 @@
 #define LOOKUP_CURSOR_INIT_SIZE 1024
 
 
-extern MPI_Datatype task_info_mpit;
+extern MPI_Datatype mpi_struct_task_info;
 
 typedef enum {
         DATA_SOURCE_FILE,
@@ -81,7 +81,6 @@ struct slave_task {
         lnf_mem_t *agg;
         size_t rec_limit; //record limit
         size_t proc_rec_cntr; //processed record counter
-        size_t slave_cnt; //slave count
 
         data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX];
@@ -108,7 +107,7 @@ static void isend_bytes(void *src, size_t bytes, MPI_Request *req)
 static void task_process_file(struct slave_task *st)
 {
         size_t file_rec_cntr = 0, file_proc_rec_cntr = 0;
-        int ret, err = LNF_OK;
+        int ret, err = E_OK;
 
         lnf_file_t *file;
 
@@ -269,9 +268,9 @@ static void task_free(struct slave_task *st)
 static int task_await_new(struct slave_task *st)
 {
         int ret;
-        task_info_t ti;
+        struct task_info ti;
 
-        MPI_Bcast(&ti, 1, task_info_mpit, ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Bcast(&ti, 1, mpi_struct_task_info, ROOT_PROC, MPI_COMM_WORLD);
 
         if (ti.filter_str_len > 0) { //have filter epxression
                 char filter_str[ti.filter_str_len + 1];
@@ -292,7 +291,6 @@ static int task_await_new(struct slave_task *st)
 
         st->working_mode = ti.working_mode;
         st->rec_limit = ti.rec_limit;
-        st->slave_cnt = ti.slave_cnt;
         st->interval_begin = ti.interval_begin;
         st->interval_end = ti.interval_end;
         st->use_fast_topn = ti.use_fast_topn;
@@ -439,7 +437,7 @@ cleanup:
 }
 
 
-int fast_topn_send_k(struct slave_task *st)
+int fast_topn_send_k(struct slave_task *st, size_t slave_cnt)
 {
         int ret, err = E_OK, rec_len;
         lnf_mem_cursor_t *read_cursor;
@@ -488,7 +486,7 @@ int fast_topn_send_k(struct slave_task *st)
         if (ret == LNF_OK) {
                 ret = lnf_rec_fget(st->rec, st->sort_key, &threshold);
                 assert(ret == LNF_OK);
-                threshold /= st->slave_cnt;
+                threshold /= slave_cnt;
         } else {
                 print_err("LNF - lnf_mem_read_c()");
                 err = E_LNF;
@@ -625,10 +623,10 @@ cleanup:
 
 int slave(int world_rank, int world_size)
 {
-        (void)world_rank; (void)world_size;
-        int ret, err = LNF_OK;
-
-        struct slave_task st = { 0 };
+        (void)world_rank;
+        int ret, err = E_OK;
+        const size_t slave_cnt = world_size - 1; //all nodes without master
+        struct slave_task st = {0};
 
         ret = task_await_new(&st);
         if (ret != E_OK) {
@@ -665,7 +663,7 @@ int slave(int world_rank, int world_size)
                 break;
         case MODE_AGG:
                 if (st.use_fast_topn) {
-                        ret = fast_topn_send_k(&st);
+                        ret = fast_topn_send_k(&st, slave_cnt);
                         if (ret != E_OK) {
                                 err = ret;
                                 goto task_done_lbl;

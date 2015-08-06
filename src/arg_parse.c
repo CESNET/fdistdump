@@ -85,7 +85,7 @@ static int str_to_tm(struct tm *time, const char *time_str)
                 ret = strptime(time_str, time_formats[idx], time);
 
                 if (ret != NULL && *ret == '\0') {
-                        return E_OK; //conversion successfull
+                        return E_OK; //conversion successful
                 }
         }
 
@@ -150,9 +150,9 @@ static int set_interval(struct cmdline_args *args, char *interval_arg_str)
  * separated with commas, maximum number of arguments is MAX_AGG_PARAMS.
  * Individual arguments are parsed by libnf function lnf_fld_parse(), see libnf
  * documentation for more information.
- * If argument is successfully parsed, next agg_params struct is filled and
- * agg_params_cnt is incremented. If field allready exists, it is overwritten.
- * If all arguments are successfully parsed, E_OK is returned. On error, content
+ * If argument is successfuly parsed, next agg_param struct is filled and
+ * agg_params_cnt is incremented. If field already exists, it is overwritten.
+ * If all arguments are successfuly parsed, E_OK is returned. On error, content
  * of agg_params and agg_params_cnt is undefined and E_ARG is returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
@@ -190,7 +190,7 @@ static int set_agg(struct cmdline_args *args, char *agg_arg_str)
                 ret = lnf_fld_info(fld, LNF_FLD_INFO_AGGR, &agg, sizeof (agg));
                 assert(ret == LNF_OK); //should not happen
 
-                /* Look if this field is allready in. */
+                /* Look if this field is already in. */
                 for (idx = 0; idx < args->agg_params_cnt; ++idx) {
                         if (args->agg_params[idx].field == fld) {
                                 break; //found the same field -> overwrite it
@@ -218,11 +218,10 @@ static int set_agg(struct cmdline_args *args, char *agg_arg_str)
 /** \brief Parse order string and save order parameters.
  *
  * Function tries to parse order string, fills agg_params and agg_params_cnt
- * with appropriate value (because ordering implies aggregation). String is
- * parsed by libnf function lnf_fld_parse(), see libnf documentation for more
- * information.
- * If argument is successfully parsed next agg_params struct is filled,
- * agg_params_cnt is incremented and E_OK is returned. If there allready is sort
+ * with appropriate value. String is parsed by libnf function lnf_fld_parse(),
+ * see libnf documentation for more information.
+ * If argument is successfuly parsed next agg_params struct is filled,
+ * agg_params_cnt is incremented and E_OK is returned. If there already is sort
  * flag among aggregation parameters, overwrite this parameter with new field
  * and sort flag. On error (bad string, maximum aggregation count exceeded, bad
  * numbers of bits, ...), content of agg_params and agg_params_cnt is kept
@@ -289,8 +288,8 @@ static int set_order(struct cmdline_args *args, char *order_str)
  * "aggragation[/order]". Aggregation is passed to set_agg() and order, if set,
  * is passed to set_order(). If order is not set, DEFAULT_STAT_ORD is used.
  * If limit was not set yet (-l parameter), DEFAULT_STAT_LIMIT is used.
- * If statistic string is successfully parsed, next agg_params struct is filled,
- * agg_params_cnt is incremented and E_OK is returned. If field allready exists,
+ * If statistic string is successfuly parsed, next agg_params struct is filled,
+ * agg_params_cnt is incremented and E_OK is returned. If field already exists,
  * it is overwritten. On error, content of agg_params and agg_params_cnt is
  * undefined and E_ARG is returned.
  *
@@ -332,6 +331,7 @@ static int set_stat(struct cmdline_args *args, char *stat_arg_str)
                 return E_ARG;
         }
 
+        //TODO: shouldn't overwrite previous "-l 0" argument with default one
         if (args->rec_limit == 0) {
                 args->rec_limit = DEFAULT_STAT_LIMIT;
         }
@@ -374,7 +374,7 @@ static int set_filter(struct cmdline_args *args, char *filter_str)
 /** \brief Check, convert and save limit string.
  *
  * Function converts limit string into unsigned integer. If string is correct
- * and conversion was successfull, args->limit is set and E_OK is returned.
+ * and conversion was successful, args->limit is set and E_OK is returned.
  * On error (overflow, invalid characters, negative value, ...) args struct is
  * kept untouched and E_ARG is returned.
  *
@@ -449,7 +449,7 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
         while (!bad_arg && !help) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
                 if (opt == -1) {
-                        break; //all options processed successfully
+                        break; //all options processed successfuly
                 }
 
                 switch (opt) {
@@ -501,7 +501,7 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                 return E_HELP;
         }
 
-        if (bad_arg) { //error allready reported
+        if (bad_arg) { //error already reported
                 return E_ARG;
         }
         if (optind != argc) //remaining arguments
@@ -563,7 +563,7 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
 
         printf("aggregation: \n");
         for (size_t i = 0; i < args->agg_params_cnt; ++i) {
-                struct agg_params *ap = args->agg_params + i;
+                struct agg_param *ap = args->agg_params + i;
                 printf("\t%d, 0x%x, (%d, %d)\n", ap->field, ap->flags,
                                 ap->numbits, ap->numbits6);
         }

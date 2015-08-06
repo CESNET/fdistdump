@@ -12,6 +12,13 @@ CFLAGS="$CFLAGS -pedantic -W -Wall -Wextra -Winit-self -Wcast-align \
 AC_SEARCH_LIBS([lnf_open], [nf], [], [AC_MSG_ERROR([unable to find the libnf \
                 library])])
 
+#check MPI version
+AC_SEARCH_LIBS([MPI_Send], [mpi], [],
+               [AC_MSG_ERROR([need MPI version >= 2.2])]) #version 1 needed
+AC_SEARCH_LIBS([MPI_Put], [mpi], [],
+               [AC_MSG_ERROR([need MPI version >= 2.2])]) #version 2 nedded
+AC_SEARCH_LIBS([MPI_Ibarrier], [mpi]) #version 3 not needed
+
 #output
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([Makefile src/Makefile])
