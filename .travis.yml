@@ -1,9 +1,16 @@
 language: c
 
+compiler:
+        - gcc
+        - clang
+
+env:
+        - MPI=openmpi
+        - MPI=mpich
+
 before_install:
         - sudo apt-get update -q
-          #default OMPI version (1.4) doesn't comply MPI 2.2, need at least 1.5
-        - sudo apt-get install -q openmpi1.5-bin libopenmpi1.5-dev
+        - ./travis_install_mpi.sh $MPI
         - ./install_dependencies.sh
         - export OMPI_CC="${CC}" #CC set by travis as MPI underlying compiler
         - unset CC #unset CC, otherwise ./configure would not set mpicc as CC
@@ -21,3 +28,6 @@ script:
 #after_success:
 #after_failure:
 #after_script:
+
+notifications:
+        email: false
