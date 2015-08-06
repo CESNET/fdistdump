@@ -46,23 +46,17 @@
 #ifndef MASTER_H
 #define MASTER_H
 
-#include <stddef.h> //size_t
-
-// Register name
-typedef struct global_context_s global_context_t;
-
-/**
- * TODO description
- */
-typedef int (* recv_callback_t) (char *, size_t, void *);
+#include "arg_parse.h"
 
 /** \brief Master program function.
  *
- * \param[in] argc Count of program arguments (argc from main).
- * \param[in] argv Array of program arguments (argv from main).
- * \param[in] g_ctx Pointer to filled global_context structure.
- * \return E_OK on success, error code otherwise.
+ * Code executed by master process, usually with rank 0.
+ *
+ * \param[in] world_rank MPI_COMM_WORLD rank.
+ * \param[in] world_size MPI_COMM_WORLD size.
+ * \param[in] args Command line parameters.
+ * \return Error code.
  */
-int master(int argc, char **argv, global_context_t *g_ctx);
+int master(int world_rank, int world_size, const struct cmdline_args *args);
 
 #endif //MASTER_H

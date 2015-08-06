@@ -46,14 +46,12 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#define CHOOSE_COMM_MPI ///TODO automatic "HAVE_MPI"-like
-
-
 #include <stddef.h> //size_t
 #include <time.h> //struct tm
 #include <stdbool.h>
 
 #include <libnf.h>
+#include <mpi.h>
 
 #define MAX_FN_LEN 2048
 #define MAX_AGG_PARAMS 16 //maximum count of -a parameters
@@ -73,12 +71,6 @@
                 FLOW_FILE_SOURCE "/" FLOW_FILE_PATH_FORMAT \
                 FLOW_FILE_NAME_FORMAT)
 
-#ifdef CHOOSE_COMM_MPI
-        #define FDD_ONE_BINARY
-#else
-        #define FDD_SPLIT_BINARY_MASTER
-        #define FDD_SPLIT_BINARY_SLAVE
-#endif
 
 /* Enumerations. */
 enum { //error return codes
@@ -98,20 +90,23 @@ typedef enum { //working modes
         MODE_AGG, //aggregation and statistic
 } working_mode_t;
 
+
 /* Data types. */
-//WATCH OUT: MPI: reflect changes also in agg_params_mpit()
-typedef struct agg_params{
+//WATCH OUT: reflect changes also in agg_params_mpit
+#define AGG_PARAMS_T_ELEMS 4
+struct agg_params {
         int field;
         int flags;
         int numbits;
         int numbits6;
-} agg_params_t;
+};
 
-//WATCH OUT: MPI: reflect changes also in task_setup_mpit()
+//WATCH OUT: reflect changes also in task_info_mpit
+#define TASK_INFO_T_ELEMS 10
 typedef struct {
         working_mode_t working_mode; //working mode
 
-        agg_params_t agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
+        struct agg_params agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
         size_t agg_params_cnt; //aggregation parameters count
 
         size_t filter_str_len; //filter expression string length
@@ -127,65 +122,79 @@ typedef struct {
         struct tm interval_end;
 
         bool use_fast_topn; //enables fast top-N algorithm
-} task_setup_static_t;
+} task_info_t;
 
-typedef struct {
-        task_setup_static_t s;
+//WATCH OUT: reflect changes in struct tm from time.h also in struct_tm_mpit
+#define STRUCT_TM_ELEMS 9
 
-        char *filter_str; //filter expression string
-        char *path_str; //path string
-} task_setup_t;
+/* MPI related */
+#define ROOT_PROC 0
+
+enum { //tags
+        TAG_CMD,
+        TAG_TASK,
+        TAG_FILTER,
+        TAG_AGG,
+        TAG_DATA,
+        TAG_TOPN_ID,
+};
+
+enum { //control commands
+        CMD_RELEASE,
+};
+
+
+/* Function-like macros */
 
 
 /* Debugging macros */
 #ifdef DEBUG
-        #define print_debug(...) \
-                do { \
-                printf(__VA_ARGS__); \
-                } while (0)
+
+#define print_debug(...) \
+        do { \
+        printf(__VA_ARGS__); \
+        } while (0)
 #else
-        #define print_debug(...)
+#define print_debug(...)
+
 #endif //DEBUG
 
-
-/**
- * TODO description
- */
-void clear_task_setup(task_setup_static_t *t_setup);
-
-/** \brief Print error message.
- *
- * ///TODO * Wrapper to fprintf(), add prefix including process rank and name.
- *
- * \param[in] format Format string passed to fprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_err(const char *format, ...);
-
-//int agg_init(lnf_mem_t **agg, const agg_params_t *agg_params,
-//                size_t agg_params_cnt);
-
-/**
- * TODO description
- */
-int mem_setup(lnf_mem_t *mem, const struct agg_params *ap, size_t ap_cnt);
 
 /** \brief Print basic record.
  *
  * Prints instance of lnf_brec1_t as one line.
  *
  * \param[in] brec Basic record.
+ * \return Error code. E_OK or E_MEM.
  */
 int print_brec(const lnf_brec1_t *brec);
 
-/**
- * TODO description
+
+/** \brief Print error message.
+ *
+ * Wrapper to fprintf(), add prefix including process rank and name.
+ *
+ * \param[in] format Format string passed to fprintf().
+ * \param[in] va_list Variable argument list passed to vfprintf().
  */
+void print_err(const char *format, ...);
+
+
+void create_agg_params_mpit(void);
+void free_agg_params_mpit(void);
+void create_struct_tm_mpit(void);
+void free_struct_tm_mpit(void);
+void create_task_info_mpit(void);
+void free_task_info_mpit(void);
+
+int mem_setup(lnf_mem_t *mem, const struct agg_params *ap, size_t ap_cnt);
 int mem_print(lnf_mem_t *mem, size_t limit);
 
 /**
- * TODO description
+ * \brief Prepare Top-N statistics memory structure.
  */
+int stats_init(lnf_mem_t **stats);
+
 double diff_tm(struct tm end_tm, struct tm begin_tm);
 
 #endif //COMMON_H
