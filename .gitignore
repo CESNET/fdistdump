@@ -1,5 +1,5 @@
 #"autoreconf -i" products
-/Makefile.in
+Makefile.in
 /aclocal.m4
 /autom4te.cache/
 /config.h.in
@@ -7,13 +7,17 @@
 /depcomp
 /install-sh
 /missing
-/src/Makefile.in
+/test-driver
 
 #"./configure" products
-/Makefile
+Makefile
 /config.h
 /config.log
 /config.status
 /src/.deps/
-/src/Makefile
 /stamp-h1
+
+#vim
+*~
+*.swp
+*.swo

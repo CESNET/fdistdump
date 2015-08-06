@@ -14,7 +14,10 @@ install:
         - make
 
 #before_script:
-#script:
+
+script:
+        - make check
+
 #after_success:
 #after_failure:
 #after_script:
