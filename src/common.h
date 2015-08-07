@@ -73,7 +73,7 @@
 
 
 /* Enumerations. */
-enum { //error return codes
+typedef enum { //error return codes
         E_OK, //no error
         E_MEM, //memory
         E_MPI, //MPI
@@ -82,12 +82,13 @@ enum { //error return codes
         E_ARG, //command line arguments
         E_HELP, //print help
         E_EOF, //end of file
-};
+        E_PATH, //problem with access to file/directory
+} error_code_t;
 
 typedef enum { //working modes
-        MODE_REC, //list unmodified flow records
-        MODE_ORD, //list ordered flow records
-        MODE_AGG, //aggregation and statistic
+        MODE_LIST, //list unmodified flow records
+        MODE_SORT, //list ordered flow records
+        MODE_AGGR, //aggregation and statistic
 } working_mode_t;
 
 
@@ -101,9 +102,9 @@ struct agg_param {
         int numbits6;
 };
 
-//WATCH OUT: reflect changes also in mpi_struct_task_info
+//WATCH OUT: reflect changes also in mpi_struct_shared_task_ctx
 #define STRUCT_TASK_INFO_ELEMS 9
-struct task_info {
+struct shared_task_ctx {
         working_mode_t working_mode; //working mode
 
         struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
@@ -114,8 +115,8 @@ struct task_info {
 
         size_t rec_limit; //record/aggregation limit
 
-        struct tm interval_begin; //begin and end of time interval
-        struct tm interval_end;
+        struct tm interval_begin; //begin of time interval
+        struct tm interval_end; //end of time interval
 
         bool use_fast_topn; //enables fast top-N algorithm
 };
@@ -172,15 +173,18 @@ int print_brec(const lnf_brec1_t *brec);
  * \param[in] format Format string passed to fprintf().
  * \param[in] va_list Variable argument list passed to vfprintf().
  */
-void print_err(const char *format, ...);
+void print_err(error_code_t prim_errno, int sec_errno,
+                const char *format, ...);
+void print_warn(error_code_t prim_errno, int sec_errno,
+                const char *format, ...);
 
 
 void create_mpi_struct_agg_param(void);
 void free_mpi_struct_agg_param(void);
 void create_mpi_struct_tm(void);
 void free_mpi_struct_tm(void);
-void create_mpi_struct_task_info(void);
-void free_mpi_struct_task_info(void);
+void create_mpi_struct_shared_task_ctx(void);
+void free_mpi_struct_shared_task_ctx(void);
 
 int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt);
 int mem_print(lnf_mem_t *mem, size_t limit);

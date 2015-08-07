@@ -54,36 +54,37 @@
 #include <libnf.h>
 
 
-/* Global MPI data types. */
-extern MPI_Datatype mpi_struct_task_info;
+/* Global variables. */
+extern MPI_Datatype mpi_struct_shared_task_ctx;
+extern int secondary_errno;
 
 
-static void fill_task_info(struct task_info *ti,
+static void prepare_shared_task_ctx(struct shared_task_ctx *stc,
                 const struct cmdline_args *args)
 {
-        ti->working_mode = args->working_mode;
-        ti->agg_params_cnt = args->agg_params_cnt;
+        stc->working_mode = args->working_mode;
+        stc->agg_params_cnt = args->agg_params_cnt;
 
-        memcpy(ti->agg_params, args->agg_params, args->agg_params_cnt *
+        memcpy(stc->agg_params, args->agg_params, args->agg_params_cnt *
                         sizeof(struct agg_param));
 
-        ti->rec_limit = args->rec_limit;
+        stc->rec_limit = args->rec_limit;
 
         if (args->filter_str == NULL) {
-                ti->filter_str_len = 0;
+                stc->filter_str_len = 0;
         } else {
-                ti->filter_str_len = strlen(args->filter_str);
+                stc->filter_str_len = strlen(args->filter_str);
         }
         if (args->path_str == NULL) {
-                ti->path_str_len = 0;
+                stc->path_str_len = 0;
         } else {
-                ti->path_str_len = strlen(args->path_str);
+                stc->path_str_len = strlen(args->path_str);
         }
 
-        ti->interval_begin = args->interval_begin;
-        ti->interval_end = args->interval_end;
+        stc->interval_begin = args->interval_begin;
+        stc->interval_end = args->interval_end;
 
-        ti->use_fast_topn = args->use_fast_topn;
+        stc->use_fast_topn = args->use_fast_topn;
 }
 
 
@@ -93,9 +94,10 @@ static int fast_topn_bcast_all(lnf_mem_t *mem)
         char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
         lnf_mem_cursor_t *read_cursor;
 
+        //TODO: handle error, if no records received
         ret = lnf_mem_first_c(mem, &read_cursor);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_first_c()");
+                print_err(E_LNF, ret, "lnf_mem_first_c()");
                 return E_LNF;
         }
 
@@ -105,7 +107,7 @@ static int fast_topn_bcast_all(lnf_mem_t *mem)
                                 LNF_MAX_RAW_LEN);
                 assert(ret != LNF_EOF);
                 if (ret != LNF_OK) {
-                        print_err("LNF - lnf_mem_read_raw_c()");
+                        print_err(E_LNF, ret, "lnf_mem_read_raw_c()");
                         return E_LNF;
                 }
 
@@ -117,7 +119,7 @@ static int fast_topn_bcast_all(lnf_mem_t *mem)
                 if (ret == LNF_EOF) {
                         break; //all records sent
                 } else if (ret != LNF_OK) {
-                        print_err("LNF - lnf_mem_next_c()");
+                        print_err(E_LNF, ret, "lnf_mem_next_c()");
                         return E_LNF;
                 }
         }
@@ -146,12 +148,12 @@ static int mem_write_callback(char *data, size_t data_len, void *user)
 
         ret = lnf_rec_fset(micd->rec, LNF_FLD_BREC1, data);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_rec_fset()");
+                print_err(E_LNF, ret, "lnf_rec_fset()");
                 return E_LNF;
         }
         ret = lnf_mem_write(micd->mem, micd->rec);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_write()");
+                print_err(E_LNF, ret, "lnf_mem_write()");
                 return E_LNF;
         }
 
@@ -164,7 +166,7 @@ static int mem_write_raw_callback(char *data, size_t data_len, void *user)
 
         ret = lnf_mem_write_raw((lnf_mem_t *)user, data, data_len);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_write_raw() %X", ret);
+                print_err(E_LNF, ret, "lnf_mem_write_raw()");
                 return E_LNF;
         }
 
@@ -243,7 +245,7 @@ static int irecv_loop(size_t slave_cnt, size_t rec_limit,
                 data_buff[0][i] = malloc(XCHG_BUFF_SIZE);
                 data_buff[1][i] = malloc(XCHG_BUFF_SIZE);
                 if (data_buff[0][i] == NULL || data_buff[1][i] == NULL) {
-                        print_err("malloc error");
+                        print_err(E_MEM, 0, "malloc()");
                         err = E_MEM;
                         goto cleanup;
                 }
@@ -331,7 +333,7 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
         /* Initialize aggregation memory. */
         ret = lnf_mem_init(&callback_data.mem);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_init()");
+                print_err(E_LNF, ret, "lnf_mem_init()");
                 callback_data.mem = NULL;
                 err = E_LNF;
                 goto cleanup;
@@ -339,7 +341,7 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
         /* Initialize empty LNF record for writing. */
         ret = lnf_rec_init(&callback_data.rec);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_rec_init()");
+                print_err(E_LNF, ret, "lnf_rec_init()");
                 callback_data.rec = NULL;
                 err = E_LNF;
                 goto cleanup;
@@ -348,7 +350,7 @@ static int mode_ord_main(size_t slave_cnt, size_t rec_limit,
         /* Switch memory to linked list (better for sorting). */
         ret = lnf_mem_setopt(callback_data.mem, LNF_OPT_LISTMODE, NULL, 0);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_setopt()");
+                print_err(E_LNF, ret, "lnf_mem_setopt()");
                 err = E_LNF;
                 goto cleanup;
         }
@@ -404,7 +406,7 @@ static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
         /* Initialize aggregation memory. */
         ret = lnf_mem_init(&mem);
         if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_init()");
+                print_err(E_LNF, ret, "lnf_mem_init()");
                 mem = NULL;
                 err = E_LNF;
                 goto cleanup;
@@ -433,7 +435,7 @@ static int mode_agg_main(size_t slave_cnt, size_t rec_limit,
                 lnf_mem_free(mem);
                 ret = lnf_mem_init(&mem);
                 if (ret != LNF_OK) {
-                        print_err("LNF - lnf_mem_init()");
+                        print_err(E_LNF, ret, "lnf_mem_init()");
                         mem = NULL;
                         err = E_LNF;
                         goto cleanup;
@@ -474,38 +476,39 @@ int master(int world_rank, int world_size, const struct cmdline_args *args)
         int ret, err = E_OK;
         const size_t slave_cnt = world_size - 1; //all nodes without master
 
-        struct task_info ti = {0};
+        struct shared_task_ctx stc = {0};
 
-        /* Fill task info struct for slaves (working mode etc). */
-        fill_task_info(&ti, args);
+        /* Fill shared_task_ctx struct for slaves (working mode etc). */
+        prepare_shared_task_ctx(&stc, args);
 
         /* Broadcast task info, optional filter string and path string. */
-        MPI_Bcast(&ti, 1, mpi_struct_task_info, ROOT_PROC, MPI_COMM_WORLD);
-        if (ti.filter_str_len > 0) {
-                MPI_Bcast(args->filter_str, ti.filter_str_len, MPI_CHAR,
+        MPI_Bcast(&stc, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
+                        MPI_COMM_WORLD);
+        if (stc.filter_str_len > 0) {
+                MPI_Bcast(args->filter_str, stc.filter_str_len, MPI_CHAR,
                                 ROOT_PROC, MPI_COMM_WORLD);
         }
-        if (ti.path_str_len > 0) {
-                MPI_Bcast(args->path_str, ti.path_str_len, MPI_CHAR,
+        if (stc.path_str_len > 0) {
+                MPI_Bcast(args->path_str, stc.path_str_len, MPI_CHAR,
                                 ROOT_PROC, MPI_COMM_WORLD);
         }
 
         /* Send, receive, process. */
         switch (args->working_mode) {
-        case MODE_REC:
+        case MODE_LIST:
                 ret = mode_rec_main(slave_cnt, args->rec_limit);
                 if (ret != E_OK) {
                         err = ret;
                 }
                 break;
-        case MODE_ORD:
+        case MODE_SORT:
                 ret = mode_ord_main(slave_cnt, args->rec_limit,
                                 args->agg_params, args->agg_params_cnt);
                 if (ret != E_OK) {
                         err = ret;
                 }
                 break;
-        case MODE_AGG:
+        case MODE_AGGR:
                 ret = mode_agg_main(slave_cnt, args->rec_limit,
                                 args->agg_params, args->agg_params_cnt,
                                 args->use_fast_topn);

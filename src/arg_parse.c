@@ -414,7 +414,7 @@ static int set_limit(struct cmdline_args *args, char *limit_str)
 
 void set_defaults(struct cmdline_args *args)
 {
-        args->working_mode = MODE_REC;
+        args->working_mode = MODE_LIST;
         args->use_fast_topn = true;
 }
 
@@ -528,19 +528,19 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
 
         /* Determine working mode. */
         if (args->agg_params_cnt == 0) { //no aggregation -> list records
-                args->working_mode = MODE_REC;
+                args->working_mode = MODE_LIST;
         } else if (args->agg_params_cnt == 1) { //aggregation or ordering
                 if (args->agg_params[0].flags & LNF_SORT_FLAGS) {
-                        args->working_mode = MODE_ORD;
+                        args->working_mode = MODE_SORT;
                 } else {
-                        args->working_mode = MODE_AGG;
+                        args->working_mode = MODE_AGGR;
                 }
         } else { //aggregation
-                args->working_mode = MODE_AGG;
+                args->working_mode = MODE_AGGR;
         }
 
         /* Fast top-N makes sense only under certain conditions. */
-        if (args->working_mode == MODE_AGG) {
+        if (args->working_mode == MODE_AGGR) {
                 /* No record limit - all records have to be sent. */
                 if (args->rec_limit == 0) { //no record limit
                         args->use_fast_topn = false;

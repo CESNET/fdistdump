@@ -58,8 +58,11 @@
 #include <libnf.h>
 
 
-/* Global MPI data types. */
-MPI_Datatype mpi_struct_agg_param, mpi_struct_task_info, mpi_struct_tm;
+/* Global varables. */
+MPI_Datatype mpi_struct_agg_param;
+MPI_Datatype mpi_struct_shared_task_ctx;
+MPI_Datatype mpi_struct_tm;
+int secondary_errno;
 
 int main(int argc, char **argv)
 {
@@ -97,7 +100,7 @@ int main(int argc, char **argv)
         /* Create MPI data types (global variables). */
         create_mpi_struct_agg_param();
         create_mpi_struct_tm();
-        create_mpi_struct_task_info();
+        create_mpi_struct_shared_task_ctx();
 
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
@@ -116,7 +119,7 @@ int main(int argc, char **argv)
         }
 
         /* Free MPI data types (global variables). */
-        free_mpi_struct_task_info();
+        free_mpi_struct_shared_task_ctx();
         free_mpi_struct_tm();
         free_mpi_struct_agg_param();
 

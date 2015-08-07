@@ -46,6 +46,8 @@
 #ifndef SLAVE_H
 #define SLAVE_H
 
+#include "common.h"
+
 #include <stddef.h> //size_t
 
 /** \brief Slave program function.
@@ -56,6 +58,6 @@
  * \param[in] world_size MPI_COMM_WORLD size.
  * \return Number of records read (by one process).
  */
-int slave(int world_rank, int world_size);
+error_code_t slave(int world_rank, int world_size);
 
 #endif //SLAVE_H
