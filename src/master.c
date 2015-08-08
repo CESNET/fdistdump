@@ -266,12 +266,12 @@ static int irecv_loop(size_t slave_cnt, size_t rec_limit,
          */
         for (size_t i = 0; i < slave_cnt; ++i) {
                 requests[i] = MPI_REQUEST_NULL;
-                data_buff_idx[i] = 0; //start with first buffer
 
                 data_buff[i][0] = continuous_data_buff +
                         (i * 2 * XCHG_BUFF_SIZE);
                 data_buff[i][1] = data_buff[i][0] + XCHG_BUFF_SIZE;
         }
+        memset(data_buff_idx, 0, slave_cnt * sizeof(data_buff_idx[0]));
 
         /* Start first individual nonblocking data receive from every slave. */
         for (size_t i = 0; i < slave_cnt ; ++i) {

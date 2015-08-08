@@ -95,7 +95,10 @@ static int str_to_tm(struct tm *time, const char *time_str)
 
 static int set_interval(struct cmdline_args *args, char *interval_arg_str)
 {
-        char *begin_str, *end_str, *remaining_str, *saveptr;
+        char *begin_str;
+        char *end_str;
+        char *remaining_str;
+        char *saveptr = NULL;
         int ret;
 
         /* Split time interval string. */
@@ -163,7 +166,8 @@ static int set_interval(struct cmdline_args *args, char *interval_arg_str)
  */
 static int set_agg(struct cmdline_args *args, char *agg_arg_str)
 {
-        char *token, *saveptr;
+        char *token;
+        char *saveptr = NULL;
         int ret, fld, nb, nb6, agg;
 
         token = strtok_r(agg_arg_str, AGG_SEPARATOR, &saveptr); //first token
@@ -301,7 +305,9 @@ static int set_order(struct cmdline_args *args, char *order_str)
  */
 static int set_stat(struct cmdline_args *args, char *stat_arg_str)
 {
-        char *stat_str, *order_str, *saveptr;
+        char *stat_str;
+        char *order_str;
+        char *saveptr = NULL;
         int ret;
 
         stat_str = strtok_r(stat_arg_str, STAT_SEPARATOR, &saveptr);

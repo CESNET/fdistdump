@@ -189,11 +189,6 @@ void free_mpi_struct_shared_task_ctx(void);
 int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt);
 int mem_print(lnf_mem_t *mem, size_t limit);
 
-/**
- * \brief Prepare Top-N statistics memory structure.
- */
-int stats_init(lnf_mem_t **stats);
-
 double diff_tm(struct tm end_tm, struct tm begin_tm);
 
 #endif //COMMON_H
