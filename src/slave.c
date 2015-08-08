@@ -734,9 +734,8 @@ static error_code_t task_process_mem(struct slave_task_ctx *stc)
 }
 
 
-error_code_t slave(int world_rank, int world_size)
+error_code_t slave(int world_size)
 {
-        (void)world_rank;
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
         memset(&stc, 0, sizeof(stc));

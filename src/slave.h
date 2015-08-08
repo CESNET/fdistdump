@@ -54,10 +54,9 @@
  *
  * Code executed by slave processes, usually with rank != 0.
  *
- * \param[in] world_rank MPI_COMM_WORLD rank.
  * \param[in] world_size MPI_COMM_WORLD size.
- * \return Number of records read (by one process).
+ * \return Error code.
  */
-error_code_t slave(int world_rank, int world_size);
+error_code_t slave(int world_size);
 
 #endif //SLAVE_H

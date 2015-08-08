@@ -66,8 +66,10 @@ int secondary_errno;
 
 int main(int argc, char **argv)
 {
+        error_code_t primary_errno = E_OK;
+        int world_rank;
+        int world_size;
         double duration;
-        int world_rank, world_size, ret;
         struct cmdline_args args = {0};
 
         MPI_Init(&argc, &argv);
@@ -75,38 +77,38 @@ int main(int argc, char **argv)
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
         if (world_rank == ROOT_PROC) {
-                ret = arg_parse(&args, argc, argv);
-                switch (ret) {
+                primary_errno = arg_parse(&args, argc, argv);
+                switch (primary_errno) {
                 case E_OK:
                         break;
+
                 case E_HELP:
                         MPI_Abort(MPI_COMM_WORLD, EXIT_SUCCESS);
                         return EXIT_SUCCESS;
-                        break;
+
                 case E_ARG:
                         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
                         return EXIT_FAILURE;
-                        break;
+
                 default:
                         assert(!"unknown error code received");
-                        break;
                 }
         }
-
-        /* Start time measurement. */
-        MPI_Barrier(MPI_COMM_WORLD);
-        duration = -MPI_Wtime();
 
         /* Create MPI data types (global variables). */
         create_mpi_struct_agg_param();
         create_mpi_struct_tm();
         create_mpi_struct_shared_task_ctx();
 
+        /* Start time measurement. */
+        MPI_Barrier(MPI_COMM_WORLD);
+        duration = -MPI_Wtime();
+
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
-                master(world_rank, world_size, &args);
+                primary_errno = master(world_size, &args);
         } else {
-                slave(world_rank, world_size);
+                secondary_errno = slave(world_size);
         }
 
         /* End time measurement. */
@@ -114,8 +116,7 @@ int main(int argc, char **argv)
         duration += MPI_Wtime();
 
         if (world_rank == ROOT_PROC) {
-                /* CPUs, slaves, duration */
-                printf("%d\t%d\t%f\n", world_size, world_size - 1, duration);
+                printf("duration: %f\n", duration);
         }
 
         /* Free MPI data types (global variables). */
@@ -124,5 +125,5 @@ int main(int argc, char **argv)
         free_mpi_struct_agg_param();
 
         MPI_Finalize();
-        return EXIT_SUCCESS;
+        return primary_errno;
 }

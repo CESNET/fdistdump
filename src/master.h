@@ -52,11 +52,10 @@
  *
  * Code executed by master process, usually with rank 0.
  *
- * \param[in] world_rank MPI_COMM_WORLD rank.
  * \param[in] world_size MPI_COMM_WORLD size.
  * \param[in] args Command line parameters.
  * \return Error code.
  */
-int master(int world_rank, int world_size, const struct cmdline_args *args);
+error_code_t master(int world_size, const struct cmdline_args *args);
 
 #endif //MASTER_H
