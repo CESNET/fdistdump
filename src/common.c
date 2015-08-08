@@ -46,8 +46,9 @@
 #include "common.h"
 
 #include <stdio.h>
-#include <stdarg.h> //variable argument list
 #include <assert.h>
+#include <string.h>
+#include <stdarg.h> //variable argument list
 #include <stddef.h> //offsetof()
 #include <math.h> //NAN
 
@@ -298,8 +299,8 @@ double diff_tm(struct tm end_tm, struct tm begin_tm)
 {
         time_t begin_time_t, end_time_t;
 
-        begin_time_t = mktime(&begin_tm);
-        end_time_t = mktime(&end_tm);
+        begin_time_t = mktime_utc(&begin_tm);
+        end_time_t = mktime_utc(&end_tm);
 
         if (begin_time_t == -1 || end_time_t == -1) {
                 print_err(E_INTERNAL, 0, "mktime()");
@@ -307,4 +308,36 @@ double diff_tm(struct tm end_tm, struct tm begin_tm)
         }
 
          return difftime(end_time_t, begin_time_t);
+}
+
+
+time_t mktime_utc(struct tm *tm)
+{
+        time_t ret;
+        char *time_zone;
+
+        /* Save current time zone environment variable. */
+        time_zone = getenv("TZ");
+        if (time_zone != NULL) {
+                time_zone = strdup(time_zone); //memory is malloc'd
+        }
+
+        /* Set time zone to UTC. mktime() would be affected by daylight saving
+         * otherwise.
+         */
+        setenv("TZ", "", 1);
+        tzset();
+
+        ret = mktime(tm); //actual normalization within UTC time zone
+
+        /* Restore time zone to stored value. */
+        if (time_zone != NULL) {
+                setenv("TZ", time_zone, 1);
+                free(time_zone);
+        } else {
+                unsetenv("TZ");
+        }
+        tzset();
+
+        return ret;
 }

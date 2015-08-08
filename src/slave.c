@@ -241,14 +241,14 @@ static error_code_t task_set_next_file(struct slave_task_ctx *stc)
                         /* Increment context by rotation interval. */
                         stc->shared.interval_begin.tm_sec +=
                                 FLOW_FILE_ROTATION_INTERVAL;
-                        mktime(&stc->shared.interval_begin); //normalization
+                        mktime_utc(&stc->shared.interval_begin); //normalization
 
                         if (access(stc->cur_file_path, F_OK) == 0) {
                                 return E_OK; //file exists
                         }
 
                         print_warn(E_PATH, 0, "skipping non existing file "
-                                        "\"%s\"\n", stc->cur_file_path);
+                                        "\"%s\"", stc->cur_file_path);
                 }
 
                 stc->no_more_files = true;

@@ -191,4 +191,20 @@ int mem_print(lnf_mem_t *mem, size_t limit);
 
 double diff_tm(struct tm end_tm, struct tm begin_tm);
 
+/** \brief Portable version of timegm().
+ *
+ * The mktime() function modifies the fields of the tm structure, if structure
+ * members are outside their valid interval, they will be normalized (so that,
+ * for  example,  40  October is changed  into  9 November). We need this. But
+ * also tm_isdst is set (regardless of its initial value) to a positive value or
+ * to 0, respectively, to indicate whether DST is or is not in effect at the
+ * specified time. This is what we don't need. Therefore, time zone is set to
+ * UTC before calling mktime() in this function and restore previous time zone
+ * afterwards. mktime() will normalize tm structure, nothing more.
+ *
+ * \param[inout] tm Broken-down time. May be altered (normalized).
+ * \return Calendar time representation of tm.
+ */
+time_t mktime_utc(struct tm *tm);
+
 #endif //COMMON_H

@@ -64,11 +64,20 @@ enum { //command line options
 
 
 static const char *const time_formats[] = {
-        "%H:%M %d.%m.%Y", //23:59 31.12.2015
-        "%H:%M:%S %d.%m.%Y", //23:59:59 31.12.2015
+        /* Date only. */
+        "%Y-%m-%d", //standard date, 2015-12-31
+        "%d.%m.%Y", //european, 31.12.2015
+        "%m/%d.%Y", //american, 12/31/2015
 
-        "%d.%m.%Y %H:%M", //31.12.2015 23:59
-        "%d.%m.%Y %H:%M:%S", //31.12.2015 23:59:59
+        /* Time and date. */
+        "%H:%M %Y-%m-%d", //standard time and date, 23:59 2015-12-31
+        "%H:%M %d.%m.%Y", //european, 23:59 31.12.2015
+        "%H:%M %m/%d.%Y", //american, 23:59 12/31/2015
+
+        /* Date and time. */
+        "%Y-%m-%d %H:%M", //standard date and time, 2015-12-31 23:59
+        "%d.%m.%Y %H:%M", //european, 31.12.2015 23:59
+        "%m/%d.%Y %H:%M", //american, 12/31/2015 23:59
 };
 
 
@@ -138,7 +147,7 @@ static int set_interval(struct cmdline_args *args, char *interval_arg_str)
         }
 
         /* Align begining time to closest greater rotation interval. */
-        while (mktime(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL) {
+        while (mktime_utc(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL){
                 args->interval_begin.tm_sec++;;
         }
 
@@ -585,7 +594,7 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 FLOW_FILE_NAME_FORMAT, &args->interval_begin);
                 printf("%s\n", buff_from);
                 args->interval_begin.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
-                mktime(&args->interval_begin); //normalization
+                mktime_utc(&args->interval_begin); //normalization
         }
 #endif //DEBUG
 
