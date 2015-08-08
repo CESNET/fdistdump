@@ -227,33 +227,55 @@ static int irecv_loop(size_t slave_cnt, size_t rec_limit,
                 recv_callback_t recv_callback, void *user)
 {
         int ret, err = E_OK;
-        char *data_buff[2][slave_cnt]; //two buffers per slave
-        bool data_buff_idx[slave_cnt]; //current buffer index
+        char *continuous_data_buff; //big chunk of memory
+        char *data_buff[slave_cnt][2]; //pointers to continuous_data_buff
+        bool data_buff_idx[slave_cnt]; //index to currently used data_buff
         MPI_Request requests[slave_cnt];
         MPI_Status status;
         size_t rec_cntr = 0; //processed records
         bool limit_exceeded = false;
 
-        /* Allocate receive buffers. */
+        /* Allocate two receive buffers for each slave as continuous memory. */
+        continuous_data_buff = malloc(2 * XCHG_BUFF_SIZE * slave_cnt);
+        if (continuous_data_buff == NULL) {
+                print_err(E_MEM, 0, "malloc()");
+                err = E_MEM;
+                return E_MEM;
+        }
+
+        /*
+         * There are two buffers for each slave. The first one is passed to
+         * nonblocking MPI receive function, the second one is processed at the
+         * same time. After both these operations are completed, buffers are
+         * switched. This switching is independet for each slave, that's why
+         * array data_buff_idx[slave_cnt] is needed.
+         * continuous_data_buff is partitioned in data_buff in following manner:
+         *
+         * <--------- XCHG_BUFF_SIZE -------> <-------- XCHG_BUFF_SIZE -------->
+         * ---------------------------------------------------------------------
+         * |         data_buff[0][0]         |          data_buff[0][1]        |
+         * ---------------------------------------------------------------------
+         * |         data_buff[1][0]         |          data_buff[1][1]        |
+         * ---------------------------------------------------------------------
+         * .                                                                   .
+         * .                                                                   .
+         * .                                                                   .
+         * ---------------------------------------------------------------------
+         * |   data_buff[slave_cnt - 1][0]   |   data_buff[slave_cnt - 1][1]   |
+         * ---------------------------------------------------------------------
+         */
         for (size_t i = 0; i < slave_cnt; ++i) {
                 requests[i] = MPI_REQUEST_NULL;
-                data_buff_idx[i] = 0;
+                data_buff_idx[i] = 0; //start with first buffer
 
-                data_buff[0][i] = NULL; //in case of malloc failure
-                data_buff[1][i] = NULL;
-
-                data_buff[0][i] = malloc(XCHG_BUFF_SIZE);
-                data_buff[1][i] = malloc(XCHG_BUFF_SIZE);
-                if (data_buff[0][i] == NULL || data_buff[1][i] == NULL) {
-                        print_err(E_MEM, 0, "malloc()");
-                        err = E_MEM;
-                        goto cleanup;
-                }
+                data_buff[i][0] = continuous_data_buff +
+                        (i * 2 * XCHG_BUFF_SIZE);
+                data_buff[i][1] = data_buff[i][0] + XCHG_BUFF_SIZE;
         }
 
         /* Start first individual nonblocking data receive from every slave. */
         for (size_t i = 0; i < slave_cnt ; ++i) {
-                char *free_buff = data_buff[data_buff_idx[i]][i]; //shortcut
+                char *free_buff = data_buff[i][data_buff_idx[i]]; //shortcut
 
                 MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1, TAG_DATA,
                                 MPI_COMM_WORLD, &requests[i]);
@@ -279,9 +301,9 @@ static int irecv_loop(size_t slave_cnt, size_t rec_limit,
                 }
 
                 /* Determine which buffer is free and which is currently used.*/
-                full_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
+                full_buff = data_buff[slave_idx][data_buff_idx[slave_idx]];
                 data_buff_idx[slave_idx] = !data_buff_idx[slave_idx]; //toggle
-                free_buff = data_buff[data_buff_idx[slave_idx]][slave_idx];
+                free_buff = data_buff[slave_idx][data_buff_idx[slave_idx]];
 
                 /* Start receiving next message into free buffer. */
                 MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE,
@@ -309,10 +331,7 @@ static int irecv_loop(size_t slave_cnt, size_t rec_limit,
         }
 
 cleanup:
-        for (size_t i = 0; i < slave_cnt; ++i) {
-                free(data_buff[1][i]);
-                free(data_buff[0][i]);
-        }
+        free(continuous_data_buff);
 
         return err;
 }
