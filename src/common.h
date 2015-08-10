@@ -169,6 +169,8 @@ void print_warn(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
 void print_debug(const char *format, ...);
 
+char * working_mode_to_str(working_mode_t working_mode);
+
 void create_mpi_struct_agg_param(void);
 void free_mpi_struct_agg_param(void);
 void create_mpi_struct_tm(void);

@@ -623,6 +623,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
 
 #ifdef DEBUG
+        print_debug("------------------------------------------------------");
+        print_debug("mode: %s", working_mode_to_str(args->working_mode));
         for (size_t i = 0; i < args->agg_params_cnt; ++i) {
                 struct agg_param *ap = args->agg_params + i;
                 print_debug("aggregation %lu: %d, 0x%x, (%d, %d)", i, ap->field,
@@ -641,6 +643,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 strftime(end, sizeof(end), "%c", &args->interval_end);
                 print_debug("interval: %s - %s", begin, end);
         }
+        if (args->use_fast_topn) {
+                print_debug("flags: using fast top-N algorithm");
+        }
+        print_debug("------------------------------------------------------\n");
 #endif //DEBUG
 
         return E_OK;

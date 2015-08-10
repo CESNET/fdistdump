@@ -459,7 +459,9 @@ static error_code_t send_loop(struct slave_task_ctx *stc)
         char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
 
         secondary_errno = lnf_mem_first_c(stc->agg_mem, &read_cursor);
-        if (secondary_errno != LNF_OK) {
+        if (secondary_errno == LNF_EOF) {
+                goto send_terminator; //no records in memory, no problem
+        } else if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno, "lnf_mem_first_c()");
                 goto send_terminator;
@@ -516,11 +518,10 @@ static error_code_t fast_topn_send_loop(struct slave_task_ctx *stc)
                 } else {
                         secondary_errno = lnf_mem_next_c(stc->agg_mem,
                                         &read_cursor);
-                        if (secondary_errno == LNF_EOF) {
-                                break; //all records in memory successfully sent
-                        }
                 }
-                if (secondary_errno != LNF_OK) {
+                if (secondary_errno == LNF_EOF) {
+                        goto send_terminator; //no more records in memory
+                } else if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
                         print_err(primary_errno, secondary_errno,
                                         "lnf_mem_first_c or lnf_mem_next_c()");
@@ -784,12 +785,12 @@ error_code_t slave(int world_size)
 
         /* Check if we read all files. */
         if (!stc.rec_limit_reached && primary_errno != E_EOF) {
-                goto finalize_task; //no, we didn't
+                goto finalize_task; //no, we didn't, some problem occured
         }
 
         /*
          * In case of aggregation or sorting, records were stored into memory.
-         * Now we need to process and send there records to master.
+         * Now we need to process and send them to master.
          */
         primary_errno = task_process_mem(&stc);
 

@@ -96,33 +96,6 @@ static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
 }
 
 
-error_code_t print_brec(const lnf_brec1_t *brec)
-{
-        char *ret;
-
-        static char srcaddr_str[INET6_ADDRSTRLEN];
-        static char dstaddr_str[INET6_ADDRSTRLEN];
-
-        ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
-        if (ret == NULL) {
-                print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_INTERNAL;
-        }
-        ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
-        if (ret == NULL) {
-                print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_INTERNAL;
-        }
-
-        printf("%lu -> %lu\t", brec->first, brec->last);
-        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec->srcport,
-                        dstaddr_str, brec->dstport);
-        printf("%lu\t%lu\t%lu\n", brec->pkts, brec->bytes, brec->flows);
-
-        return E_OK;
-}
-
-
 static char * get_processor_info(void)
 {
         static char msg[MAX_MSG_LEN];
@@ -191,6 +164,33 @@ static char * error_code_to_str(error_code_t prim_errno)
 }
 
 
+error_code_t print_brec(const lnf_brec1_t *brec)
+{
+        char *ret;
+
+        static char srcaddr_str[INET6_ADDRSTRLEN];
+        static char dstaddr_str[INET6_ADDRSTRLEN];
+
+        ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
+        if (ret == NULL) {
+                print_err(E_INTERNAL, 0, "addr_to_str()");
+                return E_INTERNAL;
+        }
+        ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
+        if (ret == NULL) {
+                print_err(E_INTERNAL, 0, "addr_to_str()");
+                return E_INTERNAL;
+        }
+
+        printf("%lu -> %lu\t", brec->first, brec->last);
+        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec->srcport,
+                        dstaddr_str, brec->dstport);
+        printf("%lu\t%lu\t%lu\n", brec->pkts, brec->bytes, brec->flows);
+
+        return E_OK;
+}
+
+
 void print_err(error_code_t prim_errno, int sec_errno,
                 const char *format, ...)
 {
@@ -233,6 +233,35 @@ void print_debug(const char *format, ...)
         fprintf(stderr, "\n");
 
         va_end(arg_list);
+}
+
+
+char * working_mode_to_str(working_mode_t working_mode)
+{
+        static char msg[MAX_MSG_LEN];
+
+        switch (working_mode) {
+        case MODE_LIST:
+                snprintf(msg, MAX_MSG_LEN, "list records");
+                break;
+
+        case MODE_SORT:
+                snprintf(msg, MAX_MSG_LEN, "sort records");
+                break;
+
+        case MODE_AGGR:
+                snprintf(msg, MAX_MSG_LEN, "aggregate records");
+                break;
+
+        case MODE_PASS:
+                snprintf(msg, MAX_MSG_LEN, "pass");
+                break;
+
+        default:
+                assert(!"unknown working mode");
+        }
+
+        return msg;
 }
 
 
