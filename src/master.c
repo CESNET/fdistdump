@@ -491,6 +491,7 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 
         /* Send, receive, process. */
         switch (args->working_mode) {
+        case MODE_PASS: //only termination msg will be received from each slave
         case MODE_LIST:
                 return mode_rec_main(slave_cnt, args->rec_limit);
 

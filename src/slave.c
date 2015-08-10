@@ -65,15 +65,16 @@
 #define LOOKUP_CURSOR_INIT_SIZE 1024
 
 /* Global variables. */
+extern MPI_Datatype mpi_struct_shared_task_ctx;
 extern int secondary_errno;
 
-extern MPI_Datatype mpi_struct_shared_task_ctx;
 
 typedef enum {
         DATA_SOURCE_FILE,
         DATA_SOURCE_DIR,
         DATA_SOURCE_INTERVAL,
 } data_source_t;
+
 
 struct slave_task_ctx {
         /* Shared task context. */
@@ -185,7 +186,7 @@ static error_code_t task_process_file(struct slave_task_ctx *stc)
 close_file:
         lnf_close(file);
 
-        print_debug("file %s: read %lu, processed %lu\n", stc->cur_file_path,
+        print_debug("file %s: read %lu, processed %lu", stc->cur_file_path,
                         file_rec_cntr, file_proc_rec_cntr);
 
         return E_OK;
@@ -383,6 +384,9 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
                 }
 
                 return E_OK;
+
+        case MODE_PASS:
+                return E_PASS;
 
         default:
                 assert(!"unknown working mode");

@@ -74,14 +74,15 @@
 
 /* Enumerations. */
 typedef enum { //error return codes
-        E_OK, //no error
+        E_OK, //no error, continue processing
+        E_PASS, //no error, no action required
+        E_EOF, //no error, end of file
+
         E_MEM, //memory
         E_MPI, //MPI
         E_LNF, //libnf
         E_INTERNAL, //internal
         E_ARG, //command line arguments
-        E_HELP, //print help
-        E_EOF, //end of file
         E_PATH, //problem with access to file/directory
 } error_code_t;
 
@@ -89,6 +90,7 @@ typedef enum { //working modes
         MODE_LIST, //list unmodified flow records
         MODE_SORT, //list ordered flow records
         MODE_AGGR, //aggregation and statistic
+        MODE_PASS, //do nothing
 } working_mode_t;
 
 
@@ -141,29 +143,17 @@ enum { //control commands
 
 
 /* Function-like macros */
-
-
-/* Debugging macros */
-#ifdef DEBUG
-
-#define print_debug(...) \
-        do { \
-        printf(__VA_ARGS__); \
-        } while (0)
-#else
-#define print_debug(...)
-
-#endif //DEBUG
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 
 /** \brief Print basic record.
  *
- * Prints instance of lnf_brec1_t as one line.
+ * Prints instance of lnf_brec1_t on one line.
  *
  * \param[in] brec Basic record.
- * \return Error code. E_OK or E_MEM.
+ * \return Error code. E_OK or E_INTERNAL.
  */
-int print_brec(const lnf_brec1_t *brec);
+error_code_t print_brec(const lnf_brec1_t *brec);
 
 
 /** \brief Print error message.
@@ -177,7 +167,7 @@ void print_err(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
 void print_warn(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
-
+void print_debug(const char *format, ...);
 
 void create_mpi_struct_agg_param(void);
 void free_mpi_struct_agg_param(void);
@@ -186,8 +176,9 @@ void free_mpi_struct_tm(void);
 void create_mpi_struct_shared_task_ctx(void);
 void free_mpi_struct_shared_task_ctx(void);
 
-int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt);
-int mem_print(lnf_mem_t *mem, size_t limit);
+error_code_t mem_setup(lnf_mem_t *mem, const struct agg_param *ap,
+                size_t ap_cnt);
+error_code_t mem_print(lnf_mem_t *mem, size_t limit);
 
 double diff_tm(struct tm end_tm, struct tm begin_tm);
 
