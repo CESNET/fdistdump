@@ -86,7 +86,7 @@ struct slave_task_ctx {
         lnf_mem_t *agg_mem; //LNF memory
 
         data_source_t data_source; //how flow files are obtained
-        char path_str[PATH_MAX]; //file of directory path string
+        char path_str[PATH_MAX]; //file or directory path string
         DIR *dir_ctx; //used in case of directory as data source
         char cur_file_path[PATH_MAX]; //currently processed file absolute path
         bool no_more_files; //true if there is no more files to read
@@ -248,6 +248,7 @@ static error_code_t task_set_next_file(struct slave_task_ctx *stc)
                                 return E_OK; //file exists
                         }
 
+                        //TODO: master should know about this
                         print_warn(E_PATH, 0, "skipping non existing file "
                                         "\"%s\"", stc->cur_file_path);
                 }

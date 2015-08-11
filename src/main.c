@@ -50,13 +50,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <getopt.h>
 #include <assert.h>
 
 #include <mpi.h>
-#include <libnf.h>
 
 
 /* Global varables. */
@@ -70,10 +66,26 @@ int main(int argc, char **argv)
         error_code_t primary_errno = E_OK;
         int world_rank;
         int world_size;
+        int thread_provided; //thread safety provided by MPI
         double duration;
         struct cmdline_args args = {0};
 
-        MPI_Init(&argc, &argv);
+        /*
+         * Init MPI and check suported thread level. We need at least
+         * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
+         * OpenMPI doc says: "It is only lightly tested and likely does not work
+         * for thread-intensive applications."
+         */
+        MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
+        if(thread_provided != MPI_THREAD_SERIALIZED ||
+                        thread_provided != MPI_THREAD_MULTIPLE) {
+                print_err(E_MPI, thread_provided,
+                                "an insufficient level of thread support. "
+                                "At least MPI_THREAD_SERIALIZED required.");
+                MPI_Finalize();
+                return EXIT_FAILURE;
+        }
+
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 

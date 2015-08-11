@@ -433,6 +433,7 @@ static error_code_t mode_agg_main(size_t slave_cnt, size_t rec_limit,
         }
 
         if (use_fast_topn) {
+                //TODO: if file doesn't exist on slave, this will cause deadlock
                 primary_errno = fast_topn_bcast_all(agg_mem);
                 if (primary_errno != E_OK) {
                         goto free_lnf_mem;
