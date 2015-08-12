@@ -77,7 +77,7 @@ int main(int argc, char **argv)
          * for thread-intensive applications."
          */
         MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
-        if(thread_provided != MPI_THREAD_SERIALIZED ||
+        if (thread_provided != MPI_THREAD_SERIALIZED &&
                         thread_provided != MPI_THREAD_MULTIPLE) {
                 print_err(E_MPI, thread_provided,
                                 "an insufficient level of thread support. "

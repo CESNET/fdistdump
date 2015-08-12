@@ -182,7 +182,18 @@ error_code_t mem_setup(lnf_mem_t *mem, const struct agg_param *ap,
                 size_t ap_cnt);
 error_code_t mem_print(lnf_mem_t *mem, size_t limit);
 
-double diff_tm(struct tm end_tm, struct tm begin_tm);
+/** \brief Yield the time difference between a and b.
+ *
+ * Measured in seconds, ignoring leap seconds. Compute intervening leap days
+ * correctly even if year is negative. Take care to avoid int overflow in leap
+ * day calculations, but it's OK to assume that A and B are close to each other.
+ * Copy paste from glibc 2.22.
+ *
+ * \param[in] a Subtrahend.
+ * \param[in] b Minuend.
+ * \return Difference in seconds.
+ */
+int tm_diff(const struct tm a, const struct tm b);
 
 /** \brief Portable version of timegm().
  *

@@ -160,7 +160,7 @@ static error_code_t set_interval(struct cmdline_args *args,
         }
 
         /* Check interval sanity. */
-        if (diff_tm(args->interval_end, args->interval_begin) <= 0.0) {
+        if (tm_diff(args->interval_end, args->interval_begin) <= 0) {
                 print_err(E_ARG, 0, "zero or negative interval duration");
                 return E_ARG;
         }
