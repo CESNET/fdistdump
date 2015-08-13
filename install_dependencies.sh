@@ -10,5 +10,5 @@ wget "${URL}${DEP}-${VER}.${SUF}"
 tar -xf "${DEP}-${VER}.${SUF}"
 
 cd "${DEP}-${VER}"
-./configure && make
+./configure --prefix="/usr" && make
 sudo make install
