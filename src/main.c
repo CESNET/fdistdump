@@ -46,6 +46,7 @@
 #include "slave.h"
 #include "common.h"
 #include "arg_parse.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,17 +83,25 @@ int main(int argc, char **argv)
                 case E_OK:
                         break;
 
-                case E_HELP:
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_SUCCESS);
-                        return EXIT_SUCCESS;
+                case E_PASS: //help or error was printed
+                        args.working_mode = MODE_PASS;
+                        break;
 
                 case E_ARG:
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-                        return EXIT_FAILURE;
+                        args.working_mode = MODE_PASS;
+                        break;
 
                 default:
                         assert(!"unknown error code received");
                 }
+        }
+
+        if (world_size <= 1) {
+                printf("%s requires at least 2 copies of the program to run. "
+                                "Did you use mpirun? "
+                                "Try to run program again with --help.\n",
+                                PACKAGE_NAME);
+                return EXIT_FAILURE;
         }
 
         /* Create MPI data types (global variables). */
@@ -108,7 +117,7 @@ int main(int argc, char **argv)
         if (world_rank == ROOT_PROC) {
                 primary_errno = master(world_size, &args);
         } else {
-                secondary_errno = slave(world_size);
+                primary_errno = slave(world_size);
         }
 
         /* End time measurement. */
@@ -116,7 +125,7 @@ int main(int argc, char **argv)
         duration += MPI_Wtime();
 
         if (world_rank == ROOT_PROC) {
-                printf("duration: %f\n", duration);
+                print_debug("total duration: %fs", duration);
         }
 
         /* Free MPI data types (global variables). */
@@ -125,5 +134,9 @@ int main(int argc, char **argv)
         free_mpi_struct_agg_param();
 
         MPI_Finalize();
-        return primary_errno;
+        if (primary_errno == E_OK || primary_errno == E_PASS) {
+                return EXIT_SUCCESS;
+        } else {
+                return EXIT_FAILURE;
+        }
 }

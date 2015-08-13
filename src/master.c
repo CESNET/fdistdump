@@ -146,7 +146,9 @@ static error_code_t fast_topn_bcast_all(lnf_mem_t *mem)
 
         //TODO: handle error, if no records received
         secondary_errno = lnf_mem_first_c(mem, &read_cursor);
-        if (secondary_errno != LNF_OK) {
+        if (secondary_errno == LNF_EOF) {
+                goto send_terminator; //no records in memory, no problem
+        } else if (secondary_errno != LNF_OK) {
                 print_err(E_LNF, secondary_errno, "lnf_mem_first_c()");
                 return E_LNF;
         }
@@ -175,6 +177,7 @@ static error_code_t fast_topn_bcast_all(lnf_mem_t *mem)
                 }
         }
 
+send_terminator:
         /* Phase 2 done, notify slaves by zero record length. */
         rec_len = 0;
         MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
@@ -491,6 +494,7 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 
         /* Send, receive, process. */
         switch (args->working_mode) {
+        case MODE_PASS: //only termination msg will be received from each slave
         case MODE_LIST:
                 return mode_rec_main(slave_cnt, args->rec_limit);
 

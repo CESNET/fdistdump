@@ -45,6 +45,7 @@
 #define _XOPEN_SOURCE //strptime()
 
 #include "arg_parse.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,8 +59,12 @@
 #include <libnf.h>
 
 
-enum { //command line options
-        OPT_NO_FAST_TOPN = 256, //above ASCII
+/* Global variables. */
+extern int secondary_errno;
+
+enum { //command line options, have to start above ASCII
+        OPT_VERSION = 256, //print version
+        OPT_NO_FAST_TOPN, //disable fast topn-N algorithm
 };
 
 
@@ -81,68 +86,82 @@ static const char *const time_formats[] = {
 };
 
 
-static int str_to_tm(struct tm *time, const char *time_str)
+static error_code_t str_to_tm(struct tm *time, const char *time_str)
 {
-        size_t idx;
         char *ret;
-        static const size_t time_formats_cnt = sizeof(time_formats) /
-                sizeof(*time_formats);
+        static const size_t time_formats_cnt = ARRAY_SIZE(time_formats);
 
         memset(time, 0, sizeof(struct tm));
 
-        for (idx = 0; idx < time_formats_cnt; ++idx) {
-                ret = strptime(time_str, time_formats[idx], time);
-
+        for (size_t i = 0; i < time_formats_cnt; ++i) {
+                ret = strptime(time_str, time_formats[i], time);
                 if (ret != NULL && *ret == '\0') {
                         return E_OK; //conversion successful
                 }
         }
 
+        print_err(E_ARG, 0, "unable to parse time string \"%s\"", time_str);
         return E_ARG; //conversion failure
 }
 
 
-static int set_interval(struct cmdline_args *args, char *interval_arg_str)
+/** \brief Parse and store time interval string.
+ *
+ * Function tries to parse interval string, fills interval_begin and
+ * interval_end with appropriate values on success. Beginning and ending dates
+ * (and times) are  separated with INTERVAL_SEPARATOR, if ending date is not
+ * specified, current time is used.
+ * If interval string is successfuly parsed, E_OK is returned. On error, content
+ * of interval_begin and interval_end is undefined and E_ARG is returned.
+ *
+ * \param[in,out] args Structure with parsed command line parameters and other
+ *                   program settings.
+ * \param[in] agg_arg_str Aggregation string, usually gathered from command
+ *                        line.
+ * \return Error code. E_OK or E_ARG.
+ */
+static error_code_t set_interval(struct cmdline_args *args,
+                char *interval_arg_str)
 {
+        error_code_t primary_errno = E_OK;
         char *begin_str;
         char *end_str;
         char *remaining_str;
         char *saveptr = NULL;
-        int ret;
 
         /* Split time interval string. */
         begin_str = strtok_r(interval_arg_str, INTERVAL_SEPARATOR, &saveptr);
         if (begin_str == NULL) {
-                printf("invalid interval string \"%s\"\n", interval_arg_str);
+                print_err(E_ARG, 0, "invalid interval string \"%s\"\n",
+                                interval_arg_str);
                 return E_ARG;
         }
         end_str = strtok_r(NULL, INTERVAL_SEPARATOR, &saveptr); //NULL is valid
         remaining_str = strtok_r(NULL, INTERVAL_SEPARATOR, &saveptr);
         if (remaining_str != NULL) {
-                printf("invalid interval string \"%s\"\n", interval_arg_str);
+                print_err(E_ARG, 0, "invalid interval string \"%s\"\n",
+                                interval_arg_str);
                 return E_ARG;
         }
 
-        /* Convert time strings to struct tm. */
-        ret = str_to_tm(&args->interval_begin, begin_str);
-        if (ret != E_OK) {
-                printf("invalid date format \"%s\"\n", begin_str);
+        /* Convert time strings to tm structure. */
+        primary_errno = str_to_tm(&args->interval_begin, begin_str);
+        if (primary_errno != E_OK) {
                 return E_ARG;
         }
         if (end_str == NULL) { //NULL means until now
                 const time_t now = time(NULL);
                 localtime_r(&now, &args->interval_end);
         } else {
-                ret = str_to_tm(&args->interval_end, end_str);
-                if (ret != E_OK) {
-                        printf("invalid date format \"%s\"\n", end_str);
+                primary_errno = str_to_tm(&args->interval_end, end_str);
+                if (primary_errno != E_OK) {
                         return E_ARG;
                 }
         }
 
         /* Check interval sanity. */
         if (diff_tm(args->interval_end, args->interval_begin) <= 0.0) {
-                printf("invalid interval duration\n");
+                print_err(E_ARG, 0, "zero or negative interval duration");
                 return E_ARG;
         }
 
@@ -159,7 +178,7 @@ static int set_interval(struct cmdline_args *args, char *interval_arg_str)
  *
  * Function tries to parse aggregation string, fills agg_params and
  * agg_params_cnt with appropriate values on success. Aggregation arguments are
- * separated with commas, maximum number of arguments is MAX_AGG_PARAMS.
+ * separated with AGG_SEPARATOR, maximum number of arguments is MAX_AGG_PARAMS.
  * Individual arguments are parsed by libnf function lnf_fld_parse(), see libnf
  * documentation for more information.
  * If argument is successfuly parsed, next agg_param struct is filled and
@@ -173,37 +192,46 @@ static int set_interval(struct cmdline_args *args, char *interval_arg_str)
  *                        line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_agg(struct cmdline_args *args, char *agg_arg_str)
+static error_code_t set_agg(struct cmdline_args *args, char *agg_arg_str)
 {
         char *token;
         char *saveptr = NULL;
-        int ret, fld, nb, nb6, agg;
+        int fld;
+        int nb;
+        int nb6;
+        int agg;
 
         token = strtok_r(agg_arg_str, AGG_SEPARATOR, &saveptr); //first token
         while (token != NULL) {
                 size_t idx;
 
                 if (args->agg_params_cnt >= MAX_AGG_PARAMS) {
-                        printf("agg count err\n");
+                        print_err(E_ARG, 0, "too many aggregations "
+                                        "(limit is %lu)", MAX_AGG_PARAMS);
                         return E_ARG;
                 }
 
                 /* Parse token, return field. */
                 fld = lnf_fld_parse(token, &nb, &nb6);
                 if (fld == LNF_FLD_ZERO_ || fld == LNF_ERR_OTHER) {
-                        printf("agg field err \"%s\"\n", token);
+                        print_err(E_ARG, 0, "unknown aggragation field \"%s\"",
+                                        token);
                         return E_ARG;
                 }
-                if (nb < 0 || nb > 32 || nb6 < 0 || nb6 > 128) {
-                        printf("agg numbits err\n");
+                if (nb < 0 || nb > 32) {
+                        print_err(E_ARG, 0, "bad number of IPv4 bits: %d", nb);
+                        return E_ARG;
+                } else if (nb6 < 0 || nb6 > 128) {
+                        print_err(E_ARG, 0, "bad number of IPv6 bits: %d", nb6);
                         return E_ARG;
                 }
 
                 /* Lookup default aggregation key for field. */
-                ret = lnf_fld_info(fld, LNF_FLD_INFO_AGGR, &agg, sizeof (agg));
-                assert(ret == LNF_OK); //should not happen
+                secondary_errno = lnf_fld_info(fld, LNF_FLD_INFO_AGGR, &agg,
+                                sizeof (agg));
+                assert(secondary_errno == LNF_OK);
 
-                /* Look if this field is already in. */
+                /* Lookup if this field is already in. */
                 for (idx = 0; idx < args->agg_params_cnt; ++idx) {
                         if (args->agg_params[idx].field == fld) {
                                 break; //found the same field -> overwrite it
@@ -245,32 +273,42 @@ static int set_agg(struct cmdline_args *args, char *agg_arg_str)
  * \param[in] order_str Order string, usually gathered from command line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_order(struct cmdline_args *args, char *order_str)
+static error_code_t set_order(struct cmdline_args *args, char *order_str)
 {
-        int ret, fld, nb, nb6, agg, sort;
+        int fld;
+        int nb;
+        int nb6;
+        int agg;
+        int sort;
         size_t idx;
 
         if (args->agg_params_cnt >= MAX_AGG_PARAMS) {
-                printf("agg count err\n");
+                print_err(E_ARG, 0, "too many aggregations "
+                                "(limit is %lu)", MAX_AGG_PARAMS);
                 return E_ARG;
         }
 
         /* Parse string, return field. */
         fld = lnf_fld_parse(order_str, &nb, &nb6);
         if (fld == LNF_FLD_ZERO_ || fld == LNF_ERR_OTHER) {
-                printf("order string err \"%s\"\n", order_str);
+                print_err(E_ARG, 0, "unknown order field \"%s\"", order_str);
                 return E_ARG;
         }
-        if (nb < 0 || nb > 32 || nb6 < 0 || nb6 > 128) {
-                printf("order numbits err\n");
+        if (nb < 0 || nb > 32) {
+                print_err(E_ARG, 0, "bad number of IPv4 bits: %d", nb);
+                return E_ARG;
+        } else if (nb6 < 0 || nb6 > 128) {
+                print_err(E_ARG, 0, "bad number of IPv6 bits: %d", nb6);
                 return E_ARG;
         }
 
         /* Get default aggregation and sort key for this field. */
-        ret = lnf_fld_info(fld, LNF_FLD_INFO_AGGR, &agg, sizeof (agg));
-        assert(ret == LNF_OK);
-        ret = lnf_fld_info(fld, LNF_FLD_INFO_SORT, &sort, sizeof(sort));
-        assert(ret == LNF_OK);
+        secondary_errno = lnf_fld_info(fld, LNF_FLD_INFO_AGGR, &agg,
+                        sizeof (agg));
+        assert(secondary_errno == LNF_OK);
+        secondary_errno = lnf_fld_info(fld, LNF_FLD_INFO_SORT, &sort,
+                        sizeof(sort));
+        assert(secondary_errno == LNF_OK);
 
         /* Lookup sort flag in existing parameters. */
         for (idx = 0; idx < args->agg_params_cnt; ++idx) {
@@ -297,10 +335,12 @@ static int set_order(struct cmdline_args *args, char *order_str)
 /** \brief Parse statistic string and save parameters.
  *
  * Function tries to parse statistic string. Statistic is only shortcut for
- * aggregation, sort and limit. Therefore statistic string expected as
- * "aggragation[/order]". Aggregation is passed to set_agg() and order, if set,
- * is passed to set_order(). If order is not set, DEFAULT_STAT_ORD is used.
- * If limit was not set yet (-l parameter), DEFAULT_STAT_LIMIT is used.
+ * aggregation, sort and limit. Therefore statistic string is expected as
+ * "aggragation[/order]". Aggregation string is passed to set_agg() and order,
+ * if set, is passed to set_order(). If order is not set, DEFAULT_STAT_ORD is
+ * used. If limit (-l parameter) wasn't previously set, or was disabled, it will
+ * be overwritten by DEFAULT_STAT_LIMIT. It is possible to disable limit, but
+ * -l 0 have to appear after -s on command line.
  * If statistic string is successfuly parsed, next agg_params struct is filled,
  * agg_params_cnt is incremented and E_OK is returned. If field already exists,
  * it is overwritten. On error, content of agg_params and agg_params_cnt is
@@ -312,22 +352,24 @@ static int set_order(struct cmdline_args *args, char *order_str)
  *                        line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_stat(struct cmdline_args *args, char *stat_arg_str)
+static error_code_t set_stat(struct cmdline_args *args, char *stat_arg_str)
 {
+        error_code_t primary_errno;
         char *stat_str;
         char *order_str;
+        char *remaining_str;
         char *saveptr = NULL;
-        int ret;
 
         stat_str = strtok_r(stat_arg_str, STAT_SEPARATOR, &saveptr);
         if (stat_str == NULL) {
-                printf("stat string err \"%s\"\n", stat_arg_str);
+                print_err(E_ARG, 0, "invalid statistic string \"%s\"\n",
+                                stat_arg_str);
                 return E_ARG;
         }
 
-        ret = set_agg(args, stat_str);
-        if (ret != E_OK) {
-                return E_ARG;
+        primary_errno = set_agg(args, stat_str);
+        if (primary_errno != E_OK) {
+                return primary_errno;
         }
 
         order_str = strtok_r(NULL, STAT_SEPARATOR, &saveptr);
@@ -335,18 +377,18 @@ static int set_stat(struct cmdline_args *args, char *stat_arg_str)
                 order_str = DEFAULT_STAT_ORD;
         }
 
-        ret = set_order(args, order_str);
-        if (ret != E_OK) {
+        primary_errno = set_order(args, order_str);
+        if (primary_errno != E_OK) {
+                return primary_errno;
+        }
+
+        remaining_str = strtok_r(NULL, STAT_SEPARATOR, &saveptr);
+        if (remaining_str != NULL) {
+                print_err(E_ARG, 0, "invalid statistic string \"%s\"\n",
+                                stat_arg_str);
                 return E_ARG;
         }
 
-        order_str = strtok_r(NULL, STAT_SEPARATOR, &saveptr);
-        if (order_str != NULL) {
-                printf("stat string err \"%s\"\n", order_str);
-                return E_ARG;
-        }
-
-        //TODO: shouldn't overwrite previous "-l 0" argument with default one
         if (args->rec_limit == 0) {
                 args->rec_limit = DEFAULT_STAT_LIMIT;
         }
@@ -368,28 +410,30 @@ static int set_stat(struct cmdline_args *args, char *stat_arg_str)
  *                       line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_filter(struct cmdline_args *args, char *filter_str)
+static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
 {
-        int ret;
         lnf_filter_t *filter;
 
         /* Try to initialize filter. */
-        ret = lnf_filter_init(&filter, filter_str);
-        if (ret != LNF_OK) {
-                printf("cannot initialise filter \"%s\"\n", filter_str);
+        //TODO: try new filter
+        secondary_errno = lnf_filter_init(&filter, filter_str);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_ARG, secondary_errno,
+                                "cannot initialise filter \"%s\"", filter_str);
                 return E_ARG;
         }
 
         lnf_filter_free(filter);
         args->filter_str = filter_str;
+
         return E_OK;
 }
 
 
-/** \brief Check, convert and save limit string.
+/** \brief Check, parse and save limit string.
  *
  * Function converts limit string into unsigned integer. If string is correct
- * and conversion was successful, args->limit is set and E_OK is returned.
+ * and conversion was successful, args->rec_limit is set and E_OK is returned.
  * On error (overflow, invalid characters, negative value, ...) args struct is
  * kept untouched and E_ARG is returned.
  *
@@ -398,31 +442,30 @@ static int set_filter(struct cmdline_args *args, char *filter_str)
  * \param[in] limit_str Limit string, usually gathered from command line.
  * \return Error code. E_OK or E_ARG.
  */
-static int set_limit(struct cmdline_args *args, char *limit_str)
+static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 {
         char *endptr;
-        long long int limit;
+        long int limit;
 
-        errno = 0;
-        limit = strtoll(limit_str, &endptr, 0);
+        errno = 0; //erase possible previous error number
+        limit = strtol(limit_str, &endptr, 0);
 
         /* Check for various possible errors. */
         if (errno != 0) {
                 perror(limit_str);
                 return E_ARG;
         }
-        if (*endptr != '\0') //remaining characters
-        {
-                printf("%s: invalid limit\n", limit_str);
+        if (*endptr != '\0') { //remaining characters
+                print_err(E_ARG, 0, "invalid limit \"%s\"", limit_str);
                 return E_ARG;
         }
-        if (limit < 0) //negatve limit
-        {
-                printf("%s: negative limit\n", limit_str);
+        if (limit < 0) { //negatve limit
+                print_err(E_ARG, 0, "negative limit \"%s\"", limit_str);
                 return E_ARG;
         }
 
         args->rec_limit = (size_t)limit;
+
         return E_OK;
 }
 
@@ -434,15 +477,16 @@ void set_defaults(struct cmdline_args *args)
 }
 
 
-int arg_parse(struct cmdline_args *args, int argc, char **argv)
+error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 {
-        int opt, ret = E_OK, sort_key = LNF_FLD_ZERO_;
-        bool help = false, bad_arg = false;
+        error_code_t primary_errno = E_OK;
+        int opt;
+        int sort_key = LNF_FLD_ZERO_;
         size_t input_arg_cnt = 0;
-
-        const char usage_string[] = "Usage: %s options\n";
+        const char usage_string[] = "Usage: mpirun [ options ] " PACKAGE_NAME
+                " [ <args> ]\n";
         const char help_string[] = "help\n";
-
+        const char *short_opts = "a:f:i:l:o:s:r:h";
         const struct option long_opts[] = {
                 {"aggregation", required_argument, NULL, 'a'},
                 {"filter", required_argument, NULL, 'f'},
@@ -451,93 +495,97 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"order", required_argument, NULL, 'o'},
                 {"statistic", required_argument, NULL, 's'},
                 {"read", required_argument, NULL, 'r'},
+                {"help", no_argument, NULL, 'h'},
 
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+                {"version", no_argument, NULL, OPT_VERSION},
 
-                {"help", no_argument, NULL, 'h'},
-                {0, 0, 0, 0} //required by getopt_long()
+                {0, 0, 0, 0} //termination required by getopt_long()
         };
-        const char *short_opts = "a:f:i:l:o:s:r:h";
 
         set_defaults(args);
 
-        while (!bad_arg && !help) {
+        while (true) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
                 if (opt == -1) {
                         break; //all options processed successfuly
                 }
 
                 switch (opt) {
-                case 'a'://aggregation
-                        ret = set_agg(args, optarg);
+                case 'a': //aggregation
+                        primary_errno = set_agg(args, optarg);
                         break;
-                case 'f'://filter expression
-                        ret = set_filter(args, optarg);
+
+                case 'f': //filter expression
+                        primary_errno = set_filter(args, optarg);
                         break;
-                case 'i'://time interval
-                        ret = set_interval(args, optarg);
+
+                case 'i': //time interval
+                        primary_errno = set_interval(args, optarg);
                         input_arg_cnt++;
                         break;
-                case 'l'://limit
-                        ret = set_limit(args, optarg);
+
+                case 'l': //limit
+                        primary_errno = set_limit(args, optarg);
                         break;
-                case 'o'://order
-                        ret = set_order(args, optarg);
+
+                case 'o': //order
+                        primary_errno = set_order(args, optarg);
                         break;
-                case 's'://statistic
-                        ret = set_stat(args, optarg);
+
+                case 's': //statistic
+                        primary_errno = set_stat(args, optarg);
                         break;
-                case 'r'://path to read file(s) from
+
+                case 'r': //path to input file or directory
                         args->path_str = optarg;
                         input_arg_cnt++;
                         break;
-                case 'h'://help
-                        help = true;
-                        break;
+
+                case 'h': //help
+                        printf(usage_string);
+                        printf("%s", help_string);
+                        return E_PASS;
+
+
+                case OPT_VERSION:
+                        printf("%s\n", PACKAGE_STRING);
+                        return E_PASS;
 
                 case OPT_NO_FAST_TOPN: //disable fast top-N algorithm
                         args->use_fast_topn = false;
                         break;
 
+
                 default: /* '?' or '0' */
-                        bad_arg = true;
-                        break;
+                        return E_ARG;
                 }
 
-                if (ret != E_OK) {
-                        bad_arg = true;
+                if (primary_errno != E_OK) {
+                        return primary_errno;
                 }
         }
 
-        if (help) //print help and exit
-        {
-                printf(usage_string, argv[0]);
-                printf("%s", help_string);
-                return E_HELP;
-        }
-
-        if (bad_arg) { //error already reported
-                return E_ARG;
-        }
-        if (optind != argc) //remaining arguments
-        {
-                fprintf(stderr, usage_string, argv[0]);
+        if (optind != argc) { //remaining arguments
+                print_err(E_ARG, 0, "unknown positional argument \"%s\"",
+                                argv[optind]);
+                fprintf(stderr, usage_string);
                 return E_ARG;
         }
 
         /* Correct data input check. */
         if (input_arg_cnt == 0) {
-                fprintf(stderr, "Missing -i or -r.\n");
-                fprintf(stderr, usage_string, argv[0]);
+                print_err(E_ARG, 0, "missing data input (-i or -r)");
+                fprintf(stderr, usage_string);
                 return E_ARG;
         } else if (input_arg_cnt > 1) {
-                fprintf(stderr, "-i and -r are mutually exclusive.\n");
-                fprintf(stderr, usage_string, argv[0]);
+                print_err(E_ARG, 0, "only one data input allowed (-i or -r)");
+                fprintf(stderr, usage_string);
                 return E_ARG;
         }
         if (args->path_str && (strlen(args->path_str) >= PATH_MAX)) {
-                errno = ENAMETOOLONG;
-                perror(args->path_str);
+                print_err(E_ARG, 0, "path string too long (limit is %lu)",
+                                PATH_MAX);
                 return E_ARG;
         }
 
@@ -564,6 +612,7 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
                 for (size_t i = 0; i < args->agg_params_cnt; ++i) {
                         if (args->agg_params[i].flags & LNF_SORT_FLAGS) {
                                 sort_key = args->agg_params[i].field;
+                                break;
                         }
                 }
                 if (sort_key < LNF_FLD_DOCTETS ||
@@ -574,51 +623,31 @@ int arg_parse(struct cmdline_args *args, int argc, char **argv)
 
 
 #ifdef DEBUG
-        char buff_from[255], buff_to[255];
-
-        printf("aggregation: \n");
+        print_debug("------------------------------------------------------");
+        print_debug("mode: %s", working_mode_to_str(args->working_mode));
         for (size_t i = 0; i < args->agg_params_cnt; ++i) {
                 struct agg_param *ap = args->agg_params + i;
-                printf("\t%d, 0x%x, (%d, %d)\n", ap->field, ap->flags,
-                                ap->numbits, ap->numbits6);
+                print_debug("aggregation %lu: %d, 0x%x, (%d, %d)", i, ap->field,
+                                ap->flags, ap->numbits,ap->numbits6);
         }
-        printf("filter: %s\n", args->filter_str);
-
-        strftime(buff_from, sizeof(buff_from), "%c", &args->interval_begin);
-        strftime(buff_to, sizeof(buff_to), "%c", &args->interval_end);
-
-        printf("interval: %s - %s\n", buff_from, buff_to);
-
-        while (diff_tm(args->interval_end, args->interval_begin) > 0.0) {
-                strftime(buff_from, sizeof(buff_from), "%Y/%m/%d/"
-                                FLOW_FILE_NAME_FORMAT, &args->interval_begin);
-                printf("%s\n", buff_from);
-                args->interval_begin.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
-                mktime_utc(&args->interval_begin); //normalization
+        if(args->filter_str != NULL) {
+                print_debug("filter: %s", args->filter_str);
         }
+
+        if (args->path_str != NULL) {
+                print_debug("path: %s", args->path_str);
+        } else {
+                char begin[255], end[255];
+
+                strftime(begin, sizeof(begin), "%c", &args->interval_begin);
+                strftime(end, sizeof(end), "%c", &args->interval_end);
+                print_debug("interval: %s - %s", begin, end);
+        }
+        if (args->use_fast_topn) {
+                print_debug("flags: using fast top-N algorithm");
+        }
+        print_debug("------------------------------------------------------\n");
 #endif //DEBUG
 
         return E_OK;
 }
-
-#if 0
-int main(int argc, char **argv)
-{
-        int ret, err = EXIT_SUCCESS;
-        struct cmdline_args args;
-
-        ret = arg_parse(&args, argc, argv);
-        switch (ret) {
-        case E_OK:
-                //continue
-                break;
-        case E_HELP:
-                break;
-        default:
-                err = ret;
-                break;
-        }
-
-        return err;
-}
-#endif //0

@@ -55,6 +55,7 @@
 #include <mpi.h>
 #include <arpa/inet.h> //inet_ntop()
 
+#define MAX_MSG_LEN (MPI_MAX_PROCESSOR_NAME + 100)
 
 /* Global variables. */
 extern MPI_Datatype mpi_struct_agg_param;
@@ -77,16 +78,16 @@ static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
 {
         const char *ret;
 
-        if (addr.data[0]) { //IPv6
-                if (buff_size < INET6_ADDRSTRLEN) {
-                        return NULL;
-                }
-                ret = inet_ntop(AF_INET6, &addr, buff, buff_size);
-        } else { //IPv4
+        if (IN6_IS_ADDR_V4COMPAT(addr.data)) { //IPv4
                 if (buff_size < INET_ADDRSTRLEN) {
                         return NULL;
                 }
                 ret = inet_ntop(AF_INET, &addr.data[3], buff, buff_size);
+        } else { //IPv6
+                if (buff_size < INET6_ADDRSTRLEN) {
+                        return NULL;
+                }
+                ret = inet_ntop(AF_INET6, &addr, buff, buff_size);
         }
 
         assert(ret != NULL);
@@ -95,7 +96,75 @@ static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
 }
 
 
-int print_brec(const lnf_brec1_t *brec)
+static char * get_processor_info(void)
+{
+        static char msg[MAX_MSG_LEN];
+        size_t msg_offset = 0;
+        char proc_name[MPI_MAX_PROCESSOR_NAME];
+        int world_rank, world_size, result_len;
+
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+        MPI_Get_processor_name(proc_name, &result_len);
+
+        if (world_rank == ROOT_PROC) {
+                msg_offset += snprintf(msg, MAX_FN_LEN, "master, ");
+        } else {
+                msg_offset += snprintf(msg, MAX_FN_LEN, "slave, ");
+        }
+
+        snprintf(msg + msg_offset, MAX_MSG_LEN - msg_offset,
+                        "rank %d/%d with processor name %s", world_rank,
+                        world_size, proc_name);
+
+        return msg;
+}
+
+
+static char * error_code_to_str(error_code_t prim_errno)
+{
+        static char msg[100];
+
+        switch (prim_errno) {
+        case E_OK:
+        case E_PASS:
+        case E_EOF:
+                sprintf(msg, "no error");
+                break;
+
+        case E_MEM:
+                sprintf(msg, "memory");
+                break;
+
+        case E_MPI:
+                sprintf(msg, "MPI");
+                break;
+
+        case E_LNF:
+                sprintf(msg, "LNF");
+                break;
+
+        case E_INTERNAL:
+                sprintf(msg, "internal");
+                break;
+
+        case E_ARG:
+                sprintf(msg, "command line argument");
+                break;
+
+        case E_PATH:
+                sprintf(msg, "path");
+                break;
+
+        default:
+                assert(!"unknown error code");
+        };
+
+        return msg;
+}
+
+
+error_code_t print_brec(const lnf_brec1_t *brec)
 {
         char *ret;
 
@@ -105,12 +174,12 @@ int print_brec(const lnf_brec1_t *brec)
         ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
         if (ret == NULL) {
                 print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_MEM;
+                return E_INTERNAL;
         }
         ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
         if (ret == NULL) {
                 print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_MEM;
+                return E_INTERNAL;
         }
 
         printf("%lu -> %lu\t", brec->first, brec->last);
@@ -125,18 +194,12 @@ int print_brec(const lnf_brec1_t *brec)
 void print_err(error_code_t prim_errno, int sec_errno,
                 const char *format, ...)
 {
+        (void)sec_errno; //TODO
         va_list arg_list;
-        char proc_name[MPI_MAX_PROCESSOR_NAME];
-        int world_rank, world_size, result_len;
-
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-        MPI_Get_processor_name(proc_name, &result_len);
         va_start(arg_list, format);
 
-        fprintf(stderr, "%d:%d\t", prim_errno, sec_errno);
-        fprintf(stderr, "Error (rank %d/%d, name %s): ",
-                        world_rank, world_size, proc_name);
+        fprintf(stderr, "Error on %s caused by %s: ", get_processor_info(),
+                        error_code_to_str(prim_errno));
         vfprintf(stderr, format, arg_list);
         fprintf(stderr, "\n");
 
@@ -147,22 +210,58 @@ void print_err(error_code_t prim_errno, int sec_errno,
 void print_warn(error_code_t prim_errno, int sec_errno,
                 const char *format, ...)
 {
+        (void)sec_errno; //TODO
         va_list arg_list;
-        char proc_name[MPI_MAX_PROCESSOR_NAME];
-        int world_rank, world_size, result_len;
-
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-        MPI_Get_processor_name(proc_name, &result_len);
         va_start(arg_list, format);
 
-        fprintf(stderr, "%d:%d\t", prim_errno, sec_errno);
-        fprintf(stderr, "Warning (rank %d/%d, name %s): ",
-                        world_rank, world_size, proc_name);
+        fprintf(stderr, "Warning on %s caused by %s: ", get_processor_info(),
+                        error_code_to_str(prim_errno));
         vfprintf(stderr, format, arg_list);
         fprintf(stderr, "\n");
 
         va_end(arg_list);
+}
+
+
+void print_debug(const char *format, ...)
+{
+        va_list arg_list;
+        va_start(arg_list, format);
+
+        fprintf(stderr, "DEBUG on %s: ", get_processor_info());
+        vfprintf(stderr, format, arg_list);
+        fprintf(stderr, "\n");
+
+        va_end(arg_list);
+}
+
+
+char * working_mode_to_str(working_mode_t working_mode)
+{
+        static char msg[MAX_MSG_LEN];
+
+        switch (working_mode) {
+        case MODE_LIST:
+                snprintf(msg, MAX_MSG_LEN, "list records");
+                break;
+
+        case MODE_SORT:
+                snprintf(msg, MAX_MSG_LEN, "sort records");
+                break;
+
+        case MODE_AGGR:
+                snprintf(msg, MAX_MSG_LEN, "aggregate records");
+                break;
+
+        case MODE_PASS:
+                snprintf(msg, MAX_MSG_LEN, "pass");
+                break;
+
+        default:
+                assert(!"unknown working mode");
+        }
+
+        return msg;
 }
 
 
@@ -237,7 +336,8 @@ void free_mpi_struct_shared_task_ctx(void)
 }
 
 
-int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt)
+error_code_t mem_setup(lnf_mem_t *mem, const struct agg_param *ap,
+                size_t ap_cnt)
 {
         /* Default aggragation fields: first, last, flows, packets, bytes. */
         secondary_errno = lnf_mem_fastaggr(mem, LNF_FAST_AGGR_BASIC);
@@ -259,39 +359,46 @@ int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt)
 }
 
 
-int mem_print(lnf_mem_t *mem, size_t limit)
+error_code_t mem_print(lnf_mem_t *mem, size_t limit)
 {
-        int ret, err = E_OK;
+        error_code_t primary_errno = E_OK;
         size_t rec_cntr = 0;
         lnf_rec_t *rec;
         lnf_brec1_t brec;
 
-        ret = lnf_rec_init(&rec);
-        if (ret != LNF_OK) {
-                print_err(E_LNF, ret, "lnf_rec_init()");
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
                 return E_LNF;
         }
 
-        for (ret = lnf_mem_read(mem, rec); ret == LNF_OK;
-                        ret = lnf_mem_read(mem, rec)) {
-                ret = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
-                if (ret != LNF_OK) {
-                        print_err(E_LNF, ret, "lnf_rec_fget()");
-                        err = E_LNF;
-                        break;
+        secondary_errno = lnf_mem_read(mem, rec); //read first
+        while (secondary_errno == LNF_OK) {
+                secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
+                if (secondary_errno != LNF_OK) {
+                        primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_rec_fget()");
+                        goto free_lnf_rec;
                 }
 
                 print_brec(&brec);
-                rec_cntr++;
 
-                if (rec_cntr == limit) {
-                        break;
+                if (++rec_cntr == limit) {
+                        goto free_lnf_rec;
                 }
+
+                secondary_errno = lnf_mem_read(mem, rec); //read next
+        }
+        if (secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
         }
 
+free_lnf_rec:
         lnf_rec_free(rec);
 
-        return err;
+        return primary_errno;
 }
 
 
