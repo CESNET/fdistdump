@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -43,7 +43,7 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_LOG_FILE=create_mpi_struct.log
+TEST_LOG_FILE=create_mpi_struct.testlog
 TEST_DESC="Creation of MPI datatypes"
 
 rm -f $TEST_LOG_FILE

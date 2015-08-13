@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -45,7 +45,7 @@
 # if advised of the possibility of such damage.
 
 
-TEST_LOG_FILE=arguments.log
+TEST_LOG_FILE=arguments.testlog
 TEST_DESC="Processing of arguments"
 
 rm -f $TEST_LOG_FILE

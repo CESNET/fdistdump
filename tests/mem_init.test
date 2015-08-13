@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -43,7 +43,7 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_LOG_FILE=mem_init.log
+TEST_LOG_FILE=mem_init.testlog
 TEST_DESC="Memory initialization"
 
 rm -f $TEST_LOG_FILE

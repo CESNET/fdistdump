@@ -53,6 +53,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <libnf.h>
 #include <mpi.h>
 
 MPI_Datatype mpi_struct_agg_param;
