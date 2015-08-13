@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
