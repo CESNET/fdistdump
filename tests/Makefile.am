@@ -3,7 +3,7 @@ TESTS = mpi_init.test create_mpi_struct.test arguments.test mem_init.test mem_se
 
 #check_PROGRAMS =
 
-bin_PROGRAMS = mpi_init create_mpi_struct arguments mem_init mem_setup mem_store_print
+bin_PROGRAMS = mpi_init create_mpi_struct arguments mem_init mem_setup mem_store_print create_test_data
 
 #AM_LDFLAGS=-lnf
 COM_CPPFLAGS=-I../src
@@ -29,3 +29,6 @@ mem_setup_CPPFLAGS=$(COM_CPPFLAGS)
 mem_store_print_SOURCES=mem_store_print.c test_common.c ../src/common.c \
                   ../src/arg_parse.c
 mem_store_print_CPPFLAGS=$(COM_CPPFLAGS)
+
+create_test_data_SOURCES=create_test_data.c test_common.c
+create_test_data_CPPFLAGS=$(COM_CPPFLAGS)

@@ -135,6 +135,7 @@ enum { //tags
         TAG_FILTER,
         TAG_AGG,
         TAG_DATA,
+        TAG_STATS,
 };
 
 enum { //control commands
@@ -210,5 +211,21 @@ int tm_diff(const struct tm a, const struct tm b);
  * \return Calendar time representation of tm.
  */
 time_t mktime_utc(struct tm *tm);
+
+/** \brief Initialize lnf memory for traffic volume statistics.
+ *
+ * This memory is used for computing of sum of flows, bytes and packets of all
+ * processed records.
+ *
+ * \param[inout] stat_mem_p Pointer to pointer to lnf memory structure.
+ * \return E_OK on success, error code otherwise.
+ */
+int init_statistics(lnf_mem_t **stat_mem_p);
+
+/** \brief Free lnf memory for traffic volume statistics, sets pointer to NULL.
+ *
+ * \param[inout] stat_mem_p Pointer to lnf memory structure.
+ */
+void free_statistics(lnf_mem_t **stat_mem_p);
 
 #endif //COMMON_H

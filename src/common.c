@@ -457,3 +457,38 @@ time_t mktime_utc(struct tm *tm)
 
         return ret;
 }
+
+/* Initialize memory for traffic volume statistics.*/
+int init_statistics(lnf_mem_t **stat_mem_p)
+{
+        if(lnf_mem_init(stat_mem_p) != LNF_OK){
+                return E_LNF;
+        }
+
+
+        if (lnf_mem_fadd(*stat_mem_p, LNF_FLD_AGGR_FLOWS, LNF_AGGR_SUM, 0, 0)
+            != LNF_OK){
+                free_statistics(stat_mem_p);
+                return E_LNF;
+        }
+        if (lnf_mem_fadd(*stat_mem_p, LNF_FLD_DPKTS, LNF_AGGR_SUM, 0, 0)
+            != LNF_OK){
+                free_statistics(stat_mem_p);
+                return E_LNF;
+        }
+        if (lnf_mem_fadd(*stat_mem_p, LNF_FLD_DOCTETS, LNF_AGGR_SUM, 0, 0)
+            != LNF_OK){
+                free_statistics(stat_mem_p);
+                return E_LNF;
+        }
+
+        return E_OK;
+}
+
+
+/* Free statistics memory. */
+void free_statistics(lnf_mem_t **stat_mem_p)
+{
+   lnf_mem_free(*stat_mem_p);
+   *stat_mem_p = NULL;
+}

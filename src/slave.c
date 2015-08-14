@@ -84,6 +84,7 @@ struct slave_task_ctx {
 
         /* Slave specific task context. */
         lnf_mem_t *agg_mem; //LNF memory
+        lnf_mem_t *stats_mem; //LNF memory used for computation of statistics
         lnf_filter_t *filter; //LNF compiled filter expression
         data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX]; //file or directory path string
@@ -160,27 +161,38 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                                                 "lnf_mem_write()");
                                 goto free_lnf_rec;
                         }
-                        continue;
-                }
 
+                        if (stc->stats_mem) {
+                                secondary_errno =
+                                        lnf_mem_write(stc->stats_mem, rec);
+                                if (secondary_errno != LNF_OK) {
+                                        primary_errno = E_LNF;
+                                        print_err(primary_errno,
+                                                  secondary_errno,
+                                                  "lnf_mem_write() - stats");
+                                        goto free_lnf_rec;
+                                }
+                        }
+                } else {
                 /*
                  * No aggregation -> store record to buffer.
                  * Send buffer, if buffer full, otherwise continue reading.
                  */
-                secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1,
-                                data_buff[buff_idx] + data_idx++);
-                assert(secondary_errno == LNF_OK);
+                        secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1,
+                                        data_buff[buff_idx] + data_idx++);
+                        assert(secondary_errno == LNF_OK);
 
-                if (data_idx == XCHG_BUFF_ELEMS) { //buffer full
-                        isend_bytes(data_buff[buff_idx], XCHG_BUFF_SIZE,
-                                        &request);
-                        data_idx = 0;
-                        buff_idx = !buff_idx; //toggle buffers
-                }
+                        if (data_idx == XCHG_BUFF_ELEMS) { //buffer full
+                                isend_bytes(data_buff[buff_idx], XCHG_BUFF_SIZE,
+                                                &request);
+                                data_idx = 0;
+                                buff_idx = !buff_idx; //toggle buffers
+                        }
 
-                if (stc->proc_rec_cntr == stc->ms_shared.rec_limit) {
-                        stc->rec_limit_reached = true;
-                        break; //record limit reached
+                        if (stc->proc_rec_cntr == stc->ms_shared.rec_limit) {
+                                stc->rec_limit_reached = true;
+                                break; //record limit reached
+                        }
                 }
         }
 
@@ -297,6 +309,9 @@ static void task_free(struct slave_task_ctx *stc)
         if (stc->agg_mem != NULL) {
                 lnf_mem_free(stc->agg_mem);
         }
+        if (stc->stats_mem != NULL) {
+                free_statistics(&stc->stats_mem);
+        }
 }
 
 
@@ -405,6 +420,11 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
                         goto free_lnf_mem;
                 }
 
+                primary_errno = init_statistics(&stc->stats_mem);
+                if (primary_errno != E_OK) {
+                        goto free_lnf_mem;
+                }
+
                 return E_OK;
 
         case MODE_PASS:
@@ -417,6 +437,7 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
 free_lnf_mem:
         lnf_mem_free(stc->agg_mem);
         stc->agg_mem = NULL;
+        free_statistics(&stc->stats_mem);
 
         return primary_errno;
 }
@@ -518,6 +539,28 @@ static error_code_t send_loop(struct slave_task_ctx *stc)
 send_terminator:
         /* All sent or error, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
+
+        if (primary_errno == E_OK && stc->stats_mem) {
+                secondary_errno = lnf_mem_first_c(stc->stats_mem, &read_cursor);
+                if (secondary_errno == LNF_EOF) {
+                        return E_EOF; /// TODO error handling
+                } else if (secondary_errno != LNF_OK) {
+                        print_err(primary_errno, secondary_errno,
+                                  "lnf_mem_first_c() - stats");
+                        return E_LNF; /// TODO error handling
+                }
+
+                secondary_errno = lnf_mem_read_raw_c(stc->stats_mem, read_cursor,
+                                rec_buff, &rec_len, LNF_MAX_RAW_LEN);
+                if (secondary_errno != LNF_OK) {
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_mem_read_raw_c() - stats");
+                        return E_LNF; /// TODO error handling
+                }
+
+                MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_STATS,
+                                MPI_COMM_WORLD);
+        }
 
         return primary_errno;
 }
@@ -644,6 +687,28 @@ send_terminator:
         /* Phase 1 done, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
+        if (primary_errno == E_OK) {
+                secondary_errno = lnf_mem_first_c(stc->stats_mem, &read_cursor);
+                if (secondary_errno == LNF_EOF) {
+                        return E_EOF; /// TODO error handling
+                } else if (secondary_errno != LNF_OK) {
+                        print_err(primary_errno, secondary_errno,
+                                  "lnf_mem_first_c() - stats");
+                        return E_LNF; /// TODO error handling
+                }
+
+                secondary_errno = lnf_mem_read_raw_c(stc->stats_mem, read_cursor,
+                                rec_buff, &rec_len, LNF_MAX_RAW_LEN);
+                if (secondary_errno != LNF_OK) {
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_mem_read_raw_c() - stats");
+                        return E_LNF; /// TODO error handling
+                }
+
+                MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_STATS,
+                                MPI_COMM_WORLD);
+        }
+
         return primary_errno;
 }
 
@@ -759,6 +824,9 @@ static error_code_t task_process_mem(struct slave_task_ctx *stc)
                                 return primary_errno;
                         }
 
+                        //already sent, we don't need it anymore
+                        free_statistics(&stc->stats_mem);
+
                         return fast_topn_recv_lookup_send(stc);
                 } else {
                         return send_loop(stc);
@@ -821,6 +889,9 @@ error_code_t slave(int world_size)
                         lnf_mem_merge_threads(stc.agg_mem);
                 }
 
+                if (stc.stats_mem) {
+                        lnf_mem_merge_threads(stc.stats_mem);
+                }
                 /* Check if we read all files. */
                 //if (!stc.rec_limit_reached && primary_errno != E_EOF) {
                 //        //goto finalize_task; //no, we didn't, some problem occured

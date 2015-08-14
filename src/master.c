@@ -339,6 +339,35 @@ free_continuous_data_buff:
 }
 
 
+static error_code_t recv_statistics(size_t slave_cnt, lnf_mem_t *stats)
+{
+        error_code_t primary_errno = E_OK;
+        int rec_len = 0;
+        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: receive mutliple records
+        MPI_Status status;
+
+        /* Data receiving loop. */
+        for (size_t i = 0; i < slave_cnt; ++i) {
+                /* Receive message from any slave. */
+                MPI_Recv(rec_buff, LNF_MAX_RAW_LEN, MPI_BYTE, MPI_ANY_SOURCE,
+                                TAG_STATS, MPI_COMM_WORLD, &status);
+
+                /* Determine actual size of the received message. */
+                MPI_Get_count(&status, MPI_BYTE, &rec_len);
+
+                secondary_errno = lnf_mem_write_raw(stats, rec_buff, rec_len);
+                if (secondary_errno != LNF_OK) {
+                        print_err(E_LNF, secondary_errno,
+                                  "lnf_mem_write_raw() - statistics");
+                        primary_errno = E_LNF;
+                        break;
+                }
+        }
+
+        return primary_errno;
+}
+
+
 static error_code_t mode_rec_main(size_t slave_cnt, size_t rec_limit)
 {
         return irecv_loop(slave_cnt, rec_limit, print_brec_callback, NULL);
@@ -413,6 +442,7 @@ static error_code_t mode_agg_main(size_t slave_cnt, size_t rec_limit,
 {
         error_code_t primary_errno = E_OK;
         lnf_mem_t *agg_mem;
+        lnf_mem_t *stats_mem;
 
         /* Initialize aggregation memory. */
         secondary_errno = lnf_mem_init(&agg_mem);
@@ -426,8 +456,17 @@ static error_code_t mode_agg_main(size_t slave_cnt, size_t rec_limit,
                 goto free_lnf_mem;
         }
 
+        primary_errno = init_statistics(&stats_mem);
+        if (primary_errno != E_OK) {
+                goto free_lnf_mem;
+        }
+
         primary_errno = recv_loop(slave_cnt, 0, mem_write_raw_callback,
                         agg_mem);
+        if (primary_errno != E_OK) {
+                goto free_lnf_mem;
+        }
+        primary_errno = recv_statistics(slave_cnt, stats_mem);
         if (primary_errno != E_OK) {
                 goto free_lnf_mem;
         }
@@ -464,9 +503,11 @@ static error_code_t mode_agg_main(size_t slave_cnt, size_t rec_limit,
 
         /* Print all records in memory. */
         primary_errno = mem_print(agg_mem, rec_limit);
+//primary_errno = mem_print(stats_mem, 0); TODO handle statistics in output
 
 free_lnf_mem:
         lnf_mem_free(agg_mem);
+        free_statistics(stats_mem);
 
         return primary_errno;
 }
