@@ -111,9 +111,10 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                 const char *path)
 {
         error_code_t primary_errno = E_OK;
+        int secondary_errno;
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
-        static lnf_brec1_t data_buff[2][XCHG_BUFF_ELEMS];
+        lnf_brec1_t data_buff[2][XCHG_BUFF_ELEMS];
         size_t data_idx = 0;
         bool buff_idx = 0;
         MPI_Request request = MPI_REQUEST_NULL;
@@ -194,11 +195,11 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                                 &request);
         }
 
-        //print_debug("/%d/ file %s: read %lu, processed %lu",
-        //                omp_get_thread_num(), path, file_rec_cntr,
-        //                file_proc_rec_cntr);
-        print_debug("file %s: read %lu, processed %lu", path, file_rec_cntr,
+        print_debug("/%d/ file %s: read %lu, processed %lu",
+                        omp_get_thread_num(), path, file_rec_cntr,
                         file_proc_rec_cntr);
+        //print_debug("file %s: read %lu, processed %lu", path, file_rec_cntr,
+        //                file_proc_rec_cntr);
 
 free_lnf_rec:
         lnf_rec_free(rec);
@@ -797,7 +798,7 @@ error_code_t slave(int world_size)
         }
 
         //TODO: return codes, record limit, secondary_errno
-        #pragma omp parallel
+        #pragma omp parallel firstprivate(primary_errno)
         {
                 #pragma omp single
                 {
@@ -816,7 +817,9 @@ error_code_t slave(int world_size)
                         }
                 }
 
-                lnf_mem_merge_threads(stc.agg_mem);
+                if (stc.agg_mem) {
+                        lnf_mem_merge_threads(stc.agg_mem);
+                }
 
                 /* Check if we read all files. */
                 //if (!stc.rec_limit_reached && primary_errno != E_EOF) {
