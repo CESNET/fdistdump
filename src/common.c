@@ -50,12 +50,12 @@
 #include <string.h>
 #include <stdarg.h> //variable argument list
 #include <stddef.h> //offsetof()
-#include <math.h> //NAN
 
 #include <mpi.h>
 #include <arpa/inet.h> //inet_ntop()
 
 #define MAX_MSG_LEN (MPI_MAX_PROCESSOR_NAME + 100)
+#define TM_YEAR_BASE 1900
 
 /* Global variables. */
 extern MPI_Datatype mpi_struct_agg_param;
@@ -222,7 +222,7 @@ void print_warn(error_code_t prim_errno, int sec_errno,
         va_end(arg_list);
 }
 
-
+#ifdef DEBUG
 void print_debug(const char *format, ...)
 {
         va_list arg_list;
@@ -234,6 +234,12 @@ void print_debug(const char *format, ...)
 
         va_end(arg_list);
 }
+#else
+void print_debug(const char *format, ...)
+{
+        (void)format;
+}
+#endif
 
 
 char * working_mode_to_str(working_mode_t working_mode)
@@ -402,31 +408,35 @@ free_lnf_rec:
 }
 
 
-double diff_tm(struct tm end_tm, struct tm begin_tm)
+int tm_diff(const struct tm a, const struct tm b)
 {
-        time_t begin_time_t, end_time_t;
+        int a4 = (a.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (a.tm_year & 3);
+        int b4 = (b.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (b.tm_year & 3);
+        int a100 = a4 / 25 - (a4 % 25 < 0);
+        int b100 = b4 / 25 - (b4 % 25 < 0);
+        int a400 = a100 >> 2;
+        int b400 = b100 >> 2;
+        int intervening_leap_days = (a4 - b4) - (a100 - b100) + (a400 - b400);
+        int years = a.tm_year - b.tm_year;
+        int days = (365 * years + intervening_leap_days +
+                        (a.tm_yday - b.tm_yday));
 
-        begin_time_t = mktime_utc(&begin_tm);
-        end_time_t = mktime_utc(&end_tm);
-
-        if (begin_time_t == -1 || end_time_t == -1) {
-                print_err(E_INTERNAL, 0, "mktime()");
-                return NAN;
-        }
-
-         return difftime(end_time_t, begin_time_t);
+        return (60 * (60 * (24 * days + (a.tm_hour - b.tm_hour)) +
+                                (a.tm_min - b.tm_min)) + (a.tm_sec - b.tm_sec));
 }
 
 
 time_t mktime_utc(struct tm *tm)
 {
         time_t ret;
-        char *time_zone;
+        static char orig_tz[128];
+        char *tz;
 
         /* Save current time zone environment variable. */
-        time_zone = getenv("TZ");
-        if (time_zone != NULL) {
-                time_zone = strdup(time_zone); //memory is malloc'd
+        tz = getenv("TZ");
+        if (tz != NULL) {
+                assert(strlen(tz) < 128);
+                strncpy(orig_tz, tz, 128);
         }
 
         /* Set time zone to UTC. mktime() would be affected by daylight saving
@@ -438,9 +448,8 @@ time_t mktime_utc(struct tm *tm)
         ret = mktime(tm); //actual normalization within UTC time zone
 
         /* Restore time zone to stored value. */
-        if (time_zone != NULL) {
-                setenv("TZ", time_zone, 1);
-                free(time_zone);
+        if (tz != NULL) {
+                setenv("TZ", orig_tz, 1);
         } else {
                 unsetenv("TZ");
         }
