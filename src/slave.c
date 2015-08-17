@@ -206,6 +206,9 @@ free_lnf_rec:
 close_file:
         lnf_close(file);
 
+        /* Buffers will be invalid after return, wai for send to complete. */
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+
         return primary_errno;
 }
 
