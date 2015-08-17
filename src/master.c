@@ -339,11 +339,11 @@ free_continuous_data_buff:
 }
 
 
-static error_code_t recv_statistics(size_t slave_cnt, lnf_mem_t *stats)
+static error_code_t recv_stat(size_t slave_cnt, lnf_mem_t *stats)
 {
         error_code_t primary_errno = E_OK;
         int rec_len = 0;
-        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: receive mutliple records
+        char rec_buff[LNF_MAX_RAW_LEN];
         MPI_Status status;
 
         /* Data receiving loop. */
@@ -357,9 +357,9 @@ static error_code_t recv_statistics(size_t slave_cnt, lnf_mem_t *stats)
 
                 secondary_errno = lnf_mem_write_raw(stats, rec_buff, rec_len);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno,
-                                  "lnf_mem_write_raw() - statistics");
                         primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_mem_write_raw()");
                         break;
                 }
         }
@@ -368,46 +368,38 @@ static error_code_t recv_statistics(size_t slave_cnt, lnf_mem_t *stats)
 }
 
 
-static error_code_t mode_rec_main(size_t slave_cnt, size_t rec_limit)
+static error_code_t mode_list_main(size_t slave_cnt, size_t rec_limit)
 {
         return irecv_loop(slave_cnt, rec_limit, print_brec_callback, NULL);
 }
 
 
-static error_code_t mode_ord_main(size_t slave_cnt, size_t rec_limit,
+static error_code_t mode_sort_main(size_t slave_cnt, size_t rec_limit,
                 const struct agg_param *ap, size_t ap_cnt)
 {
         error_code_t primary_errno = E_OK;
         struct mem_insert_callback_data callback_data = {0};
 
-        /* Initialize aggregation memory. */
-        secondary_errno = lnf_mem_init(&callback_data.mem);
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_init()");
+        /* Initialize aggregation memory and set memory parameters. */
+        primary_errno = init_aggr_mem(&callback_data.mem, ap, ap_cnt);
+        if (primary_errno != E_OK) {
                 return primary_errno;
         }
-        /* Initialize empty LNF record for writing. */
-        secondary_errno = lnf_rec_init(&callback_data.rec);
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
-                goto free_lnf_mem;
-        }
-
         /* Switch memory to linked list (better for sorting). */
         secondary_errno = lnf_mem_setopt(callback_data.mem, LNF_OPT_LISTMODE,
                         NULL, 0);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno, "lnf_mem_setopt()");
-                goto free_lnf_rec;
+                goto free_aggr_mem;
         }
 
-        /* Set memory parameters. */
-        primary_errno = mem_setup(callback_data.mem, ap, ap_cnt);
-        if (primary_errno != E_OK) {
-                goto free_lnf_rec;
+        /* Initialize empty LNF record for writing. */
+        secondary_errno = lnf_rec_init(&callback_data.rec);
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                goto free_aggr_mem;
         }
 
         /* Fill memory with records. */
@@ -426,88 +418,79 @@ static error_code_t mode_ord_main(size_t slave_cnt, size_t rec_limit,
         }
 
         /* Print all records in memory. */
-        primary_errno = mem_print(callback_data.mem, rec_limit);
+        primary_errno = print_aggr_mem(callback_data.mem, rec_limit);
 
 free_lnf_rec:
         lnf_rec_free(callback_data.rec);
-free_lnf_mem:
-        lnf_mem_free(callback_data.mem);
+free_aggr_mem:
+        free_aggr_mem(callback_data.mem);
 
         return primary_errno;
 }
 
 
-static error_code_t mode_agg_main(size_t slave_cnt, size_t rec_limit,
+static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
                 const struct agg_param *ap, size_t ap_cnt, bool use_fast_topn)
 {
         error_code_t primary_errno = E_OK;
-        lnf_mem_t *agg_mem;
-        lnf_mem_t *stats_mem;
+        lnf_mem_t *aggr_mem;
+        lnf_mem_t *stat_mem;
 
-        /* Initialize aggregation memory. */
-        secondary_errno = lnf_mem_init(&agg_mem);
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_init()");
+        /* Initialize aggregation memory and set memory parameters. */
+        primary_errno = init_aggr_mem(&aggr_mem, ap, ap_cnt);
+        if (primary_errno != E_OK) {
                 return primary_errno;
-        }
-        primary_errno = mem_setup(agg_mem, ap, ap_cnt);
-        if (primary_errno != E_OK) {
-                goto free_lnf_mem;
-        }
-
-        primary_errno = init_statistics(&stats_mem);
-        if (primary_errno != E_OK) {
-                goto free_lnf_mem;
         }
 
         primary_errno = recv_loop(slave_cnt, 0, mem_write_raw_callback,
-                        agg_mem);
+                        aggr_mem);
         if (primary_errno != E_OK) {
-                goto free_lnf_mem;
-        }
-        primary_errno = recv_statistics(slave_cnt, stats_mem);
-        if (primary_errno != E_OK) {
-                goto free_lnf_mem;
+                goto free_aggr_mem;
         }
 
         if (use_fast_topn) {
                 //TODO: if file doesn't exist on slave, this will cause deadlock
-                primary_errno = fast_topn_bcast_all(agg_mem);
+                primary_errno = fast_topn_bcast_all(aggr_mem);
                 if (primary_errno != E_OK) {
-                        goto free_lnf_mem;
+                        goto free_aggr_mem;
                 }
 
                 /* Reset memory - all records will be received again. */
                 //TODO: optimalization - add records to memory, don't reset
-                lnf_mem_free(agg_mem);
-                secondary_errno = lnf_mem_init(&agg_mem);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_init()");
+                free_aggr_mem(aggr_mem);
+                primary_errno = init_aggr_mem(&aggr_mem, ap, ap_cnt);
+                if (primary_errno != E_OK) {
+                        free_aggr_mem(stat_mem);
                         return primary_errno;
                 }
 
-                primary_errno = mem_setup(agg_mem, ap, ap_cnt);
-                if (primary_errno != E_OK) {
-                        goto free_lnf_mem;
-                }
-
                 primary_errno = recv_loop(slave_cnt, 0, mem_write_raw_callback,
-                                agg_mem);
+                                aggr_mem);
                 if (primary_errno != E_OK) {
-                        goto free_lnf_mem;
+                        goto free_aggr_mem;
                 }
         }
 
         /* Print all records in memory. */
-        primary_errno = mem_print(agg_mem, rec_limit);
-//primary_errno = mem_print(stats_mem, 0); TODO handle statistics in output
+        primary_errno = print_aggr_mem(aggr_mem, rec_limit);
+        if (primary_errno != E_OK) {
+                goto free_aggr_mem;
+        }
 
-free_lnf_mem:
-        lnf_mem_free(agg_mem);
-        free_statistics(stats_mem);
+        /* Initialize, receive, print and free statistics memory. */
+        primary_errno = init_stat_mem(&stat_mem);
+        if (primary_errno != E_OK) {
+                goto free_aggr_mem;
+        }
+        primary_errno = recv_stat(slave_cnt, stat_mem);
+        if (primary_errno != E_OK) {
+                goto free_aggr_mem;
+        }
+        primary_errno = print_stat_mem(stat_mem);
+        free_stat_mem(stat_mem);
+
+free_aggr_mem:
+        free_aggr_mem(aggr_mem);
 
         return primary_errno;
 }
@@ -538,14 +521,14 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         switch (args->working_mode) {
         case MODE_PASS: //only termination msg will be received from each slave
         case MODE_LIST:
-                return mode_rec_main(slave_cnt, args->rec_limit);
+                return mode_list_main(slave_cnt, args->rec_limit);
 
         case MODE_SORT:
-                return mode_ord_main(slave_cnt, args->rec_limit,
+                return mode_sort_main(slave_cnt, args->rec_limit,
                                 args->agg_params, args->agg_params_cnt);
 
         case MODE_AGGR:
-                return mode_agg_main(slave_cnt, args->rec_limit,
+                return mode_aggr_main(slave_cnt, args->rec_limit,
                                 args->agg_params, args->agg_params_cnt,
                                 args->use_fast_topn);
 
