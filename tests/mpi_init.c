@@ -1,7 +1,12 @@
 /**
- * \file master.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
+ * \file mpi_init.c
+ * \brief MPI Initialization test
+ *
+ * This program tests MPI initialization. It expects one mandatory parameter,
+ * which tells how many processes was started. After initialization, count of
+ * created processes is compared to value passed in argument. If matches,
+ * program exits with success.
+ *
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
@@ -43,19 +48,51 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#include "test_common.h"
 
-#include "arg_parse.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <getopt.h>
 
-/** \brief Master program function.
- *
- * Code executed by master process, usually with rank 0.
- *
- * \param[in] world_size MPI_COMM_WORLD size.
- * \param[in] args Command line parameters.
- * \return Error code.
- */
-error_code_t master(int world_size, const struct cmdline_args *args);
+#include <mpi.h>
 
-#endif //MASTER_H
+int main(int argc, char **argv)
+{
+        int world_rank;
+        int world_size;
+        int state = TE_OK;
+
+        MPI_Init(&argc, &argv);
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+        if (world_rank == 0) { // only master checks count of processes
+                int proc_cnt = 0;
+                char opt;
+
+                if (argc != 3) {
+                        log_error("mpi_init: Wrong argument count.");
+                        state = TE_ERR;
+                }
+
+                while ((opt = getopt(argc, argv, "c:")) != -1) {
+                        switch (opt) {
+                            case 'c':
+                                    proc_cnt = atoi(optarg);
+                                    break;
+                            default:
+                                    log_error("mpi_init: Wrong argument %c.",
+                                              opt);
+                                    state = TE_ERR;
+                                    break;
+                        }
+                }
+                if (proc_cnt != world_size){
+                        log_error("mpi_init: MPI initialization failed.");
+                        state = TE_ERR;
+                }
+        }
+
+        MPI_Finalize();
+        return state;
+}

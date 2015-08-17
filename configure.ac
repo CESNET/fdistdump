@@ -7,6 +7,7 @@ AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
 AC_PROG_CC_STDC
 CFLAGS="$CFLAGS -pedantic -W -Wall -Wextra -Winit-self -Wcast-align \
 -Wcast-qual -Wmissing-include-dirs -Wshadow"
+AM_PROG_CC_C_O
 
 #check for libraries
 AC_SEARCH_LIBS([lnf_open], [nf], [], [AC_MSG_ERROR([unable to find the libnf \
@@ -18,6 +19,11 @@ AC_SEARCH_LIBS([MPI_Send], [mpi], [],
 AC_SEARCH_LIBS([MPI_Put], [mpi], [],
                [AC_MSG_ERROR([need MPI version >= 2.2])]) #version 2 nedded
 AC_SEARCH_LIBS([MPI_Ibarrier], [mpi]) #version 3 not needed
+
+#check OpenMP, add flags
+AC_OPENMP
+CFLAGS="$CFLAGS $OPENMP_CFLAGS"
+CPPFLAGS="$CPPFLAGS $OPENMP_CFLAGS"
 
 #output
 AC_CONFIG_HEADERS([config.h])

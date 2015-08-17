@@ -73,21 +73,24 @@
 
 
 /* Enumerations. */
-enum { //error return codes
-        E_OK, //no error
+typedef enum { //error return codes
+        E_OK, //no error, continue processing
+        E_PASS, //no error, no action required
+        E_EOF, //no error, end of file
+
         E_MEM, //memory
         E_MPI, //MPI
         E_LNF, //libnf
         E_INTERNAL, //internal
         E_ARG, //command line arguments
-        E_HELP, //print help
-        E_EOF, //end of file
-};
+        E_PATH, //problem with access to file/directory
+} error_code_t;
 
 typedef enum { //working modes
-        MODE_REC, //list unmodified flow records
-        MODE_ORD, //list ordered flow records
-        MODE_AGG, //aggregation and statistic
+        MODE_LIST, //list unmodified flow records
+        MODE_SORT, //list ordered flow records
+        MODE_AGGR, //aggregation and statistic
+        MODE_PASS, //do nothing
 } working_mode_t;
 
 
@@ -101,9 +104,9 @@ struct agg_param {
         int numbits6;
 };
 
-//WATCH OUT: reflect changes also in mpi_struct_task_info
+//WATCH OUT: reflect changes also in mpi_struct_shared_task_ctx
 #define STRUCT_TASK_INFO_ELEMS 9
-struct task_info {
+struct shared_task_ctx {
         working_mode_t working_mode; //working mode
 
         struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
@@ -114,8 +117,8 @@ struct task_info {
 
         size_t rec_limit; //record/aggregation limit
 
-        struct tm interval_begin; //begin and end of time interval
-        struct tm interval_end;
+        struct tm interval_begin; //begin of time interval
+        struct tm interval_end; //end of time interval
 
         bool use_fast_topn; //enables fast top-N algorithm
 };
@@ -132,6 +135,7 @@ enum { //tags
         TAG_FILTER,
         TAG_AGG,
         TAG_DATA,
+        TAG_STATS,
 };
 
 enum { //control commands
@@ -140,29 +144,17 @@ enum { //control commands
 
 
 /* Function-like macros */
-
-
-/* Debugging macros */
-#ifdef DEBUG
-
-#define print_debug(...) \
-        do { \
-        printf(__VA_ARGS__); \
-        } while (0)
-#else
-#define print_debug(...)
-
-#endif //DEBUG
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 
 /** \brief Print basic record.
  *
- * Prints instance of lnf_brec1_t as one line.
+ * Prints instance of lnf_brec1_t on one line.
  *
  * \param[in] brec Basic record.
- * \return Error code. E_OK or E_MEM.
+ * \return Error code. E_OK or E_INTERNAL.
  */
-int print_brec(const lnf_brec1_t *brec);
+error_code_t print_brec(const lnf_brec1_t *brec);
 
 
 /** \brief Print error message.
@@ -172,24 +164,88 @@ int print_brec(const lnf_brec1_t *brec);
  * \param[in] format Format string passed to fprintf().
  * \param[in] va_list Variable argument list passed to vfprintf().
  */
-void print_err(const char *format, ...);
+void print_err(error_code_t prim_errno, int sec_errno,
+                const char *format, ...);
+void print_warn(error_code_t prim_errno, int sec_errno,
+                const char *format, ...);
+void print_debug(const char *format, ...);
 
+char * working_mode_to_str(working_mode_t working_mode);
 
 void create_mpi_struct_agg_param(void);
 void free_mpi_struct_agg_param(void);
 void create_mpi_struct_tm(void);
 void free_mpi_struct_tm(void);
-void create_mpi_struct_task_info(void);
-void free_mpi_struct_task_info(void);
+void create_mpi_struct_shared_task_ctx(void);
+void free_mpi_struct_shared_task_ctx(void);
 
-int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt);
-int mem_print(lnf_mem_t *mem, size_t limit);
 
-/**
- * \brief Prepare Top-N statistics memory structure.
+error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit);
+error_code_t print_stat_mem(lnf_mem_t *mem);
+
+
+/** \brief Initialize LNF aggregation memory.
+ *
+ * Initialize aggregation memory and set memory parameters. mem will be
+ * allocated, therefore have to be freed by free_aggr_mem().
+ *
+ * \param[inout] mem Pointer to pointer to LNF memory structure.
+ * \return E_OK on success, error code otherwise.
  */
-int stats_init(lnf_mem_t **stats);
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
+                size_t ap_cnt);
 
-double diff_tm(struct tm end_tm, struct tm begin_tm);
+/** \brief Free LNF aggregation memory.
+ *
+ * \param[inout] mem Pointer to LNF memory structure.
+ */
+void free_aggr_mem(lnf_mem_t *mem);
+
+/** \brief Initialize LNF memory for traffic volume statistics.
+ *
+ * This memory is used for computing sum of flows, bytes and packets of all
+ * processed records. mem will be allocated, therefore have to be freed by
+ * free_aggr_mem().
+ *
+ * \param[inout] mem Pointer to pointer to LNF memory structure.
+ * \return E_OK on success, error code otherwise.
+ */
+error_code_t init_stat_mem(lnf_mem_t **mem);
+
+/** \brief Free LNF memory for traffic volume statistics.
+ *
+ * \param[inout] mem Pointer to LNF memory structure.
+ */
+void free_stat_mem(lnf_mem_t *mem);
+
+
+/** \brief Yield the time difference between a and b.
+ *
+ * Measured in seconds, ignoring leap seconds. Compute intervening leap days
+ * correctly even if year is negative. Take care to avoid int overflow in leap
+ * day calculations, but it's OK to assume that A and B are close to each other.
+ * Copy paste from glibc 2.22.
+ *
+ * \param[in] a Subtrahend.
+ * \param[in] b Minuend.
+ * \return Difference in seconds.
+ */
+int tm_diff(const struct tm a, const struct tm b);
+
+/** \brief Portable version of timegm().
+ *
+ * The mktime() function modifies the fields of the tm structure, if structure
+ * members are outside their valid interval, they will be normalized (so that,
+ * for  example,  40  October is changed  into  9 November). We need this. But
+ * also tm_isdst is set (regardless of its initial value) to a positive value or
+ * to 0, respectively, to indicate whether DST is or is not in effect at the
+ * specified time. This is what we don't need. Therefore, time zone is set to
+ * UTC before calling mktime() in this function and restore previous time zone
+ * afterwards. mktime() will normalize tm structure, nothing more.
+ *
+ * \param[inout] tm Broken-down time. May be altered (normalized).
+ * \return Calendar time representation of tm.
+ */
+time_t mktime_utc(struct tm *tm);
 
 #endif //COMMON_H

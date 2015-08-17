@@ -1,7 +1,10 @@
 /**
- * \file master.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
+ * \file arguments.c
+ * \brief Checks processing of FDistDump arguments.
+ *
+ * This test takes program arguments and process them same way as FDistDump
+ * tool.
+ *
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
@@ -43,19 +46,42 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#include "test_common.h"
+#include "../src/common.h"
+#include "../src/arg_parse.h"
 
-#include "arg_parse.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-/** \brief Master program function.
- *
- * Code executed by master process, usually with rank 0.
- *
- * \param[in] world_size MPI_COMM_WORLD size.
- * \param[in] args Command line parameters.
- * \return Error code.
- */
-error_code_t master(int world_size, const struct cmdline_args *args);
+#include <mpi.h>
 
-#endif //MASTER_H
+MPI_Datatype mpi_struct_agg_param;
+MPI_Datatype mpi_struct_shared_task_ctx;
+MPI_Datatype mpi_struct_tm;
+int secondary_errno; // unused, declared for ../src/common.c
+
+int main(int argc, char **argv)
+{
+        int world_rank;
+        int world_size;
+        int state = TE_OK;
+
+        struct cmdline_args args = {0};
+
+        MPI_Init(&argc, &argv);
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+        if (world_rank == 0) {
+                // only master process processing arguments
+                if (arg_parse(&args, argc, argv) != E_OK){
+                        state = TE_ERR;
+                        goto done;
+                }
+        }
+
+done:
+        MPI_Finalize();
+
+        return state;
+}

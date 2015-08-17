@@ -46,18 +46,22 @@
 #include "common.h"
 
 #include <stdio.h>
-#include <stdarg.h> //variable argument list
 #include <assert.h>
+#include <string.h>
+#include <stdarg.h> //variable argument list
 #include <stddef.h> //offsetof()
-#include <math.h> //NAN
 
 #include <mpi.h>
 #include <arpa/inet.h> //inet_ntop()
 
+#define MAX_MSG_LEN (MPI_MAX_PROCESSOR_NAME + 100)
+#define TM_YEAR_BASE 1900
 
-/* Global MPI data types. */
-extern MPI_Datatype mpi_struct_agg_param, mpi_struct_task_info,
-       mpi_struct_tm;
+/* Global variables. */
+extern MPI_Datatype mpi_struct_agg_param;
+extern MPI_Datatype mpi_struct_shared_task_ctx;
+extern MPI_Datatype mpi_struct_tm;
+extern int secondary_errno;
 
 
 /** \brief Convert libnf address to string.
@@ -74,16 +78,16 @@ static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
 {
         const char *ret;
 
-        if (addr.data[0]) { //IPv6
-                if (buff_size < INET6_ADDRSTRLEN) {
-                        return NULL;
-                }
-                ret = inet_ntop(AF_INET6, &addr, buff, buff_size);
-        } else { //IPv4
+        if (IN6_IS_ADDR_V4COMPAT(addr.data)) { //IPv4
                 if (buff_size < INET_ADDRSTRLEN) {
                         return NULL;
                 }
                 ret = inet_ntop(AF_INET, &addr.data[3], buff, buff_size);
+        } else { //IPv6
+                if (buff_size < INET6_ADDRSTRLEN) {
+                        return NULL;
+                }
+                ret = inet_ntop(AF_INET6, &addr, buff, buff_size);
         }
 
         assert(ret != NULL);
@@ -92,7 +96,75 @@ static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
 }
 
 
-int print_brec(const lnf_brec1_t *brec)
+static char * get_processor_info(void)
+{
+        static char msg[MAX_MSG_LEN];
+        size_t msg_offset = 0;
+        char proc_name[MPI_MAX_PROCESSOR_NAME];
+        int world_rank, world_size, result_len;
+
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+        MPI_Get_processor_name(proc_name, &result_len);
+
+        if (world_rank == ROOT_PROC) {
+                msg_offset += snprintf(msg, MAX_FN_LEN, "master, ");
+        } else {
+                msg_offset += snprintf(msg, MAX_FN_LEN, "slave, ");
+        }
+
+        snprintf(msg + msg_offset, MAX_MSG_LEN - msg_offset,
+                        "rank %d/%d with processor name %s", world_rank,
+                        world_size, proc_name);
+
+        return msg;
+}
+
+
+static char * error_code_to_str(error_code_t prim_errno)
+{
+        static char msg[100];
+
+        switch (prim_errno) {
+        case E_OK:
+        case E_PASS:
+        case E_EOF:
+                sprintf(msg, "no error");
+                break;
+
+        case E_MEM:
+                sprintf(msg, "memory");
+                break;
+
+        case E_MPI:
+                sprintf(msg, "MPI");
+                break;
+
+        case E_LNF:
+                sprintf(msg, "LNF");
+                break;
+
+        case E_INTERNAL:
+                sprintf(msg, "internal");
+                break;
+
+        case E_ARG:
+                sprintf(msg, "command line argument");
+                break;
+
+        case E_PATH:
+                sprintf(msg, "path");
+                break;
+
+        default:
+                assert(!"unknown error code");
+        };
+
+        return msg;
+}
+
+
+error_code_t print_brec(const lnf_brec1_t *brec)
 {
         char *ret;
 
@@ -101,13 +173,13 @@ int print_brec(const lnf_brec1_t *brec)
 
         ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
         if (ret == NULL) {
-                print_err("Internal - addr_to_str()");
-                return E_MEM;
+                print_err(E_INTERNAL, 0, "addr_to_str()");
+                return E_INTERNAL;
         }
         ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
         if (ret == NULL) {
-                print_err("Internal - addr_to_str()");
-                return E_MEM;
+                print_err(E_INTERNAL, 0, "addr_to_str()");
+                return E_INTERNAL;
         }
 
         printf("%lu -> %lu\t", brec->first, brec->last);
@@ -119,23 +191,83 @@ int print_brec(const lnf_brec1_t *brec)
 }
 
 
-void print_err(const char *format, ...)
+void print_err(error_code_t prim_errno, int sec_errno,
+                const char *format, ...)
 {
+        (void)sec_errno; //TODO
         va_list arg_list;
-        char proc_name[MPI_MAX_PROCESSOR_NAME];
-        int world_rank, world_size, result_len;
-
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-        MPI_Get_processor_name(proc_name, &result_len);
         va_start(arg_list, format);
 
-        fprintf(stderr, "Error (rank %d/%d, name %s): ",
-                        world_rank, world_size, proc_name);
+        fprintf(stderr, "Error on %s caused by %s: ", get_processor_info(),
+                        error_code_to_str(prim_errno));
         vfprintf(stderr, format, arg_list);
         fprintf(stderr, "\n");
 
         va_end(arg_list);
+}
+
+
+void print_warn(error_code_t prim_errno, int sec_errno,
+                const char *format, ...)
+{
+        (void)sec_errno; //TODO
+        va_list arg_list;
+        va_start(arg_list, format);
+
+        fprintf(stderr, "Warning on %s caused by %s: ", get_processor_info(),
+                        error_code_to_str(prim_errno));
+        vfprintf(stderr, format, arg_list);
+        fprintf(stderr, "\n");
+
+        va_end(arg_list);
+}
+
+#ifdef DEBUG
+void print_debug(const char *format, ...)
+{
+        va_list arg_list;
+        va_start(arg_list, format);
+
+        fprintf(stderr, "DEBUG on %s: ", get_processor_info());
+        vfprintf(stderr, format, arg_list);
+        fprintf(stderr, "\n");
+
+        va_end(arg_list);
+}
+#else
+void print_debug(const char *format, ...)
+{
+        (void)format;
+}
+#endif
+
+
+char * working_mode_to_str(working_mode_t working_mode)
+{
+        static char msg[MAX_MSG_LEN];
+
+        switch (working_mode) {
+        case MODE_LIST:
+                snprintf(msg, MAX_MSG_LEN, "list records");
+                break;
+
+        case MODE_SORT:
+                snprintf(msg, MAX_MSG_LEN, "sort records");
+                break;
+
+        case MODE_AGGR:
+                snprintf(msg, MAX_MSG_LEN, "aggregate records");
+                break;
+
+        case MODE_PASS:
+                snprintf(msg, MAX_MSG_LEN, "pass");
+                break;
+
+        default:
+                assert(!"unknown working mode");
+        }
+
+        return msg;
 }
 
 
@@ -177,7 +309,7 @@ void free_mpi_struct_tm(void)
 }
 
 
-void create_mpi_struct_task_info(void)
+void create_mpi_struct_shared_task_ctx(void)
 {
         int block_lengths[STRUCT_TASK_INFO_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
                 1, 1, 1, 1 /*, NEW */};
@@ -187,45 +319,52 @@ void create_mpi_struct_task_info(void)
                 MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, mpi_struct_tm,
                 mpi_struct_tm, MPI_C_BOOL /*, NEW */};
 
-        displacements[0] = offsetof(struct task_info, working_mode);
-        displacements[1] = offsetof(struct task_info, agg_params);
-        displacements[2] = offsetof(struct task_info, agg_params_cnt);
-        displacements[3] = offsetof(struct task_info, filter_str_len);
-        displacements[4] = offsetof(struct task_info, path_str_len);
-        displacements[5] = offsetof(struct task_info, rec_limit);
-        displacements[6] = offsetof(struct task_info, interval_begin);
-        displacements[7] = offsetof(struct task_info, interval_end);
-        displacements[8] = offsetof(struct task_info, use_fast_topn);
-        /* displacements[NEW] = offsetof(struct task_info, NEW); */
+        displacements[0] = offsetof(struct shared_task_ctx, working_mode);
+        displacements[1] = offsetof(struct shared_task_ctx, agg_params);
+        displacements[2] = offsetof(struct shared_task_ctx, agg_params_cnt);
+        displacements[3] = offsetof(struct shared_task_ctx, filter_str_len);
+        displacements[4] = offsetof(struct shared_task_ctx, path_str_len);
+        displacements[5] = offsetof(struct shared_task_ctx, rec_limit);
+        displacements[6] = offsetof(struct shared_task_ctx, interval_begin);
+        displacements[7] = offsetof(struct shared_task_ctx, interval_end);
+        displacements[8] = offsetof(struct shared_task_ctx, use_fast_topn);
+        /* displacements[NEW] = offsetof(struct shared_task_ctx, NEW); */
 
         MPI_Type_create_struct(STRUCT_TASK_INFO_ELEMS, block_lengths,
-                        displacements, types, &mpi_struct_task_info);
-        MPI_Type_commit(&mpi_struct_task_info);
+                        displacements, types, &mpi_struct_shared_task_ctx);
+        MPI_Type_commit(&mpi_struct_shared_task_ctx);
 }
 
 
-void free_mpi_struct_task_info(void)
+void free_mpi_struct_shared_task_ctx(void)
 {
-        MPI_Type_free(&mpi_struct_task_info);
+        MPI_Type_free(&mpi_struct_shared_task_ctx);
 }
 
 
-int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt)
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
+                size_t ap_cnt)
 {
-        int ret;
+        secondary_errno = lnf_mem_init(mem);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
+                return E_LNF;
+        }
 
         /* Default aggragation fields: first, last, flows, packets, bytes. */
-        ret = lnf_mem_fastaggr(mem, LNF_FAST_AGGR_BASIC);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_fastaggr() returned %d", ret);
+        secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
+                free_aggr_mem(*mem);
                 return E_LNF;
         }
 
         for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
-                ret = lnf_mem_fadd(mem, ap->field, ap->flags, ap->numbits,
-                                ap->numbits6);
-                if (ret != LNF_OK) {
-                        print_err("LNF - lnf_mem_fadd() error");
+                secondary_errno = lnf_mem_fadd(*mem, ap->field, ap->flags,
+                                ap->numbits, ap->numbits6);
+                if (secondary_errno != LNF_OK) {
+                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
+                        free_aggr_mem(*mem);
                         return E_LNF;
                 }
         }
@@ -234,90 +373,180 @@ int mem_setup(lnf_mem_t *mem, const struct agg_param *ap, size_t ap_cnt)
 }
 
 
-int mem_print(lnf_mem_t *mem, size_t limit)
+void free_aggr_mem(lnf_mem_t *mem)
 {
-        int ret, err = E_OK;
-        size_t rec_cntr = 0;
-        lnf_rec_t *rec;
-        lnf_brec1_t brec;
-
-        ret = lnf_rec_init(&rec);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_rec_init()");
-                return E_LNF;
-        }
-
-        for (ret = lnf_mem_read(mem, rec); ret == LNF_OK;
-                        ret = lnf_mem_read(mem, rec)) {
-                ret = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
-                if (ret != LNF_OK) {
-                        print_err("LNF - lnf_rec_fget()");
-                        err = E_LNF;
-                        break;
-                }
-
-                print_brec(&brec);
-                rec_cntr++;
-
-                if (rec_cntr == limit) {
-                        break;
-                }
-        }
-
-        lnf_rec_free(rec);
-
-        return err;
+        lnf_mem_free(mem);
 }
 
 
-/* Prepare statistics memory structure */
-int stats_init(lnf_mem_t **stats)
+/* Initialize memory for traffic volume statistics.*/
+error_code_t init_stat_mem(lnf_mem_t **mem)
 {
-        int ret;
+        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
+                LNF_FLD_DOCTETS};
 
-        ret = lnf_mem_init(stats);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_init() returned %d (stats).", ret);
+        secondary_errno = lnf_mem_init(mem);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
                 return E_LNF;
         }
 
-        ret = lnf_mem_fadd(stats, LNF_FLD_AGGR_FLOWS, LNF_AGGR_SUM, 0, 0);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_fadd() error (statistics, flows).");
-                lnf_mem_free(*stats);
-                return E_LNF;
-        }
-
-        lnf_mem_fadd(stats, LNF_FLD_DPKTS, LNF_AGGR_SUM, 0, 0);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_fadd() error (statistics, packets).");
-                lnf_mem_free(*stats);
-                return E_LNF;
-        }
-
-        lnf_mem_fadd(stats, LNF_FLD_DOCTETS, LNF_AGGR_SUM, 0, 0);
-        if (ret != LNF_OK) {
-                print_err("LNF - lnf_mem_fadd() error (statistics, bytes).");
-                lnf_mem_free(*stats);
-                return E_LNF;
+        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
+                secondary_errno = lnf_mem_fadd(*mem, stat_params[i],
+                                LNF_AGGR_SUM, 0, 0);
+                if (secondary_errno != LNF_OK) {
+                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
+                        free_aggr_mem(*mem);
+                        return E_LNF;
+                }
         }
 
         return E_OK;
 }
 
 
-double diff_tm(struct tm end_tm, struct tm begin_tm)
+/* Free statistics memory. */
+void free_stat_mem(lnf_mem_t *mem)
 {
-        time_t begin_time_t, end_time_t;
-
-        begin_time_t = mktime(&begin_tm);
-        end_time_t = mktime(&end_tm);
-
-        if (begin_time_t == -1 || end_time_t == -1) {
-                printf("mktime() error\n");
-                return NAN;
-        }
-
-         return difftime(end_time_t, begin_time_t);
+   lnf_mem_free(mem);
 }
 
+
+error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit)
+{
+        error_code_t primary_errno = E_OK;
+        size_t rec_cntr = 0;
+        lnf_rec_t *rec;
+        lnf_brec1_t brec;
+
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
+                return E_LNF;
+        }
+
+        secondary_errno = lnf_mem_read(mem, rec); //read first
+        while (secondary_errno == LNF_OK) {
+                secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
+                if (secondary_errno != LNF_OK) {
+                        primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_rec_fget()");
+                        goto free_lnf_rec;
+                }
+
+                print_brec(&brec);
+
+                if (++rec_cntr == limit) {
+                        goto free_lnf_rec;
+                }
+
+                secondary_errno = lnf_mem_read(mem, rec); //read next
+        }
+        if (secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
+        }
+
+free_lnf_rec:
+        lnf_rec_free(rec);
+
+        return primary_errno;
+}
+
+
+error_code_t print_stat_mem(lnf_mem_t *mem)
+{
+        error_code_t primary_errno = E_OK;
+        lnf_rec_t *rec;
+        size_t stat_val;
+        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
+                LNF_FLD_DOCTETS};
+        char fld_name_buff[LNF_INFO_BUFSIZE];
+
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
+                return E_LNF;
+        }
+
+        secondary_errno = lnf_mem_read(mem, rec); //read single record
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
+                goto free_lnf_rec;
+        }
+
+        printf("statistics: \n");
+        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
+                secondary_errno = lnf_rec_fget(rec, stat_params[i], &stat_val);
+                if (secondary_errno != LNF_OK) {
+                        primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_rec_fget()");
+                        goto free_lnf_rec;
+                }
+
+                secondary_errno = lnf_fld_info(stat_params[i],
+                                LNF_FLD_INFO_NAME, fld_name_buff,
+                                LNF_INFO_BUFSIZE);
+
+                printf("\t%lu %s\n", stat_val, fld_name_buff);
+        }
+
+free_lnf_rec:
+        lnf_rec_free(rec);
+
+        return primary_errno;
+}
+
+
+int tm_diff(const struct tm a, const struct tm b)
+{
+        int a4 = (a.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (a.tm_year & 3);
+        int b4 = (b.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (b.tm_year & 3);
+        int a100 = a4 / 25 - (a4 % 25 < 0);
+        int b100 = b4 / 25 - (b4 % 25 < 0);
+        int a400 = a100 >> 2;
+        int b400 = b100 >> 2;
+        int intervening_leap_days = (a4 - b4) - (a100 - b100) + (a400 - b400);
+        int years = a.tm_year - b.tm_year;
+        int days = (365 * years + intervening_leap_days +
+                        (a.tm_yday - b.tm_yday));
+
+        return (60 * (60 * (24 * days + (a.tm_hour - b.tm_hour)) +
+                                (a.tm_min - b.tm_min)) + (a.tm_sec - b.tm_sec));
+}
+
+
+time_t mktime_utc(struct tm *tm)
+{
+        time_t ret;
+        static char orig_tz[128];
+        char *tz;
+
+        /* Save current time zone environment variable. */
+        tz = getenv("TZ");
+        if (tz != NULL) {
+                assert(strlen(tz) < 128);
+                strncpy(orig_tz, tz, 128);
+        }
+
+        /* Set time zone to UTC. mktime() would be affected by daylight saving
+         * otherwise.
+         */
+        setenv("TZ", "", 1);
+        tzset();
+
+        ret = mktime(tm); //actual normalization within UTC time zone
+
+        /* Restore time zone to stored value. */
+        if (tz != NULL) {
+                setenv("TZ", orig_tz, 1);
+        } else {
+                unsetenv("TZ");
+        }
+        tzset();
+
+        return ret;
+}

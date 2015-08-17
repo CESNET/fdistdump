@@ -8,6 +8,7 @@ Makefile.in
 /install-sh
 /missing
 /test-driver
+/compile
 
 #"./configure" products
 Makefile

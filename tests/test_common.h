@@ -1,7 +1,6 @@
 /**
- * \file master.h
+ * \file test_common.h
  * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
@@ -43,19 +42,9 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+enum error_codes{
+        TE_OK = 0,
+        TE_ERR = 1
+};
 
-#include "arg_parse.h"
-
-/** \brief Master program function.
- *
- * Code executed by master process, usually with rank 0.
- *
- * \param[in] world_size MPI_COMM_WORLD size.
- * \param[in] args Command line parameters.
- * \return Error code.
- */
-error_code_t master(int world_size, const struct cmdline_args *args);
-
-#endif //MASTER_H
+void log_error(const char *format, ...);

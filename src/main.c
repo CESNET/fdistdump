@@ -46,64 +46,90 @@
 #include "slave.h"
 #include "common.h"
 #include "arg_parse.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <getopt.h>
 #include <assert.h>
 
 #include <mpi.h>
-#include <libnf.h>
 
 
-/* Global MPI data types. */
-MPI_Datatype mpi_struct_agg_param, mpi_struct_task_info, mpi_struct_tm;
+/* Global varables. */
+MPI_Datatype mpi_struct_agg_param;
+MPI_Datatype mpi_struct_shared_task_ctx;
+MPI_Datatype mpi_struct_tm;
+int secondary_errno;
 
 int main(int argc, char **argv)
 {
+        error_code_t primary_errno = E_OK;
+        int world_rank;
+        int world_size;
+        int thread_provided; //thread safety provided by MPI
         double duration;
-        int world_rank, world_size, ret;
         struct cmdline_args args = {0};
 
-        MPI_Init(&argc, &argv);
+        /*
+         * Init MPI and check suported thread level. We need at least
+         * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
+         * OpenMPI doc says: "It is only lightly tested and likely does not work
+         * for thread-intensive applications."
+         */
+        MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
+        if (thread_provided != MPI_THREAD_SERIALIZED &&
+                        thread_provided != MPI_THREAD_MULTIPLE) {
+                print_err(E_MPI, thread_provided,
+                                "an insufficient level of thread support. "
+                                "At least MPI_THREAD_SERIALIZED required.");
+                MPI_Finalize();
+                return EXIT_FAILURE;
+        }
+
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
         if (world_rank == ROOT_PROC) {
-                ret = arg_parse(&args, argc, argv);
-                switch (ret) {
+                primary_errno = arg_parse(&args, argc, argv);
+                switch (primary_errno) {
                 case E_OK:
                         break;
-                case E_HELP:
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_SUCCESS);
-                        return EXIT_SUCCESS;
+
+                case E_PASS: //help or error was printed
+                        args.working_mode = MODE_PASS;
                         break;
+
                 case E_ARG:
-                        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-                        return EXIT_FAILURE;
+                        args.working_mode = MODE_PASS;
                         break;
+
                 default:
                         assert(!"unknown error code received");
-                        break;
                 }
         }
+
+        if (world_size <= 1) {
+                printf("%s requires at least 2 copies of the program to run. "
+                                "Did you use mpirun? "
+                                "Try to run program again with --help.\n",
+                                PACKAGE_NAME);
+                return EXIT_FAILURE;
+        }
+
+        /* Create MPI data types (global variables). */
+        create_mpi_struct_agg_param();
+        create_mpi_struct_tm();
+        create_mpi_struct_shared_task_ctx();
 
         /* Start time measurement. */
         MPI_Barrier(MPI_COMM_WORLD);
         duration = -MPI_Wtime();
 
-        /* Create MPI data types (global variables). */
-        create_mpi_struct_agg_param();
-        create_mpi_struct_tm();
-        create_mpi_struct_task_info();
-
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
-                master(world_rank, world_size, &args);
+                primary_errno = master(world_size, &args);
         } else {
-                slave(world_rank, world_size);
+                primary_errno = slave(world_size);
         }
 
         /* End time measurement. */
@@ -111,15 +137,18 @@ int main(int argc, char **argv)
         duration += MPI_Wtime();
 
         if (world_rank == ROOT_PROC) {
-                /* CPUs, slaves, duration */
-                printf("%d\t%d\t%f\n", world_size, world_size - 1, duration);
+                print_debug("total duration: %fs", duration);
         }
 
         /* Free MPI data types (global variables). */
-        free_mpi_struct_task_info();
+        free_mpi_struct_shared_task_ctx();
         free_mpi_struct_tm();
         free_mpi_struct_agg_param();
 
         MPI_Finalize();
-        return EXIT_SUCCESS;
+        if (primary_errno == E_OK || primary_errno == E_PASS) {
+                return EXIT_SUCCESS;
+        } else {
+                return EXIT_FAILURE;
+        }
 }

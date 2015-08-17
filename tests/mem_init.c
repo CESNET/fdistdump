@@ -1,7 +1,9 @@
 /**
- * \file master.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
+ * \file mem_init.c
+ * \brief LibNF memory initialization test.
+  *
+ * This program tests execution of lnf memory initialization.
+ *
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
@@ -43,19 +45,37 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#include "test_common.h"
+#include "../src/common.h"
 
-#include "arg_parse.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-/** \brief Master program function.
- *
- * Code executed by master process, usually with rank 0.
- *
- * \param[in] world_size MPI_COMM_WORLD size.
- * \param[in] args Command line parameters.
- * \return Error code.
- */
-error_code_t master(int world_size, const struct cmdline_args *args);
+#include <mpi.h>
+#include <libnf.h>
 
-#endif //MASTER_H
+int main(int argc, char **argv)
+{
+        int world_rank;
+        int world_size;
+        int state = TE_OK;
+
+        lnf_mem_t *mem;
+
+        MPI_Init(&argc, &argv);
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+        // all processes try to initialize lnf memory.
+        if(lnf_mem_init(&mem) != LNF_OK){
+                state = TE_ERR;
+                goto done;
+        }
+
+        lnf_mem_free(mem);
+
+done:
+        MPI_Finalize();
+
+        return state;
+}
