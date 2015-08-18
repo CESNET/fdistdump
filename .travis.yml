@@ -19,9 +19,12 @@ before_install:
         - sudo apt-get update -q
         - ./travis_install_mpi.sh $MPI
         - ./install_dependencies.sh
-        #as long as clang doesn't work, following can be ommited
-        #- export OMPI_CC="${CC}" #CC set by travis as MPI underlying compiler
-        #- unset CC #otherwise ./configure would not set mpicc as CC
+
+        #as long as clang doesn't work, following can by ommited
+        #- export OMPI_CC="${CC}" #CC set by travis as OMPI underlying compiler
+        #- export MPICH_CC="${CC}"#CC set by travis as MPICH underlying compiler
+
+        - unset CC #otherwise ./configure would not set mpicc as CC
 
 install:
         - autoreconf -i
