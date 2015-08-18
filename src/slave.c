@@ -90,26 +90,25 @@ struct slave_task_ctx {
         data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX]; //file or directory path string
         DIR *dir_ctx; //used in case of directory as data source
-        bool no_more_files; //true if there is no more files to read
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
 };
 
 
-static void isend_bytes(void *src, size_t bytes, MPI_Request *req)
+static void isend_bytes(void *data, size_t data_size, MPI_Request *req)
 {
         /* Lack of MPI_THREAD_MULTIPLE threading level implies this CS. */
         #pragma omp critical (mpi)
         {
                 MPI_Wait(req, MPI_STATUS_IGNORE);
-                MPI_Isend(src, bytes, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                MPI_Isend(data, data_size, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD, req);
         }
 }
 
 
-static error_code_t task_process_file(struct slave_task_ctx *stc,
+static error_code_t task_send_file(struct slave_task_ctx *stc,
                 const char *path)
 {
         error_code_t primary_errno = E_OK;
@@ -139,7 +138,11 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                 goto close_file;
         }
 
-        /* Read all records from file. */
+        /*
+         * Read all records from file. Hot path.
+         * No aggregation -> store record to buffer.
+         * Send buffer, if buffer full, otherwise continue reading.
+         */
         while ((secondary_errno = lnf_read(file, rec)) == LNF_OK) {
                 file_rec_cntr++;
 
@@ -147,74 +150,49 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                 if (stc->filter && !lnf_filter_match(stc->filter, rec)) {
                         continue;
                 }
-                stc->proc_rec_cntr++;
                 file_proc_rec_cntr++;
 
-                /*
-                 * Aggreagation -> write record to memory and continue.
-                 * Ignore record limit.
-                 */
-                if (stc->aggr_mem) {
-                        secondary_errno = lnf_mem_write(stc->aggr_mem, rec);
-                        if (secondary_errno != LNF_OK) {
-                                primary_errno = E_LNF;
-                                print_err(primary_errno, secondary_errno,
-                                                "lnf_mem_write()");
-                                goto free_lnf_rec;
-                        }
+                secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1,
+                                data_buff[buff_idx] + data_idx);
+                assert(secondary_errno == LNF_OK);
 
-                        if (stc->stat_mem) {
-                                secondary_errno =
-                                        lnf_mem_write(stc->stat_mem, rec);
-                                if (secondary_errno != LNF_OK) {
-                                        primary_errno = E_LNF;
-                                        print_err(primary_errno,
-                                                  secondary_errno,
-                                                  "lnf_mem_write()");
-                                        goto free_lnf_rec;
-                                }
-                        }
-                } else {
-                /*
-                 * No aggregation -> store record to buffer.
-                 * Send buffer, if buffer full, otherwise continue reading.
-                 */
-                        secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1,
-                                        data_buff[buff_idx] + data_idx++);
-                        assert(secondary_errno == LNF_OK);
+                data_idx++;
+                if (data_idx == XCHG_BUFF_ELEMS) { //buffer full
+                        isend_bytes(data_buff[buff_idx], XCHG_BUFF_SIZE,
+                                        &request);
+                        data_idx = 0;
+                        buff_idx = !buff_idx; //toggle buffers
 
-                        if (data_idx == XCHG_BUFF_ELEMS) { //buffer full
-                                isend_bytes(data_buff[buff_idx], XCHG_BUFF_SIZE,
-                                                &request);
-                                data_idx = 0;
-                                buff_idx = !buff_idx; //toggle buffers
-                        }
-
-                        if (stc->proc_rec_cntr == stc->ms_shared.rec_limit) {
-                                stc->rec_limit_reached = true;
+                        /* Increment shared counter and check record limit. */
+                        #pragma omp atomic
+                        stc->proc_rec_cntr += XCHG_BUFF_ELEMS;
+                        if (stc->proc_rec_cntr >= stc->ms_shared.rec_limit) {
                                 break; //record limit reached
                         }
                 }
-        }
-
-        /* Check if we reach end of file. */
-        if (!stc->rec_limit_reached && secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF; //no, we didn't
         }
 
         /* Send remaining records (if there are any). */
         if (data_idx != 0) {
                 isend_bytes(data_buff[buff_idx], data_idx * sizeof(lnf_brec1_t),
                                 &request);
+
+                #pragma omp atomic
+                stc->proc_rec_cntr += data_idx; //increment shared counter
+        }
+
+        /* Set record limit reached flag we read rec_limit or more records. */
+        if (stc->proc_rec_cntr >= stc->ms_shared.rec_limit) {
+                stc->rec_limit_reached = true;
+        /* Otherwise check if we reach end of file. */
+        } else if (secondary_errno != LNF_EOF){
+                primary_errno = E_LNF; //no, we didn't, a problem occured
         }
 
         print_debug("/%d/ file %s: read %lu, processed %lu",
                         omp_get_thread_num(), path, file_rec_cntr,
                         file_proc_rec_cntr);
-        //print_debug("file %s: read %lu, processed %lu", path, file_rec_cntr,
-        //                file_proc_rec_cntr);
 
-free_lnf_rec:
         lnf_rec_free(rec);
 close_file:
         lnf_close(file);
@@ -226,22 +204,105 @@ close_file:
 }
 
 
-/* Retrun value have to be freed. */
-static char * task_get_next_file(struct slave_task_ctx *stc)
+static error_code_t task_store_file(struct slave_task_ctx *stc,
+                const char *path)
 {
+        error_code_t primary_errno = E_OK;
+        int secondary_errno;
+        size_t file_rec_cntr = 0;
+        size_t file_proc_rec_cntr = 0;
+        lnf_file_t *file;
+        lnf_rec_t *rec;
+
+        /* Open flow file. */
+        secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "unable to open file \"%s\"",
+                                path);
+                return E_LNF;
+        }
+
+        /* Initialize LNF record. Have to be unique in each OMP task. */
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                goto close_file;
+        }
+
+        /*
+         * Read all records from file. Hot path.
+         * Aggreagation -> write record to memory and continue.
+         * Ignore record limit.
+         */
+        while ((secondary_errno = lnf_read(file, rec)) == LNF_OK) {
+                file_rec_cntr++;
+
+                /* Apply filter (if there is any). */
+                if (stc->filter && !lnf_filter_match(stc->filter, rec)) {
+                        continue;
+                }
+                file_proc_rec_cntr++;
+
+                secondary_errno = lnf_mem_write(stc->aggr_mem, rec);
+                if (secondary_errno != LNF_OK) {
+                        primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_mem_write()");
+                        goto free_lnf_rec;
+                }
+
+                if (stc->stat_mem) {
+                        secondary_errno = lnf_mem_write(stc->stat_mem, rec);
+                        if (secondary_errno != LNF_OK) {
+                                primary_errno = E_LNF;
+                                print_err(primary_errno, secondary_errno,
+                                                "lnf_mem_write()");
+                                goto free_lnf_rec;
+                        }
+                }
+        }
+
+        /* Check if we reach end of file. */
+        if (secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF; //no, we didn't, a problem occured
+        }
+
+        print_debug("/%d/ file %s: read %lu, processed %lu",
+                        omp_get_thread_num(), path, file_rec_cntr,
+                        file_proc_rec_cntr);
+
+free_lnf_rec:
+        lnf_rec_free(rec);
+close_file:
+        lnf_close(file);
+
+        return primary_errno;
+}
+
+
+/* Retrun value have to be freed. */
+static error_code_t task_get_next_file(struct slave_task_ctx *stc, char **fn)
+{
+        static bool no_more_files;
         struct dirent *dir_entry;
-        char *ret;
+        char *path;
 
-        assert(stc != NULL);
+        assert(stc != NULL && fn != NULL);
 
-        if (stc->no_more_files) {
-                return NULL; //E_EOF;
+        if (no_more_files) {
+                return E_EOF;
         }
 
         switch (stc->data_source) {
         case DATA_SOURCE_FILE: //one file
-                stc->no_more_files = true;
-                return strdup(stc->path_str);
+                no_more_files = true;
+                path = strdup(stc->path_str);
+                if (path == NULL) {
+                        print_err(E_MEM, 0, "strdup()");
+                        return E_MEM;
+                }
+                break;
 
         case DATA_SOURCE_DIR: //whole directory without descending
                 do { //skip all directories
@@ -249,56 +310,67 @@ static char * task_get_next_file(struct slave_task_ctx *stc)
                 } while (dir_entry && dir_entry->d_type == DT_DIR);
 
                 if (dir_entry == NULL) { //didn't find any new file
-                        stc->no_more_files = true;
-                        return NULL; //E_EOF;
+                        no_more_files = true;
+                        return E_EOF;
                 }
 
                 /* Found new file -> construct path. */
-                ret = malloc((stc->ms_shared.path_str_len +
+                path = malloc((stc->ms_shared.path_str_len +
                                         strlen(dir_entry->d_name) + 1) *
                                 sizeof (char));
-                strcpy(ret, stc->path_str); //copy dirname
-                strcat(ret, dir_entry->d_name); //append filename
-                return ret;
+                if (path == NULL) {
+                        print_err(E_MEM, 0, "malloc()");
+                        return E_MEM;
+                }
+                strcpy(path, stc->path_str); //copy dirname
+                strcat(path, dir_entry->d_name); //append filename
+                break;
 
         case DATA_SOURCE_INTERVAL: //all files coresponding to time interval
-                ret = malloc(PATH_MAX * sizeof (char));
+                path = malloc(PATH_MAX * sizeof (char));
+                if (path == NULL) {
+                        print_err(E_MEM, 0, "malloc()");
+                        return E_MEM;
+                }
 
                 /* Loop through entire interval, ctx kept in interval_begin. */
                 while (tm_diff(stc->ms_shared.interval_end,
                                         stc->ms_shared.interval_begin) > 0) {
                         /* Construct path string from time. */
-                        if (strftime(ret, PATH_MAX, FLOW_FILE_PATH,
+                        if (strftime(path, PATH_MAX, FLOW_FILE_PATH,
                                                 &stc->ms_shared.interval_begin)
                                         == 0) {
                                 secondary_errno = 0;
                                 print_err(E_PATH, secondary_errno,
                                                 "strftime()");
-                                return NULL; //E_PATH;
+                                free(path);
+                                return E_PATH;
                         }
                         /* Increment context by rotation interval, normalize. */
                         stc->ms_shared.interval_begin.tm_sec +=
                                 FLOW_FILE_ROTATION_INTERVAL;
                         mktime_utc(&stc->ms_shared.interval_begin);
 
-                        if (access(ret, F_OK) == 0) {
-                                return ret;//E_OK; //file exists
+                        if (access(path, F_OK) == 0) {
+                                *fn = path;
+                                return E_OK; //file exists
                         }
 
                         //TODO: master should know about this
                         print_warn(E_PATH, 0, "skipping non existing file "
-                                        "\"%s\"", ret);
+                                        "\"%s\"", path);
                 }
 
-                free(ret);
-                stc->no_more_files = true;
-                return NULL; //E_EOF; //whole interval read
+                free(path);
+                no_more_files = true;
+                return E_EOF; //whole interval read
 
         default:
                 assert(!"unknown data source");
         }
 
-        assert(!"task_get_next_file()");
+        *fn = path;
+        return E_OK; //file exists
 }
 
 
@@ -325,6 +397,7 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
 
         /* Initialize filter. */
         secondary_errno = lnf_filter_init(filter, filter_str);
+        //secondary_errno = lnf_filter_init_v2(filter, filter_str);
         if (secondary_errno != LNF_OK) {
                 print_err(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
@@ -826,6 +899,8 @@ error_code_t slave(int world_size)
 {
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
+        double file_dur;
+
         memset(&stc, 0, sizeof(stc));
 
         stc.slave_cnt = world_size - 1; //all nodes without master
@@ -847,23 +922,32 @@ error_code_t slave(int world_size)
                 goto finalize_task;
         }
 
-        //TODO: return codes, record limit, secondary_errno
-        #pragma omp parallel firstprivate(primary_errno)
+        file_dur = -MPI_Wtime(); //time measurement start
+
+        //TODO: return codes, secondary_errno
+        #pragma omp parallel
         {
                 #pragma omp single
                 {
-                        char *path = task_get_next_file(&stc); //first file
+                        char *path;
 
-                        while (path != NULL) {
+                        primary_errno = task_get_next_file(&stc, &path);
+                        while (primary_errno == E_OK) {
                                 #pragma omp task firstprivate(path)
                                 {
-                                        primary_errno =
-                                                task_process_file(&stc, path);
+                                        if (stc.aggr_mem) {
+                                                primary_errno = task_store_file(
+                                                                &stc, path);
+                                        } else if (!stc.rec_limit_reached) {
+                                                primary_errno = task_send_file(
+                                                                &stc, path);
+                                        }
+
                                         assert(primary_errno == E_OK);
                                         free(path);
                                 }
 
-                                path = task_get_next_file(&stc); //next file
+                                primary_errno = task_get_next_file(&stc, &path);
                         }
                 }
 
@@ -873,11 +957,15 @@ error_code_t slave(int world_size)
                 if (stc.stat_mem) {
                         lnf_mem_merge_threads(stc.stat_mem);
                 }
+
                 /* Check if we read all files. */
                 //if (!stc.rec_limit_reached && primary_errno != E_EOF) {
                 //        //goto finalize_task; //no, we didn't, some problem occured
                 //}
         } //pragma omp parallel
+
+        file_dur += MPI_Wtime();
+        print_debug("file_dur %fs", file_dur);
 
         /*
          * In case of aggregation or sorting, records were stored into memory
