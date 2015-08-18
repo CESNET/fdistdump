@@ -26,7 +26,9 @@ script:
         - make check
 
 #after_success:
-#after_failure:
+after_failure:
+        - ./print_logs.sh
+
 #after_script:
 
 notifications:

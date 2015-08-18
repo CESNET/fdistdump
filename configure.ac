@@ -7,6 +7,7 @@ AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
 AC_PROG_CC_STDC
 CFLAGS="$CFLAGS -pedantic -W -Wall -Wextra -Winit-self -Wcast-align \
 -Wcast-qual -Wmissing-include-dirs -Wshadow"
+AM_PROG_CC_C_O
 
 #check for libraries
 AC_SEARCH_LIBS([lnf_open], [nf], [], [AC_MSG_ERROR([unable to find the libnf \

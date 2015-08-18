@@ -342,21 +342,29 @@ void free_mpi_struct_shared_task_ctx(void)
 }
 
 
-error_code_t mem_setup(lnf_mem_t *mem, const struct agg_param *ap,
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
                 size_t ap_cnt)
 {
+        secondary_errno = lnf_mem_init(mem);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
+                return E_LNF;
+        }
+
         /* Default aggragation fields: first, last, flows, packets, bytes. */
-        secondary_errno = lnf_mem_fastaggr(mem, LNF_FAST_AGGR_BASIC);
+        secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
         if (secondary_errno != LNF_OK) {
                 print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
+                free_aggr_mem(*mem);
                 return E_LNF;
         }
 
         for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
-                secondary_errno = lnf_mem_fadd(mem, ap->field, ap->flags,
+                secondary_errno = lnf_mem_fadd(*mem, ap->field, ap->flags,
                                 ap->numbits, ap->numbits6);
                 if (secondary_errno != LNF_OK) {
                         print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
+                        free_aggr_mem(*mem);
                         return E_LNF;
                 }
         }
@@ -365,7 +373,46 @@ error_code_t mem_setup(lnf_mem_t *mem, const struct agg_param *ap,
 }
 
 
-error_code_t mem_print(lnf_mem_t *mem, size_t limit)
+void free_aggr_mem(lnf_mem_t *mem)
+{
+        lnf_mem_free(mem);
+}
+
+
+/* Initialize memory for traffic volume statistics.*/
+error_code_t init_stat_mem(lnf_mem_t **mem)
+{
+        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
+                LNF_FLD_DOCTETS};
+
+        secondary_errno = lnf_mem_init(mem);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
+                return E_LNF;
+        }
+
+        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
+                secondary_errno = lnf_mem_fadd(*mem, stat_params[i],
+                                LNF_AGGR_SUM, 0, 0);
+                if (secondary_errno != LNF_OK) {
+                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
+                        free_aggr_mem(*mem);
+                        return E_LNF;
+                }
+        }
+
+        return E_OK;
+}
+
+
+/* Free statistics memory. */
+void free_stat_mem(lnf_mem_t *mem)
+{
+   lnf_mem_free(mem);
+}
+
+
+error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit)
 {
         error_code_t primary_errno = E_OK;
         size_t rec_cntr = 0;
@@ -399,6 +446,52 @@ error_code_t mem_print(lnf_mem_t *mem, size_t limit)
         if (secondary_errno != LNF_EOF) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno, "lnf_mem_read()");
+        }
+
+free_lnf_rec:
+        lnf_rec_free(rec);
+
+        return primary_errno;
+}
+
+
+error_code_t print_stat_mem(lnf_mem_t *mem)
+{
+        error_code_t primary_errno = E_OK;
+        lnf_rec_t *rec;
+        size_t stat_val;
+        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
+                LNF_FLD_DOCTETS};
+        char fld_name_buff[LNF_INFO_BUFSIZE];
+
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
+                return E_LNF;
+        }
+
+        secondary_errno = lnf_mem_read(mem, rec); //read single record
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
+                goto free_lnf_rec;
+        }
+
+        printf("statistics: \n");
+        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
+                secondary_errno = lnf_rec_fget(rec, stat_params[i], &stat_val);
+                if (secondary_errno != LNF_OK) {
+                        primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_rec_fget()");
+                        goto free_lnf_rec;
+                }
+
+                secondary_errno = lnf_fld_info(stat_params[i],
+                                LNF_FLD_INFO_NAME, fld_name_buff,
+                                LNF_INFO_BUFSIZE);
+
+                printf("\t%lu %s\n", stat_val, fld_name_buff);
         }
 
 free_lnf_rec:

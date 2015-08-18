@@ -135,6 +135,7 @@ enum { //tags
         TAG_FILTER,
         TAG_AGG,
         TAG_DATA,
+        TAG_STATS,
 };
 
 enum { //control commands
@@ -178,9 +179,45 @@ void free_mpi_struct_tm(void);
 void create_mpi_struct_shared_task_ctx(void);
 void free_mpi_struct_shared_task_ctx(void);
 
-error_code_t mem_setup(lnf_mem_t *mem, const struct agg_param *ap,
+
+error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit);
+error_code_t print_stat_mem(lnf_mem_t *mem);
+
+
+/** \brief Initialize LNF aggregation memory.
+ *
+ * Initialize aggregation memory and set memory parameters. mem will be
+ * allocated, therefore have to be freed by free_aggr_mem().
+ *
+ * \param[inout] mem Pointer to pointer to LNF memory structure.
+ * \return E_OK on success, error code otherwise.
+ */
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
                 size_t ap_cnt);
-error_code_t mem_print(lnf_mem_t *mem, size_t limit);
+
+/** \brief Free LNF aggregation memory.
+ *
+ * \param[inout] mem Pointer to LNF memory structure.
+ */
+void free_aggr_mem(lnf_mem_t *mem);
+
+/** \brief Initialize LNF memory for traffic volume statistics.
+ *
+ * This memory is used for computing sum of flows, bytes and packets of all
+ * processed records. mem will be allocated, therefore have to be freed by
+ * free_aggr_mem().
+ *
+ * \param[inout] mem Pointer to pointer to LNF memory structure.
+ * \return E_OK on success, error code otherwise.
+ */
+error_code_t init_stat_mem(lnf_mem_t **mem);
+
+/** \brief Free LNF memory for traffic volume statistics.
+ *
+ * \param[inout] mem Pointer to LNF memory structure.
+ */
+void free_stat_mem(lnf_mem_t *mem);
+
 
 /** \brief Yield the time difference between a and b.
  *
