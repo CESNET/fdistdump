@@ -83,7 +83,8 @@ int main(int argc, char **argv)
                 }
 
                 for (int i = 0; i < 2; ++i){ // try normal and list mode
-                        if(lnf_mem_init(&mem) != LNF_OK){
+                        if (init_aggr_mem(&mem, args.agg_params,
+                                                args.agg_params_cnt) != E_OK) {
                                 state = TE_ERR;
                                 log_error("mem_setup: memory  init.");
                                 goto done;
@@ -99,14 +100,7 @@ int main(int argc, char **argv)
                                 }
                         }
 
-                        if (mem_setup(mem, args.agg_params, args.agg_params_cnt)
-                            != E_OK){
-                                log_error("mem_setup: memory setup.");
-                                goto done;
-                        }
-
-
-                        lnf_mem_free(mem);
+                        free_aggr_mem(mem);
                 }
         }
 

@@ -2,18 +2,26 @@ language: c
 
 compiler:
         - gcc
-        - clang
+        #- clang #on travis environment clang doesn't support OpenMP
 
 env:
-        - MPI=openmpi
-        - MPI=mpich
+        global:
+                #don't waste travis resources, limit threads
+                - OMP_NUM_THREADS=4
+                #coverity related
+                - secure: "ZPncDzOLt2e9rb3wCrycqPJHNNtPDjEwJ61dspYbmcLBflHBzoAwTLp3e2UH8p1PufOsf4nNj2SA27Fm47/V0lRZ4TPllwsAzKmWSjVlGWczjpIFT/TMFt6B1rDZ+RLF7J2PQW8t2ZAOJ5wqpHobHijcVtSz4wfiRsGY5Yiavbs0bdGo+CDTl+o8uGqQW5kU66H+C9wBvt2y5WKyp2HnDfojOk7Cp6+Ti5Kcox1AuhwyuQT2iXkmWwKUnTLDuqfHH0kUAnLZMGCAnsg5xnfPKr4/+SZ4QvTnK+Pk8uO6O6Mx3/n3fPyo9i6Gy+Ks7+BGSB173T45CUbWyLd1tu7KSdb2s24lUvK582t4yQ7SJzNnEDg1ENgP9TfjFuLFBEkdlWSVjP4XjrXVujKFzX9hAa2iaquPvFiWvLM6D+a+PVrbuWicRjTpewGFavk0p+Ik+ltFOQMlEcG7P/3iIQZgOF/FQHGYIt3ByOahDUmbyWKQ8DBDc+xPwqlnnDPev/3RIIoAiQPMy/qsJqbCMV8CWmtrMhpSRJdmwtv1n0gpx0DWc7m5Qp/Z1rnmYMmS5Di2oOFm1xfCiLtjX8JLuUlq2rrLrvKiF15CcckpHMmsClv/GztcVNdKCzGx2TcQPDF98SJ0An0bz+Lcao/9OTaBFVtMf2W8edYApAQVzJ82Ex4="
+        matrix:
+                - MPI=openmpi
+                - MPI=mpich
+
 
 before_install:
         - sudo apt-get update -q
         - ./travis_install_mpi.sh $MPI
         - ./install_dependencies.sh
-        - export OMPI_CC="${CC}" #CC set by travis as MPI underlying compiler
-        - unset CC #unset CC, otherwise ./configure would not set mpicc as CC
+        #as long as clang doesn't work, following can be ommited
+        #- export OMPI_CC="${CC}" #CC set by travis as MPI underlying compiler
+        #- unset CC #otherwise ./configure would not set mpicc as CC
 
 install:
         - autoreconf -i
@@ -34,19 +42,13 @@ after_failure:
 notifications:
         email: false
 
-#coverity scan
-env:
-  global:
-   # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
-   #   via the "travis encrypt" command using the project repo's public key
-   - secure: "ZPncDzOLt2e9rb3wCrycqPJHNNtPDjEwJ61dspYbmcLBflHBzoAwTLp3e2UH8p1PufOsf4nNj2SA27Fm47/V0lRZ4TPllwsAzKmWSjVlGWczjpIFT/TMFt6B1rDZ+RLF7J2PQW8t2ZAOJ5wqpHobHijcVtSz4wfiRsGY5Yiavbs0bdGo+CDTl+o8uGqQW5kU66H+C9wBvt2y5WKyp2HnDfojOk7Cp6+Ti5Kcox1AuhwyuQT2iXkmWwKUnTLDuqfHH0kUAnLZMGCAnsg5xnfPKr4/+SZ4QvTnK+Pk8uO6O6Mx3/n3fPyo9i6Gy+Ks7+BGSB173T45CUbWyLd1tu7KSdb2s24lUvK582t4yQ7SJzNnEDg1ENgP9TfjFuLFBEkdlWSVjP4XjrXVujKFzX9hAa2iaquPvFiWvLM6D+a+PVrbuWicRjTpewGFavk0p+Ik+ltFOQMlEcG7P/3iIQZgOF/FQHGYIt3ByOahDUmbyWKQ8DBDc+xPwqlnnDPev/3RIIoAiQPMy/qsJqbCMV8CWmtrMhpSRJdmwtv1n0gpx0DWc7m5Qp/Z1rnmYMmS5Di2oOFm1xfCiLtjX8JLuUlq2rrLrvKiF15CcckpHMmsClv/GztcVNdKCzGx2TcQPDF98SJ0An0bz+Lcao/9OTaBFVtMf2W8edYApAQVzJ82Ex4="
-
+#coverity related
 addons:
-  coverity_scan:
-    project:
-      name: "CESNET/fdistdump"
-      description: "Build submitted via Travis CI"
-    notification_email: wrona@cesnet.cz
-    build_command_prepend: "./configure; make clean"
-    build_command:   "make -j 4"
-    branch_pattern: coverity_scan
+        coverity_scan:
+                project:
+                        name: "CESNET/fdistdump"
+                        description: "Build submitted via Travis CI"
+                notification_email: wrona@cesnet.cz
+                build_command_prepend: "./configure; make clean"
+                build_command:   "make -j 4"
+                branch_pattern: coverity_scan

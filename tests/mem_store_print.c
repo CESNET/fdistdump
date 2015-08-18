@@ -176,25 +176,6 @@ int main(int argc, char **argv)
 //                       time_start, time_end, src_ip, src_port, dst_ip, dst_port,
 //                       packets, bytes);
 
-                if(lnf_mem_init(&mem) != LNF_OK){
-                        state = TE_ERR;
-                        log_error("mem_store_print: memory  init.");
-                        goto done;
-                }
-
-                if(lnf_rec_init(&recp) != LNF_OK){
-                        state = TE_ERR;
-                        log_error("mem_store_print: rec init.");
-                        goto done;
-                }
-
-                if (lnf_mem_setopt(mem, LNF_OPT_LISTMODE, NULL, 0) !=
-                    LNF_OK){
-                        state = TE_ERR;
-                        log_error("mem_store_print: setopt list-mode.");
-                        goto master_done;
-                }
-
                 if (add_field("srcip", agg_params, &agg_param_cnt) != TE_OK){
                         state = TE_ERR;
                         log_error("mem_store_print: add-field.");
@@ -221,18 +202,28 @@ int main(int argc, char **argv)
                         goto master_done;
                 }
 
-                if (mem_setup(mem, agg_params, agg_param_cnt) !=
-                    E_OK){
-                        log_error("mem_store_print: memory setup.");
+                if (init_aggr_mem(&mem, agg_params, agg_param_cnt) != E_OK){
+                        state = TE_ERR;
+                        log_error("mem_store_print: memory init.");
                         goto done;
                 }
+                if (lnf_mem_setopt(mem, LNF_OPT_LISTMODE, NULL, 0) !=
+                    LNF_OK){
+                        state = TE_ERR;
+                        log_error("mem_store_print: setopt list-mode.");
+                        goto master_done;
+                }
 
+                if(lnf_rec_init(&recp) != LNF_OK){
+                        state = TE_ERR;
+                        log_error("mem_store_print: rec init.");
+                        goto done;
+                }
                 if (lnf_rec_fset(recp, LNF_FLD_BREC1, &brec) != LNF_OK) {
                         log_error("mem_store_print: rec-fset.");
                         state = TE_ERR;
                         goto master_done;
                 }
-
 
                 for (int i = 0; i < rec_copy_cnt; ++i){
                     if (lnf_mem_write(mem, recp) != LNF_OK) {
@@ -242,9 +233,9 @@ int main(int argc, char **argv)
                     }
                 }
 
-                mem_print(mem, 0);
+                print_aggr_mem(mem, 0);
 master_done:
-                lnf_mem_free(mem);
+                free_aggr_mem(mem);
                 lnf_rec_free(recp);
         }
 
