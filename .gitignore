@@ -22,3 +22,11 @@ Makefile
 *~
 *.swp
 *.swo
+
+#tests
+/tests/*
+!/tests/*.c
+!/tests/*.test
+
+#object files
+*.o

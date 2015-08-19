@@ -63,53 +63,114 @@
 extern int secondary_errno;
 
 enum { //command line options, have to start above ASCII
-        OPT_VERSION = 256, //print version
-        OPT_NO_FAST_TOPN, //disable fast topn-N algorithm
+        OPT_NO_FAST_TOPN = 256, //disable fast topn-N algorithm
+
+        OPT_HELP, //print help
+        OPT_VERSION, //print version
 };
 
 
-static const char *const time_formats[] = {
-        /* Date only. */
+static const char *const date_formats[] = {
         "%Y-%m-%d", //standard date, 2015-12-31
         "%d.%m.%Y", //european, 31.12.2015
-        "%m/%d.%Y", //american, 12/31/2015
+        "%m/%d/%Y", //american, 12/31/2015
+};
 
-        /* Time and date. */
-        "%H:%M %Y-%m-%d", //standard time and date, 23:59 2015-12-31
-        "%H:%M %d.%m.%Y", //european, 23:59 31.12.2015
-        "%H:%M %m/%d.%Y", //american, 23:59 12/31/2015
+static const char *const time_formats[] = {
+        "%H:%M", //23:59
+        "%H:%M", //23:59
+};
 
-        /* Date and time. */
-        "%Y-%m-%d %H:%M", //standard date and time, 2015-12-31 23:59
-        "%d.%m.%Y %H:%M", //european, 31.12.2015 23:59
-        "%m/%d.%Y %H:%M", //american, 12/31/2015 23:59
+static const char *const utc_strings[] = {
+        "u",
+        "ut",
+        "utc",
+        "U",
+        "UT",
+        "UTC",
 };
 
 
-static error_code_t str_to_tm(struct tm *time, const char *time_str)
+/** \brief Convert string into tm structure.
+ *
+ * Function tries to parse time string and fills tm with appropriate values on
+ * success. String is split into tokens according to TIME_DELIM delimiter. Each
+ * token is converted (from left to right) into one of three categories. Date,
+ * if it corresponds to one of date_formats[], time if if corresponds to one of
+ * time_formats[] or UTC flag is set, if token matches to one of utc_strings[].
+ * If none of these categories is detected, E_ARG is returned.
+ * Time structure is overwritten by parsed-out values. If more then one valid
+ * token of the same category is found, the later one is used. If only date is
+ * found in time_str, used time is 00:00. If only time is found in time_str,
+ * date used is today. If both date and time is present, both is used.
+ * If string is successfuly parsed, E_OK is returned. On error, content
+ * of tm structure is undefined and E_ARG is returned.
+ *
+ * \param[in] time_str Time string, usually gathered from command line.
+ * \param[out] utc Set it one of utc_strings[] is found.
+ * \param[out] tm Time structure filled with parsed-out time and date.
+ * \return Error code. E_OK or E_ARG.
+ */
+static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
 {
         char *ret;
-        static const size_t time_formats_cnt = ARRAY_SIZE(time_formats);
+        char *token;
+        char *saveptr = NULL;
+        struct tm garbage = {0}; //strptime() failure would ruin tm values
+        const time_t now = time(NULL);
 
-        memset(time, 0, sizeof(struct tm));
+        /* Default is today midnight. */
+        localtime_r(&now, tm);
+        tm->tm_sec = 0;
+        tm->tm_min = 0;
+        tm->tm_hour = 0;
 
-        for (size_t i = 0; i < time_formats_cnt; ++i) {
-                ret = strptime(time_str, time_formats[i], time);
-                if (ret != NULL && *ret == '\0') {
-                        return E_OK; //conversion successful
+        /* Separate time and date in time string. */
+        token = strtok_r(time_str, TIME_DELIM, &saveptr); //first token
+        while (token != NULL) {
+                /* Try to parse date.*/
+                for (size_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
+                        ret = strptime(token, date_formats[i], &garbage);
+                        if (ret != NULL && *ret == '\0') {
+                                /* Conversion succeeded, fill real struct tm. */
+                                strptime(token, date_formats[i], tm);
+                                goto next_token;
+                        }
                 }
+
+                /* Try to parse time.*/
+                for (size_t i = 0; i < ARRAY_SIZE(time_formats); ++i) {
+                        ret = strptime(token, time_formats[i], &garbage);
+                        if (ret != NULL && *ret == '\0') {
+                                /* Conversion succeeded, fill real struct tm. */
+                                strptime(token, time_formats[i], tm);
+                                goto next_token; //success
+                        }
+                }
+
+                /* Check for UTC flag. */
+                for (size_t i = 0; i < ARRAY_SIZE(utc_strings); ++i) {
+                        if (strcmp(token, utc_strings[i]) == 0) {
+                                *utc = true;
+                                goto next_token;
+                        }
+                }
+
+                print_err(E_ARG, 0, "invalid time format \"%s\"", token);
+                return E_ARG; //conversion failure
+next_token:
+                token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
         }
 
-        print_err(E_ARG, 0, "unable to parse time string \"%s\"", time_str);
-        return E_ARG; //conversion failure
+        return E_OK;
 }
 
 
 /** \brief Parse and store time interval string.
  *
- * Function tries to parse interval string, fills interval_begin and
+ * Function tries to parse time interval string, fills interval_begin and
  * interval_end with appropriate values on success. Beginning and ending dates
- * (and times) are  separated with INTERVAL_SEPARATOR, if ending date is not
+ * (and times) are  separated with INTERVAL_DELIM, if ending date is not
  * specified, current time is used.
  * If interval string is successfuly parsed, E_OK is returned. On error, content
  * of interval_begin and interval_end is undefined and E_ARG is returned.
@@ -120,7 +181,7 @@ static error_code_t str_to_tm(struct tm *time, const char *time_str)
  *                        line.
  * \return Error code. E_OK or E_ARG.
  */
-static error_code_t set_interval(struct cmdline_args *args,
+static error_code_t set_time_interval(struct cmdline_args *args,
                 char *interval_arg_str)
 {
         error_code_t primary_errno = E_OK;
@@ -128,16 +189,20 @@ static error_code_t set_interval(struct cmdline_args *args,
         char *end_str;
         char *remaining_str;
         char *saveptr = NULL;
+        bool begin_utc = false;
+        bool end_utc = false;
+
+        assert(args != NULL && interval_arg_str != NULL);
 
         /* Split time interval string. */
-        begin_str = strtok_r(interval_arg_str, INTERVAL_SEPARATOR, &saveptr);
+        begin_str = strtok_r(interval_arg_str, INTERVAL_DELIM, &saveptr);
         if (begin_str == NULL) {
                 print_err(E_ARG, 0, "invalid interval string \"%s\"\n",
                                 interval_arg_str);
                 return E_ARG;
         }
-        end_str = strtok_r(NULL, INTERVAL_SEPARATOR, &saveptr); //NULL is valid
-        remaining_str = strtok_r(NULL, INTERVAL_SEPARATOR, &saveptr);
+        end_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr); //NULL is valid
+        remaining_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr);
         if (remaining_str != NULL) {
                 print_err(E_ARG, 0, "invalid interval string \"%s\"\n",
                                 interval_arg_str);
@@ -145,7 +210,7 @@ static error_code_t set_interval(struct cmdline_args *args,
         }
 
         /* Convert time strings to tm structure. */
-        primary_errno = str_to_tm(&args->interval_begin, begin_str);
+        primary_errno = str_to_tm(begin_str, &begin_utc, &args->interval_begin);
         if (primary_errno != E_OK) {
                 return E_ARG;
         }
@@ -153,10 +218,28 @@ static error_code_t set_interval(struct cmdline_args *args,
                 const time_t now = time(NULL);
                 localtime_r(&now, &args->interval_end);
         } else {
-                primary_errno = str_to_tm(&args->interval_end, end_str);
+                primary_errno = str_to_tm(end_str, &end_utc,
+                                &args->interval_end);
                 if (primary_errno != E_OK) {
                         return E_ARG;
                 }
+        }
+
+        if (!begin_utc) {
+                time_t tmp;
+
+                //let mktime() decide about DST
+                args->interval_begin.tm_isdst = -1;
+                tmp = mktime(&args->interval_begin);
+                gmtime_r(&tmp, &args->interval_begin);
+        }
+        if (!end_utc) {
+                time_t tmp;
+
+                //let mktime() decide about DST
+                args->interval_end.tm_isdst = -1;
+                tmp = mktime(&args->interval_end);
+                gmtime_r(&tmp, &args->interval_end);
         }
 
         /* Check interval sanity. */
@@ -178,7 +261,7 @@ static error_code_t set_interval(struct cmdline_args *args,
  *
  * Function tries to parse aggregation string, fills agg_params and
  * agg_params_cnt with appropriate values on success. Aggregation arguments are
- * separated with AGG_SEPARATOR, maximum number of arguments is MAX_AGG_PARAMS.
+ * separated with AGG_DELIM, maximum number of arguments is MAX_AGG_PARAMS.
  * Individual arguments are parsed by libnf function lnf_fld_parse(), see libnf
  * documentation for more information.
  * If argument is successfuly parsed, next agg_param struct is filled and
@@ -201,7 +284,7 @@ static error_code_t set_agg(struct cmdline_args *args, char *agg_arg_str)
         int nb6;
         int agg;
 
-        token = strtok_r(agg_arg_str, AGG_SEPARATOR, &saveptr); //first token
+        token = strtok_r(agg_arg_str, AGG_DELIM, &saveptr); //first token
         while (token != NULL) {
                 size_t idx;
 
@@ -249,7 +332,7 @@ static error_code_t set_agg(struct cmdline_args *args, char *agg_arg_str)
                         args->agg_params_cnt++;
                 }
 
-                token = strtok_r(NULL, AGG_SEPARATOR, &saveptr); //next token
+                token = strtok_r(NULL, AGG_DELIM, &saveptr); //next token
         }
 
         return E_OK;
@@ -360,7 +443,7 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_arg_str)
         char *remaining_str;
         char *saveptr = NULL;
 
-        stat_str = strtok_r(stat_arg_str, STAT_SEPARATOR, &saveptr);
+        stat_str = strtok_r(stat_arg_str, STAT_DELIM, &saveptr);
         if (stat_str == NULL) {
                 print_err(E_ARG, 0, "invalid statistic string \"%s\"\n",
                                 stat_arg_str);
@@ -372,7 +455,7 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_arg_str)
                 return primary_errno;
         }
 
-        order_str = strtok_r(NULL, STAT_SEPARATOR, &saveptr);
+        order_str = strtok_r(NULL, STAT_DELIM, &saveptr);
         if (order_str == NULL) {
                 order_str = DEFAULT_STAT_ORD;
         }
@@ -382,7 +465,7 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_arg_str)
                 return primary_errno;
         }
 
-        remaining_str = strtok_r(NULL, STAT_SEPARATOR, &saveptr);
+        remaining_str = strtok_r(NULL, STAT_DELIM, &saveptr);
         if (remaining_str != NULL) {
                 print_err(E_ARG, 0, "invalid statistic string \"%s\"\n",
                                 stat_arg_str);
@@ -470,13 +553,6 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 }
 
 
-void set_defaults(struct cmdline_args *args)
-{
-        args->working_mode = MODE_LIST;
-        args->use_fast_topn = true;
-}
-
-
 error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 {
         error_code_t primary_errno = E_OK;
@@ -486,24 +562,28 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         const char usage_string[] = "Usage: mpirun [ options ] " PACKAGE_NAME
                 " [ <args> ]\n";
         const char help_string[] = "help\n";
-        const char *short_opts = "a:f:i:l:o:s:r:h";
+        const char *short_opts = "a:f:l:o:r:s:t:";
         const struct option long_opts[] = {
+                /* Long and short. */
                 {"aggregation", required_argument, NULL, 'a'},
                 {"filter", required_argument, NULL, 'f'},
-                {"time-interval", required_argument, NULL, 'i'},
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
-                {"statistic", required_argument, NULL, 's'},
                 {"read", required_argument, NULL, 'r'},
-                {"help", no_argument, NULL, 'h'},
+                {"statistic", required_argument, NULL, 's'},
+                {"time", required_argument, NULL, 't'},
 
+                /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+                {"help", no_argument, NULL, OPT_HELP},
                 {"version", no_argument, NULL, OPT_VERSION},
 
                 {0, 0, 0, 0} //termination required by getopt_long()
         };
 
-        set_defaults(args);
+        /* Set argument defaults */
+        args->working_mode = MODE_LIST;
+        args->use_fast_topn = true;
 
         while (true) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
@@ -520,11 +600,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_filter(args, optarg);
                         break;
 
-                case 'i': //time interval
-                        primary_errno = set_interval(args, optarg);
-                        input_arg_cnt++;
-                        break;
-
                 case 'l': //limit
                         primary_errno = set_limit(args, optarg);
                         break;
@@ -533,28 +608,33 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_order(args, optarg);
                         break;
 
-                case 's': //statistic
-                        primary_errno = set_stat(args, optarg);
-                        break;
-
                 case 'r': //path to input file or directory
                         args->path_str = optarg;
                         input_arg_cnt++;
                         break;
 
-                case 'h': //help
-                        printf(usage_string);
-                        printf("%s", help_string);
-                        return E_PASS;
+                case 's': //statistic
+                        primary_errno = set_stat(args, optarg);
+                        break;
 
+                case 't': //time interval
+                        primary_errno = set_time_interval(args, optarg);
+                        input_arg_cnt++;
+                        break;
 
-                case OPT_VERSION:
-                        printf("%s\n", PACKAGE_STRING);
-                        return E_PASS;
 
                 case OPT_NO_FAST_TOPN: //disable fast top-N algorithm
                         args->use_fast_topn = false;
                         break;
+
+                case OPT_HELP: //help
+                        printf(usage_string);
+                        printf("%s", help_string);
+                        return E_PASS;
+
+                case OPT_VERSION: //version
+                        printf("%s\n", PACKAGE_STRING);
+                        return E_PASS;
 
 
                 default: /* '?' or '0' */
@@ -625,6 +705,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 #ifdef DEBUG
         print_debug("------------------------------------------------------");
         print_debug("mode: %s", working_mode_to_str(args->working_mode));
+        if (args->working_mode == MODE_AGGR && args->use_fast_topn) {
+                print_debug("flags: using fast top-N algorithm");
+        }
         for (size_t i = 0; i < args->agg_params_cnt; ++i) {
                 struct agg_param *ap = args->agg_params + i;
                 print_debug("aggregation %lu: %d, 0x%x, (%d, %d)", i, ap->field,
@@ -642,9 +725,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 strftime(begin, sizeof(begin), "%c", &args->interval_begin);
                 strftime(end, sizeof(end), "%c", &args->interval_end);
                 print_debug("interval: %s - %s", begin, end);
-        }
-        if (args->use_fast_topn) {
-                print_debug("flags: using fast top-N algorithm");
         }
         print_debug("------------------------------------------------------\n");
 #endif //DEBUG

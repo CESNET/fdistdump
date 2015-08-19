@@ -50,9 +50,10 @@
 #include <stddef.h> //size_t
 #include <stdbool.h>
 
-#define AGG_SEPARATOR "," //srcport,srcip
-#define STAT_SEPARATOR "/" //statistic/order
-#define INTERVAL_SEPARATOR "#" //begin#end
+#define AGG_DELIM "," //srcport,srcip
+#define STAT_DELIM "/" //statistic/order
+#define INTERVAL_DELIM "#" //begin#end
+#define TIME_DELIM " \t\n\v\f\r" //whitespace
 
 #define DEFAULT_STAT_ORD "flows"
 #define DEFAULT_STAT_LIMIT 10
