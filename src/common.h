@@ -145,6 +145,12 @@ enum { //control commands
 
 /* Function-like macros */
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#define MEMBER_SIZE(type, member) sizeof(((type *)0)->member)
+
+#define BIT_SET(var, idx) ((var) |= (1 << (idx)))
+#define BIT_CLEAR(var, idx) ((var) &= ~(1 << (idx)))
+#define BIT_TOGGLE(var, idx) ((var) ^= (1 << (idx)))
+#define BIT_TEST(var, idx) ((var) & (1 << (idx)))
 
 
 /** \brief Print basic record.
@@ -180,7 +186,8 @@ void create_mpi_struct_shared_task_ctx(void);
 void free_mpi_struct_shared_task_ctx(void);
 
 
-error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit);
+error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
+                const struct agg_param *ap, size_t ap_cnt);
 error_code_t print_stat_mem(lnf_mem_t *mem);
 
 

@@ -56,6 +56,7 @@
 
 #define MAX_MSG_LEN (MPI_MAX_PROCESSOR_NAME + 100)
 #define TM_YEAR_BASE 1900
+#define FIELDS_SIZE (LNF_FLD_TERM_ + 1) //currently 256 bits
 
 /* Global variables. */
 extern MPI_Datatype mpi_struct_agg_param;
@@ -411,13 +412,155 @@ void free_stat_mem(lnf_mem_t *mem)
    lnf_mem_free(mem);
 }
 
+struct fields {
+        uint8_t present[FIELDS_SIZE / (8 * sizeof (uint8_t))];
+        size_t cursor;
+};
 
-error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit)
+void fields_init(struct fields *f)
+{
+        assert(f != NULL);
+        memset(f, 0, sizeof (struct fields));
+}
+
+static void fields_add_new(struct fields *f, int new_field)
+{
+        size_t arr_idx;
+        size_t bit_idx;
+
+        assert(f != NULL);
+
+        if (new_field <= LNF_FLD_ZERO_ || new_field >= LNF_FLD_TERM_) {
+                return;
+        }
+
+        arr_idx = new_field / (8 * MEMBER_SIZE(struct fields, present[0]));
+        bit_idx = new_field % (8 * MEMBER_SIZE(struct fields, present[0]));
+        BIT_SET(f->present[arr_idx], bit_idx);
+}
+
+static int fields_iter_next(struct fields *f)
+{
+        assert(f != NULL);
+
+        for (size_t i = f->cursor; i < FIELDS_SIZE; ++i) {
+                size_t arr_idx = i /
+                        (8 * MEMBER_SIZE(struct fields, present[0]));
+                size_t bit_idx = i %
+                        (8 * MEMBER_SIZE(struct fields, present[0]));
+
+                if (BIT_TEST(f->present[arr_idx], bit_idx)) {
+                        f->cursor = i + 1;
+                        return i;
+                }
+        }
+
+        return -1;
+}
+
+static void fields_iter_reset(struct fields *f)
+{
+        assert(f != NULL);
+        f->cursor = 0;
+}
+
+
+static char * field_get_name(int field)
+{
+        static char fld_name_buff[LNF_INFO_BUFSIZE];
+
+        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
+                return NULL;
+        }
+
+        lnf_fld_info(field, LNF_FLD_INFO_NAME, fld_name_buff, LNF_INFO_BUFSIZE);
+
+        return fld_name_buff;
+}
+
+static int field_get_type(int field)
+{
+        int type;
+
+        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
+                return -1;
+        }
+
+        lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
+
+        return type;
+#if 0
+        switch (type) {
+        case LNF_NONE:
+                printf("LNF_NONE\n");
+                break;
+
+        case LNF_UINT8:
+                printf("LNF_UINT8\n");
+                break;
+
+        case LNF_UINT16:
+                printf("LNF_UINT16\n");
+                break;
+
+        case LNF_UINT32:
+                printf("LNF_UINT32\n");
+                break;
+
+        case LNF_UINT64:
+                printf("LNF_UINT64\n");
+                break;
+
+        case LNF_DOUBLE:
+                printf("LNF_DOUBLE\n");
+                break;
+
+        case LNF_ADDR:
+                printf("LNF_ADDR\n");
+                break;
+
+        case LNF_MAC:
+                printf("LNF_MAC\n");
+                break;
+
+        case LNF_STRING:
+                printf("LNF_STRING\n");
+                break;
+
+        case LNF_MPLS:
+                printf("LNF_MPLS\n");
+                break;
+
+        case LNF_BASIC_RECORD1:
+                printf("LNF_BASIC_RECORD1\n");
+                break;
+
+        default:
+                assert(!"unknown LNF data type");
+        }
+#endif
+}
+
+
+error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
+                const struct agg_param *ap, size_t ap_cnt)
 {
         error_code_t primary_errno = E_OK;
         size_t rec_cntr = 0;
         lnf_rec_t *rec;
-        lnf_brec1_t brec;
+        struct fields fields;
+        int field;
+
+        /* Default aggragation fields: first, last, flows, packets, bytes. */
+        fields_init(&fields);
+        fields_add_new(&fields, LNF_FLD_FIRST);
+        fields_add_new(&fields, LNF_FLD_LAST);
+        fields_add_new(&fields, LNF_FLD_AGGR_FLOWS);
+        fields_add_new(&fields, LNF_FLD_DPKTS);
+        fields_add_new(&fields, LNF_FLD_DOCTETS);
+        for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
+                fields_add_new(&fields, ap->field);
+        }
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
@@ -425,17 +568,29 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit)
                 return E_LNF;
         }
 
+        while ((field = fields_iter_next(&fields)) != -1) {
+                printf("%s\t", field_get_name(field));
+        }
+        putchar('\n');
+        fields_iter_reset(&fields);
+
         secondary_errno = lnf_mem_read(mem, rec); //read first
         while (secondary_errno == LNF_OK) {
-                secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_rec_fget()");
-                        goto free_lnf_rec;
-                }
+                uint64_t space;
 
-                print_brec(&brec);
+                while ((field = fields_iter_next(&fields)) != -1) {
+                        secondary_errno = lnf_rec_fget(rec, field, &space);
+                        if (secondary_errno != LNF_OK) {
+                                primary_errno = E_LNF;
+                                print_err(primary_errno, secondary_errno,
+                                                "lnf_rec_fget()");
+                                goto free_lnf_rec;
+                        }
+
+                        printf("%lu\t", space);
+                }
+                putchar('\n');
+                fields_iter_reset(&fields);
 
                 if (++rec_cntr == limit) {
                         goto free_lnf_rec;

@@ -418,7 +418,8 @@ static error_code_t mode_sort_main(size_t slave_cnt, size_t rec_limit,
         }
 
         /* Print all records in memory. */
-        primary_errno = print_aggr_mem(callback_data.mem, rec_limit);
+        primary_errno = print_aggr_mem(callback_data.mem, rec_limit, ap,
+                        ap_cnt);
 
 free_lnf_rec:
         lnf_rec_free(callback_data.rec);
@@ -472,7 +473,7 @@ static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
         }
 
         /* Print all records in memory. */
-        primary_errno = print_aggr_mem(aggr_mem, rec_limit);
+        primary_errno = print_aggr_mem(aggr_mem, rec_limit, ap, ap_cnt);
         if (primary_errno != E_OK) {
                 goto free_aggr_mem;
         }
