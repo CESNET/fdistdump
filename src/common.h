@@ -49,6 +49,7 @@
 #include <stddef.h> //size_t
 #include <time.h> //struct tm
 #include <stdbool.h>
+#include <inttypes.h> //exact width integer types
 
 #include <libnf.h>
 #include <mpi.h>
@@ -70,6 +71,8 @@
 #define FLOW_FILE_PATH (FLOW_FILE_BASE_DIR FLOW_FILE_PROFILE "/" \
                 FLOW_FILE_SOURCE "/" FLOW_FILE_PATH_FORMAT \
                 FLOW_FILE_NAME_FORMAT)
+
+#define PRINT_SPACING 4
 
 
 /* Enumerations. */
@@ -147,20 +150,40 @@ enum { //control commands
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define MEMBER_SIZE(type, member) sizeof(((type *)0)->member)
 
+//unsafe macros - double evaluation of arguments with side effects
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+//safe, but braced-group within expression is GCC extension forbidden by ISO C
+/*
+ * #define MAX(a, b) \
+ *       ({ \
+ *                __typeof__(a) _a = (a); \
+ *                __typeof__(b) _b = (b); \
+ *                _a > _b ? _a : _b; \
+ *        })
+ */
+/*
+ * #define MIN(a, b) \
+ *        ({ \
+ *                 __typeof__(a) _a = (a); \
+ *                 __typeof__(b) _b = (b); \
+ *                 _a > _b ? _a : _b; \
+ *         })
+ */
+
 #define BIT_SET(var, idx) ((var) |= (1 << (idx)))
 #define BIT_CLEAR(var, idx) ((var) &= ~(1 << (idx)))
 #define BIT_TOGGLE(var, idx) ((var) ^= (1 << (idx)))
 #define BIT_TEST(var, idx) ((var) & (1 << (idx)))
 
 
-/** \brief Print basic record.
+/** \brief Convert libnf basic record 1 to string.
  *
- * Prints instance of lnf_brec1_t on one line.
- *
- * \param[in] brec Basic record.
- * \return Error code. E_OK or E_INTERNAL.
+ * \param[in] brec lnf_brec1_t structure.
+ * \return String basic record 1 representation. Static memory.
  */
-error_code_t print_brec(const lnf_brec1_t *brec);
+char * mylnf_brec_to_str(lnf_brec1_t brec);
 
 
 /** \brief Print error message.

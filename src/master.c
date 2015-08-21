@@ -134,7 +134,9 @@ static error_code_t print_brec_callback(char *data, size_t data_len, void *user)
         (void)data_len;
         (void)user;
 
-        return print_brec((const lnf_brec1_t *)data);
+        printf("%s\n", mylnf_brec_to_str(*(lnf_brec1_t*)data));
+
+        return E_OK;
 }
 
 

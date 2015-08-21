@@ -54,7 +54,6 @@
 #include <errno.h>
 #include <limits.h> //PATH_MAX
 #include <unistd.h> //access
-#include <stdint.h>
 
 #include <mpi.h>
 #include <omp.h>

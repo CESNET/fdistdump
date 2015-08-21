@@ -57,6 +57,7 @@
 #define MAX_MSG_LEN (MPI_MAX_PROCESSOR_NAME + 100)
 #define TM_YEAR_BASE 1900
 #define FIELDS_SIZE (LNF_FLD_TERM_ + 1) //currently 256 bits
+#define MAX_STR_LEN 1024
 
 /* Global variables. */
 extern MPI_Datatype mpi_struct_agg_param;
@@ -65,35 +66,97 @@ extern MPI_Datatype mpi_struct_tm;
 extern int secondary_errno;
 
 
-/** \brief Convert libnf address to string.
+static char * timestamp_to_str(uint64_t ts)
+{
+        static char str[MAX_STR_LEN];
+        time_t sec = ts / 1000;
+        uint64_t msec = ts % 1000;
+        struct tm *sec_tm = gmtime(&sec);
+        size_t offset;
+
+        offset = strftime(str, sizeof (str), "%F %T", sec_tm);
+        snprintf(str + offset, sizeof (str) - offset, ".%lu", msec);
+
+        return str;
+}
+
+/** \brief Convert libnf IP address to string.
  *
  * Distinguish IPv4 vs IPv6 address and use inet_ntop() to convert binary
- * representation to string. In case of small buffer, NULL is returned.
+ * representation to string.
  *
- * \param[in] addr Binary address representation.
- * \param[out] buff String address representation.
- * \param[in] buff_len Buffer size.
- * \return String address representation.
+ * \param[in] addr Binary IP address representation.
+ * \return String IP address representation. Static memory.
  */
-static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
+static char * mylnf_addr_to_str(lnf_ip_t addr)
 {
+        static char str[INET6_ADDRSTRLEN];
         const char *ret;
 
-        if (IN6_IS_ADDR_V4COMPAT(addr.data)) { //IPv4
-                if (buff_size < INET_ADDRSTRLEN) {
-                        return NULL;
-                }
-                ret = inet_ntop(AF_INET, &addr.data[3], buff, buff_size);
+        if (IN6_IS_ADDR_V4COMPAT(addr.data)) { //IPv4 compatibile
+                ret = inet_ntop(AF_INET, &addr.data[3], str, INET_ADDRSTRLEN);
         } else { //IPv6
-                if (buff_size < INET6_ADDRSTRLEN) {
-                        return NULL;
-                }
-                ret = inet_ntop(AF_INET6, &addr, buff, buff_size);
+                ret = inet_ntop(AF_INET6, &addr, str, INET6_ADDRSTRLEN);
         }
 
         assert(ret != NULL);
 
-        return buff;
+        return str;
+}
+
+/** \brief Convert libnf MAC address to string.
+ *
+ * \param[in] mac Binary MAC address representation.
+ * \return String MAC address representation. Static memory.
+ */
+static char * mylnf_mac_to_str(lnf_mac_t mac)
+{
+        static char str[18];
+
+        snprintf(str, 18, "%02x:%02x:%02x:%02x:%02x:%02x", mac.data[0],
+                        mac.data[1], mac.data[2], mac.data[3], mac.data[4],
+                        mac.data[5]);
+
+        return str;
+}
+
+char * mylnf_brec_to_str(lnf_brec1_t brec)
+{
+        static char str[MAX_STR_LEN];
+        size_t offset = 0;
+
+        offset += snprintf(str + offset, MAX_STR_LEN - offset, "%-27s",
+                        timestamp_to_str(brec.first));
+        offset += snprintf(str + offset, MAX_STR_LEN - offset, "%-27s",
+                        timestamp_to_str(brec.last));
+
+        offset += snprintf(str + offset, MAX_STR_LEN - offset, "%5" PRIu8,
+                        brec.prot);
+
+        offset += snprintf(str + offset, MAX_STR_LEN - offset, "%17s:%-7"
+                        PRIu16, mylnf_addr_to_str(brec.srcaddr), brec.srcport);
+        offset += snprintf(str + offset, MAX_STR_LEN - offset, "%17s:%-7"
+                        PRIu16, mylnf_addr_to_str(brec.dstaddr), brec.dstport);
+
+        offset += snprintf(str + offset, MAX_STR_LEN - offset,
+                        "%13" PRIu64 "%13" PRIu64 "%13" PRIu64,
+                        brec.bytes, brec.pkts, brec.flows);
+
+#if 0
+        if (ret == NULL) {
+                print_err(E_INTERNAL, 0, "addr_to_str()");
+                return E_INTERNAL;
+        }
+
+        printf("%lu -> %lu\t", brec->first, brec->last);
+        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec->srcport,
+                        dstaddr_str, brec->dstport);
+        printf("%lu\t%lu\t%lu\n", brec->pkts, brec->bytes, brec->flows);
+
+        return E_OK;
+#endif
+
+        return str;
 }
 
 
@@ -162,33 +225,6 @@ static char * error_code_to_str(error_code_t prim_errno)
         };
 
         return msg;
-}
-
-
-error_code_t print_brec(const lnf_brec1_t *brec)
-{
-        char *ret;
-
-        static char srcaddr_str[INET6_ADDRSTRLEN];
-        static char dstaddr_str[INET6_ADDRSTRLEN];
-
-        ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
-        if (ret == NULL) {
-                print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_INTERNAL;
-        }
-        ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
-        if (ret == NULL) {
-                print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_INTERNAL;
-        }
-
-        printf("%lu -> %lu\t", brec->first, brec->last);
-        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec->srcport,
-                        dstaddr_str, brec->dstport);
-        printf("%lu\t%lu\t%lu\n", brec->pkts, brec->bytes, brec->flows);
-
-        return E_OK;
 }
 
 
@@ -414,6 +450,7 @@ void free_stat_mem(lnf_mem_t *mem)
 
 struct fields {
         uint8_t present[FIELDS_SIZE / (8 * sizeof (uint8_t))];
+        size_t count;
         size_t cursor;
 };
 
@@ -437,6 +474,7 @@ static void fields_add_new(struct fields *f, int new_field)
         arr_idx = new_field / (8 * MEMBER_SIZE(struct fields, present[0]));
         bit_idx = new_field % (8 * MEMBER_SIZE(struct fields, present[0]));
         BIT_SET(f->present[arr_idx], bit_idx);
+        f->count++;
 }
 
 static int fields_iter_next(struct fields *f)
@@ -464,6 +502,12 @@ static void fields_iter_reset(struct fields *f)
         f->cursor = 0;
 }
 
+static size_t fields_get_count(const struct fields *f)
+{
+        assert(f != NULL);
+        return f->count;
+}
+
 
 static char * field_get_name(int field)
 {
@@ -489,56 +533,114 @@ static int field_get_type(int field)
         lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
 
         return type;
-#if 0
-        switch (type) {
-        case LNF_NONE:
-                printf("LNF_NONE\n");
-                break;
+}
 
+static size_t field_get_size(int field)
+{
+        int type = field_get_type(field);
+
+        if (type == -1) {
+                return 0;
+        }
+
+        switch (type) {
         case LNF_UINT8:
-                printf("LNF_UINT8\n");
-                break;
+                return sizeof (uint8_t);
 
         case LNF_UINT16:
-                printf("LNF_UINT16\n");
-                break;
+                return sizeof (uint16_t);
 
         case LNF_UINT32:
-                printf("LNF_UINT32\n");
-                break;
+                return sizeof (uint32_t);
 
         case LNF_UINT64:
-                printf("LNF_UINT64\n");
-                break;
+                return sizeof (uint64_t);
 
         case LNF_DOUBLE:
-                printf("LNF_DOUBLE\n");
-                break;
+                return sizeof (double);
 
         case LNF_ADDR:
-                printf("LNF_ADDR\n");
-                break;
+                return sizeof (lnf_ip_t);
 
         case LNF_MAC:
-                printf("LNF_MAC\n");
-                break;
-
-        case LNF_STRING:
-                printf("LNF_STRING\n");
-                break;
-
-        case LNF_MPLS:
-                printf("LNF_MPLS\n");
-                break;
+                return sizeof (lnf_mac_t);
 
         case LNF_BASIC_RECORD1:
-                printf("LNF_BASIC_RECORD1\n");
-                break;
+                return sizeof (lnf_brec1_t);
+
+        case LNF_NONE:
+        case LNF_STRING:
+        case LNF_MPLS:
+                assert(!"unimplemented LNF data type");
 
         default:
                 assert(!"unknown LNF data type");
         }
-#endif
+}
+
+static char * field_to_str(int field, char *data)
+{
+        static char str[MAX_STR_LEN];
+        int type = field_get_type(field);
+
+        if (type == -1) {
+                return NULL;
+        }
+
+        /* Timestamps are LNF_UINT64, but different string format. */
+        if (field == LNF_FLD_FIRST || field == LNF_FLD_LAST ||
+                        field == LNF_FLD_RECEIVED) {
+                snprintf(str, MAX_STR_LEN, timestamp_to_str(*(uint64_t *)data));
+
+                return str;
+        }
+
+        switch (type) {
+        case LNF_UINT8:
+                snprintf(str, MAX_STR_LEN, "%" PRIu8, *(uint8_t *)data);
+                break;
+
+        case LNF_UINT16:
+                snprintf(str, MAX_STR_LEN, "%" PRIu16, *(uint16_t *)data);
+                break;
+
+        case LNF_UINT32:
+                snprintf(str, MAX_STR_LEN, "%" PRIu32, *(uint32_t *)data);
+                break;
+
+        case LNF_UINT64:
+                snprintf(str, MAX_STR_LEN, "%" PRIu64, *(uint64_t *)data);
+                break;
+
+        case LNF_DOUBLE:
+                snprintf(str, MAX_STR_LEN, "%f", *(double *)data);
+                break;
+
+        case LNF_ADDR:
+                snprintf(str, MAX_STR_LEN,
+                                mylnf_addr_to_str(*(lnf_ip_t *)data));
+                break;
+
+        case LNF_MAC:
+                snprintf(str, MAX_STR_LEN,
+                                mylnf_mac_to_str(*(lnf_mac_t *)data));
+                break;
+
+        case LNF_BASIC_RECORD1:
+                snprintf(str, MAX_STR_LEN,
+                                mylnf_brec_to_str(*(lnf_brec1_t *)data));
+                break;
+
+        case LNF_NONE:
+        case LNF_STRING:
+        case LNF_MPLS:
+                assert(!"unimplemented LNF data type");
+
+        default:
+                assert(!"unknown LNF data type");
+        }
+
+        return str;
 }
 
 
@@ -550,6 +652,15 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
         lnf_rec_t *rec;
         struct fields fields;
         int field;
+        size_t field_max_size = 0;
+        size_t max_data_str_len[LNF_FLD_TERM_] = {0};
+
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
+                return E_LNF;
+        }
+
 
         /* Default aggragation fields: first, last, flows, packets, bytes. */
         fields_init(&fields);
@@ -562,32 +673,69 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                 fields_add_new(&fields, ap->field);
         }
 
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
-                return E_LNF;
-        }
 
+        /* Find out maximum data type size of present fields. */
         while ((field = fields_iter_next(&fields)) != -1) {
-                printf("%s\t", field_get_name(field));
+                size_t field_size = field_get_size(field);
+
+                field_max_size = MAX(field_max_size, field_size);
         }
-        putchar('\n');
+        fields_iter_reset(&fields);
+
+
+        /* Find out maximum length of each field data converted to string. */
+        while ((field = fields_iter_next(&fields)) != -1) {
+                size_t header_str_len = strlen(field_get_name(field));
+
+                max_data_str_len[field] = MAX(max_data_str_len[field],
+                                header_str_len);
+        }
         fields_iter_reset(&fields);
 
         secondary_errno = lnf_mem_read(mem, rec); //read first
         while (secondary_errno == LNF_OK) {
-                uint64_t space;
+                char buff[field_max_size];
 
                 while ((field = fields_iter_next(&fields)) != -1) {
-                        secondary_errno = lnf_rec_fget(rec, field, &space);
-                        if (secondary_errno != LNF_OK) {
-                                primary_errno = E_LNF;
-                                print_err(primary_errno, secondary_errno,
-                                                "lnf_rec_fget()");
-                                goto free_lnf_rec;
-                        }
+                        size_t data_str_len;
 
-                        printf("%lu\t", space);
+                        assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
+                        data_str_len = strlen(field_to_str(field, buff));
+                        max_data_str_len[field] = MAX(max_data_str_len[field],
+                                        data_str_len);
+                }
+                fields_iter_reset(&fields);
+
+                if (++rec_cntr == limit) {
+                        break;
+                }
+
+                secondary_errno = lnf_mem_read(mem, rec); //read next
+        }
+        lnf_mem_read_reset(mem);
+        rec_cntr = 0;
+
+
+        /* Actual printing: header. */
+        while ((field = fields_iter_next(&fields)) != -1) {
+                size_t field_size = field_get_size(field);
+
+                printf("%-*s", max_data_str_len[field] + PRINT_SPACING,
+                                field_get_name(field));
+                field_max_size = MAX(field_max_size, field_size);
+        }
+        putchar('\n');
+        fields_iter_reset(&fields);
+
+        /* Field data. */
+        secondary_errno = lnf_mem_read(mem, rec); //read first
+        while (secondary_errno == LNF_OK) {
+                char buff[field_max_size];
+
+                while ((field = fields_iter_next(&fields)) != -1) {
+                        assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
+                        printf("%-*s", max_data_str_len[field] + PRINT_SPACING,
+                                        field_to_str(field, buff));
                 }
                 putchar('\n');
                 fields_iter_reset(&fields);
@@ -602,6 +750,7 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno, "lnf_mem_read()");
         }
+
 
 free_lnf_rec:
         lnf_rec_free(rec);
