@@ -233,7 +233,7 @@ int main(int argc, char **argv)
                     }
                 }
 
-                print_aggr_mem(mem, 0);
+                print_aggr_mem(mem, 0, agg_params, agg_param_cnt);
 master_done:
                 free_aggr_mem(mem);
                 lnf_rec_free(recp);
