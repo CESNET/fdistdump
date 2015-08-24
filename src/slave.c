@@ -84,7 +84,6 @@ struct slave_task_ctx {
 
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
-        lnf_mem_t *stat_mem; //LNF memory used for computation of statistics
         lnf_filter_t *filter; //LNF compiled filter expression
         data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX]; //file or directory path string
@@ -92,6 +91,7 @@ struct slave_task_ctx {
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
+        struct stats stats;
 };
 
 
@@ -104,6 +104,38 @@ static void isend_bytes(void *data, size_t data_size, MPI_Request *req)
                 MPI_Isend(data, data_size, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD, req);
         }
+}
+
+
+static void stats_update(struct stats *s, lnf_rec_t *rec)
+{
+        uint64_t tmp;
+
+        lnf_rec_fget(rec, LNF_FLD_AGGR_FLOWS, &tmp);
+        s->flows += tmp;
+
+        lnf_rec_fget(rec, LNF_FLD_DPKTS, &tmp);
+        s->pkts += tmp;
+
+        lnf_rec_fget(rec, LNF_FLD_DOCTETS, &tmp);
+        s->bytes += tmp;
+}
+
+static void stats_share(struct stats *shared, struct stats *private)
+{
+        #pragma omp atomic
+        shared->flows += private->flows;
+
+        #pragma omp atomic
+        shared->pkts += private->pkts;
+
+        #pragma omp atomic
+        shared->bytes += private->bytes;
+}
+
+static void stats_send(struct stats *s)
+{
+        MPI_Send(s, 3, MPI_UINT64_T, ROOT_PROC, TAG_STATS, MPI_COMM_WORLD);
 }
 
 
@@ -196,7 +228,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
 close_file:
         lnf_close(file);
 
-        /* Buffers will be invalid after return, wai for send to complete. */
+        /* Buffers will be invalid after return, wait for send to complete. */
         MPI_Wait(&request, MPI_STATUS_IGNORE);
 
         return primary_errno;
@@ -212,6 +244,7 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
         size_t file_proc_rec_cntr = 0;
         lnf_file_t *file;
         lnf_rec_t *rec;
+        struct stats stats = {0};
 
         /* Open flow file. */
         secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
@@ -242,6 +275,7 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
                         continue;
                 }
                 file_proc_rec_cntr++;
+                stats_update(&stats, rec); //increment private stats counters
 
                 secondary_errno = lnf_mem_write(stc->aggr_mem, rec);
                 if (secondary_errno != LNF_OK) {
@@ -251,15 +285,6 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
                         goto free_lnf_rec;
                 }
 
-                if (stc->stat_mem) {
-                        secondary_errno = lnf_mem_write(stc->stat_mem, rec);
-                        if (secondary_errno != LNF_OK) {
-                                primary_errno = E_LNF;
-                                print_err(primary_errno, secondary_errno,
-                                                "lnf_mem_write()");
-                                goto free_lnf_rec;
-                        }
-                }
         }
 
         /* Check if we reach end of file. */
@@ -267,6 +292,7 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
                 primary_errno = E_LNF; //no, we didn't, a problem occured
         }
 
+        stats_share(&stc->stats, &stats); //atomic increment of shared stats
         print_debug("/%d/ file %s: read %lu, processed %lu",
                         omp_get_thread_num(), path, file_rec_cntr,
                         file_proc_rec_cntr);
@@ -384,9 +410,6 @@ static void task_free(struct slave_task_ctx *stc)
         if (!stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
         }
-        if (!stc->stat_mem) {
-                free_stat_mem(stc->stat_mem);
-        }
 }
 
 
@@ -485,12 +508,6 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
                         return primary_errno;
                 }
 
-                /* Initialize statistics memory. */
-                primary_errno = init_stat_mem(&stc->stat_mem);
-                if (primary_errno != E_OK) {
-                        goto free_aggr_mem;
-                }
-
                 return E_OK;
 
         case MODE_PASS:
@@ -554,34 +571,6 @@ static error_code_t task_init_data_source(struct slave_task_ctx *stc)
         if (stc->path_str[stc->ms_shared.path_str_len - 1] != '/') {
                 stc->path_str[stc->ms_shared.path_str_len++] = '/';
         }
-
-        return E_OK;
-}
-
-
-static error_code_t send_stat(lnf_mem_t *mem)
-{
-        lnf_mem_cursor_t *cursor;
-        int rec_len;
-        char rec_buff[LNF_MAX_RAW_LEN];
-
-        secondary_errno = lnf_mem_first_c(mem, &cursor);
-        if (secondary_errno == LNF_EOF) {
-                return E_EOF; //TODO: handle empty files
-        } else if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_first_c()");
-                return E_LNF;
-        }
-
-        secondary_errno = lnf_mem_read_raw_c(mem, cursor, rec_buff, &rec_len,
-                        LNF_MAX_RAW_LEN);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_read_raw_c()");
-                return E_LNF;
-        }
-
-        MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_STATS,
-                        MPI_COMM_WORLD);
 
         return E_OK;
 }
@@ -848,25 +837,24 @@ free_lookup_cursors:
 }
 
 
-static error_code_t task_process_mem(struct slave_task_ctx *stc)
+static error_code_t task_postprocess(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
 
-        /* Reasons to disable fast top-N algorithm:
-         * - user request by command line argument
-         * - no record limit (all records would be exchanged anyway)
-         * - sort key isn't statistical fld (flows, packets, bytes, ...)
-         */
         switch (stc->ms_shared.working_mode) {
         case MODE_LIST:
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                MPI_COMM_WORLD);
                 return E_OK; //all records already sent while reading
 
         case MODE_SORT:
                 if (stc->ms_shared.rec_limit == 0) {
+                        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                        MPI_COMM_WORLD);
                         return E_OK; //all records already sent while reading
+                } else {
+                        return send_loop(stc);
                 }
-
-                return send_loop(stc);
 
         case MODE_AGGR:
                 if (stc->ms_shared.use_fast_topn) {
@@ -880,17 +868,13 @@ static error_code_t task_process_mem(struct slave_task_ctx *stc)
                         primary_errno = send_loop(stc);
                 }
 
-                if (primary_errno != E_OK) {
-                        return primary_errno;
-                }
+                stats_send(&stc->stats);
 
-                return send_stat(stc->stat_mem);
+                return primary_errno;
 
         default:
                 assert(!"unknown working mode");
         }
-
-        assert(!"task_process_mem()");
 }
 
 
@@ -953,9 +937,6 @@ error_code_t slave(int world_size)
                 if (stc.aggr_mem) {
                         lnf_mem_merge_threads(stc.aggr_mem);
                 }
-                if (stc.stat_mem) {
-                        lnf_mem_merge_threads(stc.stat_mem);
-                }
 
                 /* Check if we read all files. */
                 //if (!stc.rec_limit_reached && primary_errno != E_EOF) {
@@ -968,15 +949,9 @@ error_code_t slave(int world_size)
 
         /*
          * In case of aggregation or sorting, records were stored into memory
-         * and we need to process and send them to master. If there was no
-         * aggregation, notify master that everything is done here.
+         * and we need to process and send them to master.
          */
-        if (stc.aggr_mem) {
-                primary_errno = task_process_mem(&stc);
-        } else {
-                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
-        }
+        primary_errno = task_postprocess(&stc);
 
 finalize_task:
         if (primary_errno != E_OK) { //always send terminator to master on error
