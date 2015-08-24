@@ -656,6 +656,7 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
 {
         error_code_t primary_errno = E_OK;
         size_t rec_cntr = 0;
+        lnf_mem_cursor_t *cursor;
         lnf_rec_t *rec;
         struct fields fields;
         int field;
@@ -699,9 +700,11 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
         }
         fields_iter_reset(&fields);
 
-        secondary_errno = lnf_mem_read(mem, rec); //read first
-        while (secondary_errno == LNF_OK) {
+        lnf_mem_first_c(mem, &cursor);
+        while (cursor != NULL) {
                 char buff[field_max_size];
+
+                lnf_mem_read_c(mem, cursor, rec);
 
                 while ((field = fields_iter_next(&fields)) != -1) {
                         size_t data_str_len;
@@ -717,9 +720,8 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                         break;
                 }
 
-                secondary_errno = lnf_mem_read(mem, rec); //read next
+                lnf_mem_next_c(mem, &cursor);
         }
-        lnf_mem_read_reset(mem);
         rec_cntr = 0;
 
 
@@ -735,9 +737,11 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
         fields_iter_reset(&fields);
 
         /* Field data. */
-        secondary_errno = lnf_mem_read(mem, rec); //read first
-        while (secondary_errno == LNF_OK) {
+        lnf_mem_first_c(mem, &cursor);
+        while (cursor != NULL) {
                 char buff[field_max_size];
+
+                lnf_mem_read_c(mem, cursor, rec);
 
                 while ((field = fields_iter_next(&fields)) != -1) {
                         assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
@@ -751,13 +755,8 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                         goto free_lnf_rec;
                 }
 
-                secondary_errno = lnf_mem_read(mem, rec); //read next
+                lnf_mem_next_c(mem, &cursor);
         }
-        if (secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
-        }
-
 
 free_lnf_rec:
         lnf_rec_free(rec);
