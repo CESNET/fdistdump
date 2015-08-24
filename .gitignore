@@ -12,10 +12,10 @@ Makefile.in
 
 #"./configure" products
 Makefile
+.deps/
 /config.h
 /config.log
 /config.status
-/src/.deps/
 /stamp-h1
 
 #vim

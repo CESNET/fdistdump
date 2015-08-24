@@ -234,10 +234,17 @@ void print_err(error_code_t prim_errno, int sec_errno,
         (void)sec_errno; //TODO
         va_list arg_list;
         va_start(arg_list, format);
+        char lnf_error_str[LNF_MAX_STRING];
 
         fprintf(stderr, "Error on %s caused by %s: ", get_processor_info(),
                         error_code_to_str(prim_errno));
         vfprintf(stderr, format, arg_list);
+
+        if (prim_errno == E_LNF && secondary_errno == LNF_ERR_OTHER_MSG) {
+                lnf_error(lnf_error_str, LNF_MAX_STRING);
+                fprintf(stderr, "\nLNF error string: %s", lnf_error_str);
+        }
+
         fprintf(stderr, "\n");
 
         va_end(arg_list);
