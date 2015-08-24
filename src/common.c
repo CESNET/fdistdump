@@ -416,44 +416,11 @@ error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
         return E_OK;
 }
 
-
 void free_aggr_mem(lnf_mem_t *mem)
 {
         lnf_mem_free(mem);
 }
 
-
-/* Initialize memory for traffic volume statistics.*/
-error_code_t init_stat_mem(lnf_mem_t **mem)
-{
-        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
-                LNF_FLD_DOCTETS};
-
-        secondary_errno = lnf_mem_init(mem);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
-                return E_LNF;
-        }
-
-        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
-                secondary_errno = lnf_mem_fadd(*mem, stat_params[i],
-                                LNF_AGGR_SUM, 0, 0);
-                if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
-                        free_aggr_mem(*mem);
-                        return E_LNF;
-                }
-        }
-
-        return E_OK;
-}
-
-
-/* Free statistics memory. */
-void free_stat_mem(lnf_mem_t *mem)
-{
-   lnf_mem_free(mem);
-}
 
 struct fields {
         uint8_t present[FIELDS_SIZE / (8 * sizeof (uint8_t))];
@@ -756,52 +723,6 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                 }
 
                 lnf_mem_next_c(mem, &cursor);
-        }
-
-free_lnf_rec:
-        lnf_rec_free(rec);
-
-        return primary_errno;
-}
-
-
-error_code_t print_stat_mem(lnf_mem_t *mem)
-{
-        error_code_t primary_errno = E_OK;
-        lnf_rec_t *rec;
-        size_t stat_val;
-        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
-                LNF_FLD_DOCTETS};
-        char fld_name_buff[LNF_INFO_BUFSIZE];
-
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
-                return E_LNF;
-        }
-
-        secondary_errno = lnf_mem_read(mem, rec); //read single record
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
-                goto free_lnf_rec;
-        }
-
-        printf("statistics: \n");
-        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
-                secondary_errno = lnf_rec_fget(rec, stat_params[i], &stat_val);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_rec_fget()");
-                        goto free_lnf_rec;
-                }
-
-                secondary_errno = lnf_fld_info(stat_params[i],
-                                LNF_FLD_INFO_NAME, fld_name_buff,
-                                LNF_INFO_BUFSIZE);
-
-                printf("\t%lu %s\n", stat_val, fld_name_buff);
         }
 
 free_lnf_rec:

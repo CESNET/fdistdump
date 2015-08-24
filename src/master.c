@@ -341,32 +341,28 @@ free_continuous_data_buff:
 }
 
 
-static error_code_t recv_stat(size_t slave_cnt, lnf_mem_t *stats)
+static void stats_recv(struct stats *s, size_t slave_cnt)
 {
-        error_code_t primary_errno = E_OK;
-        int rec_len = 0;
-        char rec_buff[LNF_MAX_RAW_LEN];
-        MPI_Status status;
+        struct stats received;
 
-        /* Data receiving loop. */
+        /* Wait for statistics from every slave. */
         for (size_t i = 0; i < slave_cnt; ++i) {
-                /* Receive message from any slave. */
-                MPI_Recv(rec_buff, LNF_MAX_RAW_LEN, MPI_BYTE, MPI_ANY_SOURCE,
-                                TAG_STATS, MPI_COMM_WORLD, &status);
+                MPI_Recv(&received, 3, MPI_UINT64_T, MPI_ANY_SOURCE, TAG_STATS,
+                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                /* Determine actual size of the received message. */
-                MPI_Get_count(&status, MPI_BYTE, &rec_len);
-
-                secondary_errno = lnf_mem_write_raw(stats, rec_buff, rec_len);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_write_raw()");
-                        break;
-                }
+                s->flows += received.flows;
+                s->pkts += received.pkts;
+                s->bytes += received.bytes;
         }
+}
 
-        return primary_errno;
+static void stats_print(const struct stats *s)
+{
+        printf("statistics: "
+                        "total flows: %" PRIu64 ", "
+                        "total packets: %" PRIu64 ", "
+                        "total bytes: %" PRIu64 "\n",
+                        s->flows, s->pkts, s->bytes);
 }
 
 
@@ -437,7 +433,7 @@ static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
 {
         error_code_t primary_errno = E_OK;
         lnf_mem_t *aggr_mem;
-        lnf_mem_t *stat_mem;
+        struct stats stats = {0};
 
         /* Initialize aggregation memory and set memory parameters. */
         primary_errno = init_aggr_mem(&aggr_mem, ap, ap_cnt);
@@ -463,7 +459,6 @@ static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
                 free_aggr_mem(aggr_mem);
                 primary_errno = init_aggr_mem(&aggr_mem, ap, ap_cnt);
                 if (primary_errno != E_OK) {
-                        free_aggr_mem(stat_mem);
                         return primary_errno;
                 }
 
@@ -480,17 +475,9 @@ static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
                 goto free_aggr_mem;
         }
 
-        /* Initialize, receive, print and free statistics memory. */
-        primary_errno = init_stat_mem(&stat_mem);
-        if (primary_errno != E_OK) {
-                goto free_aggr_mem;
-        }
-        primary_errno = recv_stat(slave_cnt, stat_mem);
-        if (primary_errno != E_OK) {
-                goto free_aggr_mem;
-        }
-        primary_errno = print_stat_mem(stat_mem);
-        free_stat_mem(stat_mem);
+        /* Receive statistics from every slave, print them. */
+        stats_recv(&stats, slave_cnt);
+        stats_print(&stats);
 
 free_aggr_mem:
         free_aggr_mem(aggr_mem);

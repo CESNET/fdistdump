@@ -682,10 +682,14 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 args->working_mode = MODE_AGGR;
         }
 
-        /* Fast top-N makes sense only under certain conditions. */
+        /* Fast top-N makes sense only under certain conditions.
+         * Reasons to disable fast top-N algorithm:
+         * - user request by command line argument
+         * - no record limit (all records would be exchanged anyway)
+         * - sort key isn't statistical field (flows, packets, bytes, ...)
+         */
         if (args->working_mode == MODE_AGGR) {
-                /* No record limit - all records have to be sent. */
-                if (args->rec_limit == 0) { //no record limit
+                if (args->rec_limit == 0) {
                         args->use_fast_topn = false;
                 }
                 /* Only statistical items makes sense. */
