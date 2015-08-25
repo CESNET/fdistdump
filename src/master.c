@@ -45,6 +45,7 @@
 
 #include "master.h"
 #include "common.h"
+#include "print.h"
 
 #include <string.h> //strlen()
 #include <stdbool.h>

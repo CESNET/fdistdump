@@ -1,6 +1,6 @@
 /**
  * \file common.h
- * \brief
+ * \brief Common fdistdump prototypes, macros, data types, enumerations, etc.
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
@@ -52,10 +52,11 @@
 #include <inttypes.h> //exact width integer types
 
 #include <libnf.h>
-#include <mpi.h>
 
-#define MAX_FN_LEN 2048
-#define MAX_AGG_PARAMS 16 //maximum count of -a parameters
+#define ROOT_PROC 0 //MPI root processor number
+
+#define MAX_STR_LEN 1024 //maximum length of a general string
+#define MAX_AGG_PARAMS 16 //maximum count of aggregation parameters
 
 #define XCHG_BUFF_MAX_SIZE (1024 * 1024) //KiB
 #define XCHG_BUFF_ELEMS (XCHG_BUFF_MAX_SIZE / sizeof(lnf_brec1_t))
@@ -72,10 +73,11 @@
                 FLOW_FILE_SOURCE "/" FLOW_FILE_PATH_FORMAT \
                 FLOW_FILE_NAME_FORMAT)
 
-#define PRINT_SPACING 4
 
-
-/* Enumerations. */
+/**
+ * \defgroup common_enum Common enumerations usable everywhere
+ * @{
+ */
 typedef enum { //error return codes
         E_OK, //no error, continue processing
         E_PASS, //no error, no action required
@@ -96,9 +98,26 @@ typedef enum { //working modes
         MODE_PASS, //do nothing
 } working_mode_t;
 
+enum { //tags
+        TAG_DATA, //message contains data (records)
+        TAG_STATS, //message contains statistics
+};
+/**
+ * @}
+ */ //common_enum
 
-/* Data types. */
-//WATCH OUT: reflect changes also in mpi_struct_agg_param
+
+/**
+ * \defgroup common_struct Common structures usable everywhere
+ * @{
+ */
+struct stats {
+        uint64_t flows;
+        uint64_t pkts;
+        uint64_t bytes;
+};
+
+//XXX: reflect changes also in mpi_struct_agg_param
 #define STRUCT_AGG_PARAM_ELEMS 4
 struct agg_param {
         int field;
@@ -107,7 +126,7 @@ struct agg_param {
         int numbits6;
 };
 
-//WATCH OUT: reflect changes also in mpi_struct_shared_task_ctx
+//XXX: reflect changes also in mpi_struct_shared_task_ctx
 #define STRUCT_TASK_INFO_ELEMS 9
 struct shared_task_ctx {
         working_mode_t working_mode; //working mode
@@ -126,30 +145,17 @@ struct shared_task_ctx {
         bool use_fast_topn; //enables fast top-N algorithm
 };
 
-//WATCH OUT: reflect changes in struct tm from time.h also in mpi_struct_tm
+//XXX: reflect changes in struct tm from time.h also in mpi_struct_tm
 #define STRUCT_TM_ELEMS 9
-
-struct stats {
-        uint64_t flows;
-        uint64_t pkts;
-        uint64_t bytes;
-};
+/**
+ * @}
+ */ //common_struct
 
 
-/* MPI related */
-#define ROOT_PROC 0
-
-enum { //tags
-        TAG_DATA,
-        TAG_STATS,
-};
-
-enum { //control commands
-        CMD_RELEASE,
-};
-
-
-/* Function-like macros */
+/**
+ * \defgroup func_like_macros Function-like macros
+ * @{
+ */
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #define MEMBER_SIZE(type, member) sizeof(((type *)0)->member)
 
@@ -179,41 +185,89 @@ enum { //control commands
 #define BIT_CLEAR(var, idx) ((var) &= ~(1 << (idx)))
 #define BIT_TOGGLE(var, idx) ((var) ^= (1 << (idx)))
 #define BIT_TEST(var, idx) ((var) & (1 << (idx)))
+/**
+ * @}
+ */ //func_like_macros
 
 
-/** \brief Convert libnf basic record 1 to string.
+/** \brief Convert working_mode_t working mode to human-readable string.
  *
- * \param[in] brec lnf_brec1_t structure.
- * \return String basic record 1 representation. Static memory.
+ * \return Static string at most MAX_STR_LEN long.
  */
-char * mylnf_brec_to_str(lnf_brec1_t brec);
+char * working_mode_to_str(working_mode_t working_mode);
 
 
 /** \brief Print error message.
  *
- * Wrapper to fprintf(), add prefix including process rank and name.
+ * Print detailed error information to stderr. Provided format is prefixed by
+ * error cause and MPI process info.
  *
- * \param[in] format Format string passed to fprintf().
+ * \param[in] prim_errno Primary errno.
+ * \param[in] sec_errno Secondary errno.
+ * \param[in] format Format string passed to vfprintf().
  * \param[in] va_list Variable argument list passed to vfprintf().
  */
 void print_err(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
+
+/** \brief Print warning message.
+ *
+ * Print detailed warning information to stderr. Provided format is prefixed by
+ * warning cause and MPI process info.
+ *
+ * \param[in] prim_errno Primary errno.
+ * \param[in] sec_errno Secondary errno.
+ * \param[in] format Format string passed to vfprintf().
+ * \param[in] va_list Variable argument list passed to vfprintf().
+ */
 void print_warn(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
+
+/** \brief Print debug message.
+ *
+ * If DEBUG is defined, print provided debug string to stdout. Format is
+ * prefixed by MPI process info. If DEBUG is not defined, function will do
+ * nothing.
+ *
+ * \param[in] format Format string passed to vfprintf().
+ * \param[in] va_list Variable argument list passed to vfprintf().
+ */
 void print_debug(const char *format, ...);
 
-char * working_mode_to_str(working_mode_t working_mode);
 
+/** \brief Construct MPI structure mpi_struct_agg_param.
+ *
+ * Global variable MPI_Datatype mpi_struct_agg_param is constructed as mirror
+ * to struct agg_param. Every change to struct agg_param must be reflected.
+ */
 void create_mpi_struct_agg_param(void);
+
+/** \brief Destruct MPI structure mpi_struct_agg_param.
+ */
 void free_mpi_struct_agg_param(void);
+
+/** \brief Construct MPI contiguous mpi_struct_tm.
+ *
+ * Global variable MPI_Datatype mpi_struct_tm is constructed as mirror
+ * to struct tm. Every change to struct tm must be reflected.
+ */
 void create_mpi_struct_tm(void);
+
+/** \brief Destruct MPI contiguous mpi_struct_tm.
+ */
 void free_mpi_struct_tm(void);
+
+/** \brief Construct MPI structure mpi_struct_shared_task_ctx.
+ *
+ * Global variable MPI_Datatype mpi_struct_shared_task_ctx is constructed as
+ * mirror to struct shared_task_ctx. Every change to struct shared_task_ctx must
+ * be reflected.
+ */
 void create_mpi_struct_shared_task_ctx(void);
+
+/** \brief Destruct MPI structure mpi_struct_shared_task_ctx.
+ */
 void free_mpi_struct_shared_task_ctx(void);
-
-
-error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
-                const struct agg_param *ap, size_t ap_cnt);
 
 
 /** \brief Initialize LNF aggregation memory.
