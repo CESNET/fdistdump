@@ -43,6 +43,7 @@
  */
 
 #include "print.h"
+#include "bit_array.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -147,69 +148,6 @@ char * mylnf_brec_to_str(lnf_brec1_t brec)
 #endif
 
         return str;
-}
-
-
-
-
-struct fields {
-        uint8_t present[FIELDS_SIZE / (8 * sizeof (uint8_t))];
-        size_t count;
-        size_t cursor;
-};
-
-void fields_init(struct fields *f)
-{
-        assert(f != NULL);
-        memset(f, 0, sizeof (struct fields));
-}
-
-static void fields_add_new(struct fields *f, int new_field)
-{
-        size_t arr_idx;
-        size_t bit_idx;
-
-        assert(f != NULL);
-
-        if (new_field <= LNF_FLD_ZERO_ || new_field >= LNF_FLD_TERM_) {
-                return;
-        }
-
-        arr_idx = new_field / (8 * MEMBER_SIZE(struct fields, present[0]));
-        bit_idx = new_field % (8 * MEMBER_SIZE(struct fields, present[0]));
-        BIT_SET(f->present[arr_idx], bit_idx);
-        f->count++;
-}
-
-static int fields_iter_next(struct fields *f)
-{
-        assert(f != NULL);
-
-        for (size_t i = f->cursor; i < FIELDS_SIZE; ++i) {
-                size_t arr_idx = i /
-                        (8 * MEMBER_SIZE(struct fields, present[0]));
-                size_t bit_idx = i %
-                        (8 * MEMBER_SIZE(struct fields, present[0]));
-
-                if (BIT_TEST(f->present[arr_idx], bit_idx)) {
-                        f->cursor = i + 1;
-                        return i;
-                }
-        }
-
-        return -1;
-}
-
-static void fields_iter_reset(struct fields *f)
-{
-        assert(f != NULL);
-        f->cursor = 0;
-}
-
-static size_t fields_get_count(const struct fields *f)
-{
-        assert(f != NULL);
-        return f->count;
 }
 
 
@@ -355,47 +293,51 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
         size_t rec_cntr = 0;
         lnf_mem_cursor_t *cursor;
         lnf_rec_t *rec;
-        struct fields fields;
         int field;
         size_t field_max_size = 0;
         size_t max_data_str_len[LNF_FLD_TERM_] = {0};
+        struct bit_array *ba;
+
+        ba = bit_array_init(FIELDS_SIZE);
+        if (ba == NULL) {
+                print_err(E_MEM, 0, "bit_array_init()");
+                return E_MEM;
+        }
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
-                return E_LNF;
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                goto free_bit_array;
         }
 
-
         /* Default aggragation fields: first, last, flows, packets, bytes. */
-        fields_init(&fields);
-        fields_add_new(&fields, LNF_FLD_FIRST);
-        fields_add_new(&fields, LNF_FLD_LAST);
-        fields_add_new(&fields, LNF_FLD_AGGR_FLOWS);
-        fields_add_new(&fields, LNF_FLD_DPKTS);
-        fields_add_new(&fields, LNF_FLD_DOCTETS);
+        bit_array_set(ba, LNF_FLD_FIRST);
+        bit_array_set(ba, LNF_FLD_LAST);
+        bit_array_set(ba, LNF_FLD_AGGR_FLOWS);
+        bit_array_set(ba, LNF_FLD_DPKTS);
+        bit_array_set(ba, LNF_FLD_DOCTETS);
         for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
-                fields_add_new(&fields, ap->field);
+                bit_array_set(ba, ap->field);
         }
 
 
         /* Find out maximum data type size of present fields. */
-        while ((field = fields_iter_next(&fields)) != -1) {
+        bit_array_iter_init(ba);
+        while ((field = bit_array_iter_next(ba)) != -1) {
                 size_t field_size = field_get_size(field);
 
-                field_max_size = MAX(field_max_size, field_size);
+                MAX_ASSIGN(field_max_size, field_size);
         }
-        fields_iter_reset(&fields);
 
 
         /* Find out maximum length of each field data converted to string. */
-        while ((field = fields_iter_next(&fields)) != -1) {
+        bit_array_iter_init(ba);
+        while ((field = bit_array_iter_next(ba)) != -1) {
                 size_t header_str_len = strlen(field_get_name(field));
 
-                max_data_str_len[field] = MAX(max_data_str_len[field],
-                                header_str_len);
+                MAX_ASSIGN(max_data_str_len[field], header_str_len);
         }
-        fields_iter_reset(&fields);
 
         lnf_mem_first_c(mem, &cursor);
         while (cursor != NULL) {
@@ -403,15 +345,14 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
 
                 lnf_mem_read_c(mem, cursor, rec);
 
-                while ((field = fields_iter_next(&fields)) != -1) {
+                bit_array_iter_init(ba);
+                while ((field = bit_array_iter_next(ba)) != -1) {
                         size_t data_str_len;
 
                         assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
                         data_str_len = strlen(field_to_str(field, buff));
-                        max_data_str_len[field] = MAX(max_data_str_len[field],
-                                        data_str_len);
+                        MAX_ASSIGN(max_data_str_len[field], data_str_len);
                 }
-                fields_iter_reset(&fields);
 
                 if (++rec_cntr == limit) {
                         break;
@@ -423,15 +364,15 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
 
 
         /* Actual printing: header. */
-        while ((field = fields_iter_next(&fields)) != -1) {
+        bit_array_iter_init(ba);
+        while ((field = bit_array_iter_next(ba)) != -1) {
                 size_t field_size = field_get_size(field);
 
                 printf("%-*s", max_data_str_len[field] + PRINT_SPACING,
                                 field_get_name(field));
-                field_max_size = MAX(field_max_size, field_size);
+                MAX_ASSIGN(field_max_size, field_size);
         }
         putchar('\n');
-        fields_iter_reset(&fields);
 
         /* Field data. */
         lnf_mem_first_c(mem, &cursor);
@@ -440,13 +381,13 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
 
                 lnf_mem_read_c(mem, cursor, rec);
 
-                while ((field = fields_iter_next(&fields)) != -1) {
+                bit_array_iter_init(ba);
+                while ((field = bit_array_iter_next(ba)) != -1) {
                         assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
                         printf("%-*s", max_data_str_len[field] + PRINT_SPACING,
                                         field_to_str(field, buff));
                 }
                 putchar('\n');
-                fields_iter_reset(&fields);
 
                 if (++rec_cntr == limit) {
                         goto free_lnf_rec;
@@ -457,6 +398,8 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
 
 free_lnf_rec:
         lnf_rec_free(rec);
+free_bit_array:
+        bit_array_free(ba);
 
         return primary_errno;
 }

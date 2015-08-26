@@ -156,35 +156,36 @@ struct shared_task_ctx {
  * \defgroup func_like_macros Function-like macros
  * @{
  */
+//size of static allocated array
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#define MEMBER_SIZE(type, member) sizeof(((type *)0)->member)
+
+//size of structure member
+#define MEMBER_SIZE(type, member) (sizeof (((type *)0)->member))
+
+//intergral division with round up, aka ceil()
+#define INT_DIV_CEIL(a, b) (((a) + ((b) - 1)) / (b))
 
 //unsafe macros - double evaluation of arguments with side effects
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX_ASSIGN(a, b) ((a) = (a) > (b) ? (a) : (b))
+#define MIN_ASSIGN(a, b) ((a) = (a) < (b) ? (a) : (b))
 
 //safe, but braced-group within expression is GCC extension forbidden by ISO C
-/*
- * #define MAX(a, b) \
- *       ({ \
- *                __typeof__(a) _a = (a); \
- *                __typeof__(b) _b = (b); \
- *                _a > _b ? _a : _b; \
- *        })
- */
-/*
- * #define MIN(a, b) \
- *        ({ \
- *                 __typeof__(a) _a = (a); \
- *                 __typeof__(b) _b = (b); \
- *                 _a > _b ? _a : _b; \
- *         })
- */
-
-#define BIT_SET(var, idx) ((var) |= (1 << (idx)))
-#define BIT_CLEAR(var, idx) ((var) &= ~(1 << (idx)))
-#define BIT_TOGGLE(var, idx) ((var) ^= (1 << (idx)))
-#define BIT_TEST(var, idx) ((var) & (1 << (idx)))
+#if 0
+#define MAX(a, b) \
+        ({ \
+                 __typeof__(a) _a = (a); \
+                 __typeof__(b) _b = (b); \
+                 _a > _b ? _a : _b; \
+         })
+#define MIN(a, b) \
+        ({ \
+                 __typeof__(a) _a = (a); \
+                 __typeof__(b) _b = (b); \
+                 _a > _b ? _a : _b; \
+         })
+#endif
 /**
  * @}
  */ //func_like_macros
