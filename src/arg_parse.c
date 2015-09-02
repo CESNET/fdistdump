@@ -65,6 +65,12 @@ extern int secondary_errno;
 enum { //command line options, have to start above ASCII
         OPT_NO_FAST_TOPN = 256, //disable fast topn-N algorithm
 
+        OPT_OUTPUT_FORMAT, //output (print) format
+        OPT_OUTPUT_TS_CONV, //output timestamp conversion
+        OPT_OUTPUT_STAT_CONV, //output statistics conversion
+        OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
+        OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
+
         OPT_HELP, //print help
         OPT_VERSION, //print version
 };
@@ -553,6 +559,86 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 }
 
 
+static error_code_t set_output_format(struct output_params *op,
+                char *format_str)
+{
+        if (strcmp(format_str, "csv") == 0) {
+                op->format = OUTPUT_FORMAT_CSV;
+        } else if (strcmp(format_str, "pretty") == 0) {
+                op->format = OUTPUT_FORMAT_PRETTY;
+        } else {
+                print_err(E_ARG, 0, "unknown output format string \"%s\"",
+                                format_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
+static error_code_t set_output_ts_conv(struct output_params *op,
+                char *ts_conv_str)
+{
+        if (strcmp(ts_conv_str, "none") == 0) {
+                op->ts_conv= OUTPUT_TS_CONV_NONE;
+        } else {
+                op->ts_conv= OUTPUT_TS_CONV_STR;
+                op->ts_conv_str = ts_conv_str;
+        }
+
+        return E_OK;
+}
+
+static error_code_t set_output_stat_conv(struct output_params *op,
+                char *stat_conv_str)
+{
+        if (strcmp(stat_conv_str, "none") == 0) {
+                op->stat_conv= OUTPUT_STAT_CONV_NONE;
+        } else if (strcmp(stat_conv_str, "metric-prefix") == 0) {
+                op->stat_conv = OUTPUT_STAT_CONV_METRIC_PREFIX;
+        } else if (strcmp(stat_conv_str, "binary-prefix") == 0) {
+                op->stat_conv = OUTPUT_STAT_CONV_BINARY_PREFIX;
+        } else {
+                print_err(E_ARG, 0, "unknown output statistics conversion string "
+                                "\"%s\"", stat_conv_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
+static error_code_t set_output_tcp_flags_conv(struct output_params *op,
+                char *tcp_flags_conv_str)
+{
+        if (strcmp(tcp_flags_conv_str, "none") == 0) {
+                op->tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_NONE;
+        } else if (strcmp(tcp_flags_conv_str, "str") == 0) {
+                op->tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_STR;
+        } else {
+                print_err(E_ARG, 0, "unknown tcp flags conversion string "
+                                "\"%s\"", tcp_flags_conv_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
+static error_code_t set_output_ip_proto_conv(struct output_params *op,
+                char *ip_proto_conv_str)
+{
+        if (strcmp(ip_proto_conv_str, "none") == 0) {
+                op->ip_proto_conv = OUTPUT_IP_PROTO_CONV_NONE;
+        } else if (strcmp(ip_proto_conv_str, "str") == 0) {
+                op->ip_proto_conv = OUTPUT_IP_PROTO_CONV_STR;
+        } else {
+                print_err(E_ARG, 0, "unknown internet protocol conversion string "
+                                "\"%s\"", ip_proto_conv_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
+
 error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 {
         error_code_t primary_errno = E_OK;
@@ -575,16 +661,26 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+                {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
+                {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
+                {"output-stat-conv", required_argument, NULL,
+                        OPT_OUTPUT_STAT_CONV},
+                {"output-tcpflags-conv", required_argument, NULL,
+                        OPT_OUTPUT_TCP_FLAGS_CONV},
+                {"output-proto-conv", required_argument, NULL,
+                        OPT_OUTPUT_IP_PROTO_CONV},
                 {"help", no_argument, NULL, OPT_HELP},
                 {"version", no_argument, NULL, OPT_VERSION},
 
                 {0, 0, 0, 0} //termination required by getopt_long()
         };
 
-        /* Set argument defaults */
-        args->working_mode = MODE_LIST;
+
+        /* Set argument default values. */
         args->use_fast_topn = true;
 
+
+        /* Loop through all the command-line arguments. */
         while (true) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
                 if (opt == -1) {
@@ -625,6 +721,31 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 case OPT_NO_FAST_TOPN: //disable fast top-N algorithm
                         args->use_fast_topn = false;
+                        break;
+
+                case OPT_OUTPUT_FORMAT:
+                        primary_errno = set_output_format(&args->output_params,
+                                        optarg);
+                        break;
+
+                case OPT_OUTPUT_TS_CONV:
+                        primary_errno = set_output_ts_conv(&args->output_params,
+                                        optarg);
+                        break;
+
+                case OPT_OUTPUT_STAT_CONV:
+                        primary_errno = set_output_stat_conv(
+                                        &args->output_params, optarg);
+                        break;
+
+                case OPT_OUTPUT_TCP_FLAGS_CONV:
+                        primary_errno = set_output_tcp_flags_conv(
+                                        &args->output_params, optarg);
+                        break;
+
+                case OPT_OUTPUT_IP_PROTO_CONV:
+                        primary_errno = set_output_ip_proto_conv(
+                                        &args->output_params, optarg);
                         break;
 
                 case OPT_HELP: //help
@@ -703,6 +824,61 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 sort_key > LNF_FLD_AGGR_FLOWS) {
                         args->use_fast_topn = false;
                 }
+        }
+
+        /* Set default output parameters. */
+        if (args->output_params.format == OUTPUT_FORMAT_UNSET) {
+                args->output_params.format = OUTPUT_FORMAT_PRETTY;
+        }
+
+        switch (args->output_params.format) {
+        case OUTPUT_FORMAT_PRETTY:
+                if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
+                        args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
+                        args->output_params.ts_conv_str = "%F %T";
+                }
+
+                if (args->output_params.stat_conv == OUTPUT_STAT_CONV_UNSET) {
+                        args->output_params.stat_conv =
+                                OUTPUT_STAT_CONV_METRIC_PREFIX;
+                }
+
+                if (args->output_params.tcp_flags_conv ==
+                                OUTPUT_TCP_FLAGS_CONV_UNSET) {
+                        args->output_params.tcp_flags_conv =
+                                OUTPUT_TCP_FLAGS_CONV_STR;
+                }
+
+                if (args->output_params.ip_proto_conv ==
+                                OUTPUT_IP_PROTO_CONV_UNSET) {
+                        args->output_params.ip_proto_conv =
+                                OUTPUT_IP_PROTO_CONV_STR;
+                }
+                break;
+
+        case OUTPUT_FORMAT_CSV:
+                if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
+                        args->output_params.ts_conv = OUTPUT_TS_CONV_NONE;
+                }
+
+                if (args->output_params.stat_conv == OUTPUT_STAT_CONV_UNSET) {
+                        args->output_params.stat_conv = OUTPUT_STAT_CONV_NONE;
+                }
+
+                if (args->output_params.tcp_flags_conv ==
+                                OUTPUT_TCP_FLAGS_CONV_UNSET) {
+                        args->output_params.tcp_flags_conv =
+                                OUTPUT_TCP_FLAGS_CONV_NONE;
+                }
+
+                if (args->output_params.ip_proto_conv ==
+                                OUTPUT_IP_PROTO_CONV_UNSET) {
+                        args->output_params.ip_proto_conv =
+                                OUTPUT_IP_PROTO_CONV_NONE;
+                }
+                break;
+        default:
+                assert(!"unkwnown output parameters format");
         }
 
 

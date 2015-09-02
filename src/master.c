@@ -45,7 +45,7 @@
 
 #include "master.h"
 #include "common.h"
-#include "print.h"
+#include "output.h"
 
 #include <string.h> //strlen()
 #include <stdbool.h>
@@ -60,6 +60,15 @@ extern MPI_Datatype mpi_struct_shared_task_ctx;
 extern int secondary_errno;
 
 
+struct master_task_ctx {
+        /* Master and slave shared task context. */
+        struct shared_task_ctx ms_shared;
+
+        /* Master specific task context. */
+        size_t slave_cnt;
+        struct output_params output_params;
+};
+
 struct mem_insert_callback_data {
         lnf_mem_t *mem;
         lnf_rec_t *rec;
@@ -69,32 +78,38 @@ struct mem_insert_callback_data {
 typedef error_code_t(*recv_callback_t)(char *data, size_t data_len, void *user);
 
 
-static void prepare_shared_task_ctx(struct shared_task_ctx *stc,
-                const struct cmdline_args *args)
+static void construct_master_task_ctx(struct master_task_ctx *mtc,
+                const struct cmdline_args *args, int world_size)
 {
-        stc->working_mode = args->working_mode;
-        stc->agg_params_cnt = args->agg_params_cnt;
+        /* Fill shared content. */
+        mtc->ms_shared.working_mode = args->working_mode;
+        mtc->ms_shared.agg_params_cnt = args->agg_params_cnt;
 
-        memcpy(stc->agg_params, args->agg_params, args->agg_params_cnt *
-                        sizeof(struct agg_param));
+        memcpy(mtc->ms_shared.agg_params, args->agg_params,
+                        args->agg_params_cnt * sizeof (struct agg_param));
 
-        stc->rec_limit = args->rec_limit;
+        mtc->ms_shared.rec_limit = args->rec_limit;
 
         if (args->filter_str == NULL) {
-                stc->filter_str_len = 0;
+                mtc->ms_shared.filter_str_len = 0;
         } else {
-                stc->filter_str_len = strlen(args->filter_str);
+                mtc->ms_shared.filter_str_len = strlen(args->filter_str);
         }
         if (args->path_str == NULL) {
-                stc->path_str_len = 0;
+                mtc->ms_shared.path_str_len = 0;
         } else {
-                stc->path_str_len = strlen(args->path_str);
+                mtc->ms_shared.path_str_len = strlen(args->path_str);
         }
 
-        stc->interval_begin = args->interval_begin;
-        stc->interval_end = args->interval_end;
+        mtc->ms_shared.interval_begin = args->interval_begin;
+        mtc->ms_shared.interval_end = args->interval_end;
 
-        stc->use_fast_topn = args->use_fast_topn;
+        mtc->ms_shared.use_fast_topn = args->use_fast_topn;
+
+
+        /* Fill master specific content. */
+        mtc->slave_cnt = world_size - 1; //all nodes without master
+        mtc->output_params = args->output_params;
 }
 
 
@@ -135,7 +150,7 @@ static error_code_t print_brec_callback(char *data, size_t data_len, void *user)
         (void)data_len;
         (void)user;
 
-        printf("%s\n", mylnf_brec_to_str(*(lnf_brec1_t*)data));
+        printf("%s\n", field_to_str(LNF_FLD_BREC1, (lnf_brec1_t*)data));
 
         return E_OK;
 }
@@ -278,7 +293,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                         (i * 2 * XCHG_BUFF_SIZE);
                 data_buff[i][1] = data_buff[i][0] + XCHG_BUFF_SIZE;
         }
-        memset(data_buff_idx, 0, slave_cnt * sizeof(data_buff_idx[0]));
+        memset(data_buff_idx, 0, slave_cnt * sizeof (data_buff_idx[0]));
 
         /* Start first individual nonblocking data receive from every slave. */
         for (size_t i = 0; i < slave_cnt ; ++i) {
@@ -322,7 +337,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                 /* Call callback function for each received record. */
                 for (size_t i = 0; i < msg_size / sizeof (lnf_brec1_t); ++i) {
                         primary_errno = recv_callback(full_buff +
-                                        i * sizeof(lnf_brec1_t),
+                                        i * sizeof (lnf_brec1_t),
                                         sizeof (lnf_brec1_t), user);
                         if (primary_errno != E_OK) {
                                 goto free_continuous_data_buff;
@@ -367,20 +382,22 @@ static void stats_print(const struct stats *s)
 }
 
 
-static error_code_t mode_list_main(size_t slave_cnt, size_t rec_limit)
+static error_code_t mode_list_main(const struct master_task_ctx *mtc)
 {
-        return irecv_loop(slave_cnt, rec_limit, print_brec_callback, NULL);
+        return irecv_loop(mtc->slave_cnt, mtc->ms_shared.rec_limit,
+                        print_brec_callback, NULL);
 }
 
 
-static error_code_t mode_sort_main(size_t slave_cnt, size_t rec_limit,
-                const struct agg_param *ap, size_t ap_cnt)
+static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno = E_OK;
         struct mem_insert_callback_data callback_data = {0};
 
         /* Initialize aggregation memory and set memory parameters. */
-        primary_errno = init_aggr_mem(&callback_data.mem, ap, ap_cnt);
+        primary_errno = init_aggr_mem(&callback_data.mem,
+                        mtc->ms_shared.agg_params,
+                        mtc->ms_shared.agg_params_cnt);
         if (primary_errno != E_OK) {
                 return primary_errno;
         }
@@ -402,23 +419,24 @@ static error_code_t mode_sort_main(size_t slave_cnt, size_t rec_limit,
         }
 
         /* Fill memory with records. */
-        if (rec_limit == 0) { //slow ordering, all records exchanged
-                primary_errno = irecv_loop(slave_cnt, 0, mem_write_callback,
-                                &callback_data);
+        if (mtc->ms_shared.rec_limit == 0) { //slow ordering, all records xchg
+                primary_errno = irecv_loop(mtc->slave_cnt, 0,
+                                mem_write_callback, &callback_data);
                 if (primary_errno != E_OK) {
                         goto free_lnf_rec;
                 }
-        } else { //fast ordering, minimum of records exchanged
-                primary_errno = recv_loop(slave_cnt, 0, mem_write_raw_callback,
-                                callback_data.mem);
+        } else { //fast ordering, minimum of records xchg
+                primary_errno = recv_loop(mtc->slave_cnt, 0,
+                                mem_write_raw_callback, callback_data.mem);
                 if (primary_errno != E_OK) {
                         goto free_lnf_rec;
                 }
         }
 
         /* Print all records in memory. */
-        primary_errno = print_aggr_mem(callback_data.mem, rec_limit, ap,
-                        ap_cnt);
+        primary_errno = print_aggr_mem(callback_data.mem,
+                        mtc->ms_shared.rec_limit, mtc->ms_shared.agg_params,
+                        mtc->ms_shared.agg_params_cnt);
 
 free_lnf_rec:
         lnf_rec_free(callback_data.rec);
@@ -429,26 +447,26 @@ free_aggr_mem:
 }
 
 
-static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
-                const struct agg_param *ap, size_t ap_cnt, bool use_fast_topn)
+static error_code_t mode_aggr_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno = E_OK;
         lnf_mem_t *aggr_mem;
         struct stats stats = {0};
 
         /* Initialize aggregation memory and set memory parameters. */
-        primary_errno = init_aggr_mem(&aggr_mem, ap, ap_cnt);
+        primary_errno = init_aggr_mem(&aggr_mem, mtc->ms_shared.agg_params,
+                        mtc->ms_shared.agg_params_cnt);
         if (primary_errno != E_OK) {
                 return primary_errno;
         }
 
-        primary_errno = recv_loop(slave_cnt, 0, mem_write_raw_callback,
+        primary_errno = recv_loop(mtc->slave_cnt, 0, mem_write_raw_callback,
                         aggr_mem);
         if (primary_errno != E_OK) {
                 goto free_aggr_mem;
         }
 
-        if (use_fast_topn) {
+        if (mtc->ms_shared.use_fast_topn) {
                 //TODO: if file doesn't exist on slave, this will cause deadlock
                 primary_errno = fast_topn_bcast_all(aggr_mem);
                 if (primary_errno != E_OK) {
@@ -458,26 +476,30 @@ static error_code_t mode_aggr_main(size_t slave_cnt, size_t rec_limit,
                 /* Reset memory - all records will be received again. */
                 //TODO: optimalization - add records to memory, don't reset
                 free_aggr_mem(aggr_mem);
-                primary_errno = init_aggr_mem(&aggr_mem, ap, ap_cnt);
+                primary_errno = init_aggr_mem(&aggr_mem,
+                                mtc->ms_shared.agg_params,
+                                mtc->ms_shared.agg_params_cnt);
                 if (primary_errno != E_OK) {
                         return primary_errno;
                 }
 
-                primary_errno = recv_loop(slave_cnt, 0, mem_write_raw_callback,
-                                aggr_mem);
+                primary_errno = recv_loop(mtc->slave_cnt, 0,
+                                mem_write_raw_callback, aggr_mem);
                 if (primary_errno != E_OK) {
                         goto free_aggr_mem;
                 }
         }
 
         /* Print all records in memory. */
-        primary_errno = print_aggr_mem(aggr_mem, rec_limit, ap, ap_cnt);
+        primary_errno = print_aggr_mem(aggr_mem, mtc->ms_shared.rec_limit,
+                        mtc->ms_shared.agg_params,
+                        mtc->ms_shared.agg_params_cnt);
         if (primary_errno != E_OK) {
                 goto free_aggr_mem;
         }
 
         /* Receive statistics from every slave, print them. */
-        stats_recv(&stats, slave_cnt);
+        stats_recv(&stats, mtc->slave_cnt);
         stats_print(&stats);
 
 free_aggr_mem:
@@ -489,43 +511,44 @@ free_aggr_mem:
 
 error_code_t master(int world_size, const struct cmdline_args *args)
 {
-        const size_t slave_cnt = world_size - 1; //all nodes without master
+        struct master_task_ctx mtc;
 
-        struct shared_task_ctx stc = {0};
+        memset(&mtc, 0, sizeof (mtc));
 
-        /* Fill shared_task_ctx struct for slaves (working mode etc). */
-        prepare_shared_task_ctx(&stc, args);
+        /* Construct master_task_ctx struct from command-line arguments. */
+        construct_master_task_ctx(&mtc, args, world_size);
+        output_setup(mtc.output_params);
+
 
         /* Broadcast task info, optional filter string and path string. */
-        MPI_Bcast(&stc, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
+        MPI_Bcast(&mtc.ms_shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
                         MPI_COMM_WORLD);
-        if (stc.filter_str_len > 0) {
-                MPI_Bcast(args->filter_str, stc.filter_str_len, MPI_CHAR,
+        if (mtc.ms_shared.filter_str_len > 0) {
+                MPI_Bcast(args->filter_str, mtc.ms_shared.filter_str_len,
+                                MPI_CHAR, ROOT_PROC, MPI_COMM_WORLD);
+        }
+        if (mtc.ms_shared.path_str_len > 0) {
+                MPI_Bcast(args->path_str, mtc.ms_shared.path_str_len, MPI_CHAR,
                                 ROOT_PROC, MPI_COMM_WORLD);
         }
-        if (stc.path_str_len > 0) {
-                MPI_Bcast(args->path_str, stc.path_str_len, MPI_CHAR,
-                                ROOT_PROC, MPI_COMM_WORLD);
-        }
+
 
         /* Send, receive, process. */
-        switch (args->working_mode) {
+        switch (mtc.ms_shared.working_mode) {
         case MODE_PASS: //only termination msg will be received from each slave
         case MODE_LIST:
-                return mode_list_main(slave_cnt, args->rec_limit);
+                return mode_list_main(&mtc);
 
         case MODE_SORT:
-                return mode_sort_main(slave_cnt, args->rec_limit,
-                                args->agg_params, args->agg_params_cnt);
+                return mode_sort_main(&mtc);
 
         case MODE_AGGR:
-                return mode_aggr_main(slave_cnt, args->rec_limit,
-                                args->agg_params, args->agg_params_cnt,
-                                args->use_fast_topn);
+                return mode_aggr_main(&mtc);
 
         default:
                 assert(!"unknown working mode");
         }
+
 
         assert(!"master()");
 }

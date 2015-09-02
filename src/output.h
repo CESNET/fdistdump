@@ -1,5 +1,5 @@
 /**
- * \file print.h
+ * \file output.h
  * \brief Prototypes of functions for printing records and fields.
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \date 2015
@@ -42,8 +42,8 @@
  *
  */
 
-#ifndef PRINT_H
-#define PRINT_H
+#ifndef OUTPUT_H
+#define OUTPUT_H
 
 #include "common.h"
 
@@ -51,17 +51,57 @@
 
 #include <libnf.h>
 
-#define PRINT_SPACING 4
 
-/** \brief Convert libnf basic record 1 to string.
- *
- * \param[in] brec lnf_brec1_t structure.
- * \return String basic record 1 representation. Static memory.
- */
-char * mylnf_brec_to_str(lnf_brec1_t brec);
+typedef enum {
+        OUTPUT_FORMAT_UNSET,
+        OUTPUT_FORMAT_PRETTY,
+        OUTPUT_FORMAT_CSV,
+} output_format_t;
 
+typedef enum {
+        OUTPUT_TS_CONV_UNSET,
+        OUTPUT_TS_CONV_NONE,
+        OUTPUT_TS_CONV_STR,
+} output_ts_conv_t;
+
+typedef enum {
+        OUTPUT_STAT_CONV_UNSET,
+        OUTPUT_STAT_CONV_NONE,
+        OUTPUT_STAT_CONV_METRIC_PREFIX,
+        OUTPUT_STAT_CONV_BINARY_PREFIX,
+} output_stat_conv_t;
+
+typedef enum {
+        OUTPUT_TCP_FLAGS_CONV_UNSET,
+        OUTPUT_TCP_FLAGS_CONV_NONE,
+        OUTPUT_TCP_FLAGS_CONV_STR,
+} output_tcp_flags_conv_t;
+
+typedef enum {
+        OUTPUT_IP_PROTO_CONV_UNSET,
+        OUTPUT_IP_PROTO_CONV_NONE,
+        OUTPUT_IP_PROTO_CONV_STR,
+} output_ip_proto_conv_t;
+
+
+struct output_params {
+        output_format_t format;
+
+        output_ts_conv_t ts_conv;
+        char *ts_conv_str;
+
+        output_stat_conv_t stat_conv;
+
+        output_tcp_flags_conv_t tcp_flags_conv;
+
+        output_ip_proto_conv_t ip_proto_conv;
+};
+
+void output_setup(struct output_params op);
+
+const char * field_to_str(int field, const void *data);
 
 error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                 const struct agg_param *ap, size_t ap_cnt);
 
-#endif //PRINT_H
+#endif //OUTPUT_H

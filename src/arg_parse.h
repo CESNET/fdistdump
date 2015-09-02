@@ -46,6 +46,7 @@
 #define ARG_PARSE_H
 
 #include "common.h"
+#include "output.h"
 
 #include <stddef.h> //size_t
 #include <stdbool.h>
@@ -71,6 +72,7 @@ struct cmdline_args {
         struct tm interval_begin, interval_end; //begin and end of interval
 
         bool use_fast_topn; //enables fast top-N algorithm
+        struct output_params output_params; //output (printing) parameters
 };
 
 

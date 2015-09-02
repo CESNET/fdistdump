@@ -205,8 +205,8 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
 
         /* Send remaining records (if there are any). */
         if (data_idx != 0) {
-                isend_bytes(data_buff[buff_idx], data_idx * sizeof(lnf_brec1_t),
-                                &request);
+                isend_bytes(data_buff[buff_idx], data_idx *
+                                sizeof (lnf_brec1_t), &request);
 
                 #pragma omp atomic
                 stc->proc_rec_cntr += data_idx; //increment shared counter
@@ -762,7 +762,7 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
 
         /* Allocate some lookup cursors. */
         lookup_cursors = malloc(lookup_cursors_size *
-                        sizeof(lnf_mem_cursor_t *));
+                        sizeof (lnf_mem_cursor_t *));
         if (lookup_cursors == NULL) {
                 secondary_errno = 0;
                 print_err(E_MEM, secondary_errno, "malloc()");
@@ -884,7 +884,7 @@ error_code_t slave(int world_size)
         struct slave_task_ctx stc;
         double file_dur;
 
-        memset(&stc, 0, sizeof(stc));
+        memset(&stc, 0, sizeof (stc));
 
         stc.slave_cnt = world_size - 1; //all nodes without master
 
