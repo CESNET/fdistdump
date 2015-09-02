@@ -851,16 +851,28 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                 printed_field_cnt = 0;
 
                 if (++rec_cntr == limit) {
-                        goto free_lnf_rec;
+                        break;
                 }
 
                 lnf_mem_next_c(mem, &cursor);
         }
 
-free_lnf_rec:
         lnf_rec_free(rec);
 free_bit_array:
         bit_array_free(ba);
 
         return primary_errno;
+}
+
+void print_stats(const struct stats *stats)
+{
+        if (output_params.summary != OUTPUT_SUMMARY_YES) {
+                return;
+        }
+
+        printf("summary: ");
+        printf("%s flows, ", stat_to_str(&stats->flows));
+        printf("%s packets, ", stat_to_str(&stats->pkts));
+        printf("%s bytes", stat_to_str(&stats->bytes));
+        putchar('\n');
 }

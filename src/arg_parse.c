@@ -70,6 +70,7 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_STAT_CONV, //output statistics conversion
         OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
+        OPT_OUTPUT_SUMMARY, //print summary?
 
         OPT_HELP, //print help
         OPT_VERSION, //print version
@@ -95,6 +96,18 @@ static const char *const utc_strings[] = {
         "UT",
         "UTC",
 };
+
+
+static int str_yes_or_no(const char *str)
+{
+        if (strcmp(str, "y") == 0 || strcmp(str, "yes") == 0) {
+                return 1;
+        } else if (strcmp(str, "n") == 0 || strcmp(str, "no") == 0) {
+                return 0;
+        } else {
+                return -1;
+        }
+}
 
 
 /** \brief Convert string into tm structure.
@@ -638,6 +651,25 @@ static error_code_t set_output_ip_proto_conv(struct output_params *op,
         return E_OK;
 }
 
+static error_code_t set_output_summary(struct output_params *op,
+                char *summary_str)
+{
+        switch (str_yes_or_no(summary_str)) {
+        case 0: //no
+                op->summary = OUTPUT_SUMMARY_NO;
+                break;
+        case 1: //yes
+                op->summary = OUTPUT_SUMMARY_YES;
+                break;
+        default: //other
+                print_err(E_ARG, 0, "unknown output summary string" "\"%s\"",
+                                summary_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
 
 error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 {
@@ -669,6 +701,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         OPT_OUTPUT_TCP_FLAGS_CONV},
                 {"output-proto-conv", required_argument, NULL,
                         OPT_OUTPUT_IP_PROTO_CONV},
+                {"output-summary", required_argument, NULL, OPT_OUTPUT_SUMMARY},
                 {"help", no_argument, NULL, OPT_HELP},
                 {"version", no_argument, NULL, OPT_VERSION},
 
@@ -746,6 +779,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 case OPT_OUTPUT_IP_PROTO_CONV:
                         primary_errno = set_output_ip_proto_conv(
                                         &args->output_params, optarg);
+                        break;
+
+                case OPT_OUTPUT_SUMMARY:
+                        primary_errno = set_output_summary(&args->output_params,
+                                        optarg);
                         break;
 
                 case OPT_HELP: //help
@@ -854,6 +892,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         args->output_params.ip_proto_conv =
                                 OUTPUT_IP_PROTO_CONV_STR;
                 }
+
+                if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
+                        args->output_params.summary = OUTPUT_SUMMARY_YES;
+                }
                 break;
 
         case OUTPUT_FORMAT_CSV:
@@ -875,6 +917,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_IP_PROTO_CONV_UNSET) {
                         args->output_params.ip_proto_conv =
                                 OUTPUT_IP_PROTO_CONV_NONE;
+                }
+
+                if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
+                        args->output_params.summary = OUTPUT_SUMMARY_NO;
                 }
                 break;
         default:

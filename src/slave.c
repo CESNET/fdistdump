@@ -152,6 +152,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
         MPI_Request request = MPI_REQUEST_NULL;
         lnf_file_t *file;
         lnf_rec_t *rec;
+        struct stats stats = {0};
 
         /* Open flow file. */
         secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
@@ -182,6 +183,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                         continue;
                 }
                 file_proc_rec_cntr++;
+                stats_update(&stats, rec); //increment private stats counters
 
                 secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1,
                                 data_buff[buff_idx] + data_idx);
@@ -222,6 +224,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 primary_errno = E_LNF; //no, we didn't, a problem occured
         }
 
+        stats_share(&stc->stats, &stats); //atomic increment of shared stats
         print_debug("[thread %d] file %s: read %lu, processed %lu",
                         omp_get_thread_num(), path, file_rec_cntr,
                         file_proc_rec_cntr);
@@ -295,7 +298,7 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
         }
 
         stats_share(&stc->stats, &stats); //atomic increment of shared stats
-        print_debug("/%d/ file %s: read %lu, processed %lu",
+        print_debug("[thread %d] file %s: read %lu, processed %lu",
                         omp_get_thread_num(), path, file_rec_cntr,
                         file_proc_rec_cntr);
 
@@ -847,16 +850,17 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
         case MODE_LIST:
                 MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD);
-                return E_OK; //all records already sent while reading
+                break; //all records already sent while reading
 
         case MODE_SORT:
                 if (stc->ms_shared.rec_limit == 0) {
                         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                         MPI_COMM_WORLD);
-                        return E_OK; //all records already sent while reading
                 } else {
-                        return send_loop(stc);
+                        primary_errno = send_loop(stc);
                 }
+
+                break;
 
         case MODE_AGGR:
                 if (stc->ms_shared.use_fast_topn) {
@@ -870,13 +874,14 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
                         primary_errno = send_loop(stc);
                 }
 
-                stats_send(&stc->stats);
-
-                return primary_errno;
+                break;
 
         default:
                 assert(!"unknown working mode");
         }
+
+        stats_send(&stc->stats);
+        return primary_errno;
 }
 
 
@@ -951,7 +956,8 @@ error_code_t slave(int world_size)
 
         /*
          * In case of aggregation or sorting, records were stored into memory
-         * and we need to process and send them to master.
+         * and we need to process and send them to master. After that,
+         * statistics are sent.
          */
         primary_errno = task_postprocess(&stc);
 

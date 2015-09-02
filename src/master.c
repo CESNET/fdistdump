@@ -372,20 +372,20 @@ static void stats_recv(struct stats *s, size_t slave_cnt)
         }
 }
 
-static void stats_print(const struct stats *s)
-{
-        printf("statistics: "
-                        "total flows: %" PRIu64 ", "
-                        "total packets: %" PRIu64 ", "
-                        "total bytes: %" PRIu64 "\n",
-                        s->flows, s->pkts, s->bytes);
-}
-
 
 static error_code_t mode_list_main(const struct master_task_ctx *mtc)
 {
-        return irecv_loop(mtc->slave_cnt, mtc->ms_shared.rec_limit,
+        error_code_t primary_errno;
+        struct stats stats = {0};
+
+        primary_errno =  irecv_loop(mtc->slave_cnt, mtc->ms_shared.rec_limit,
                         print_brec_callback, NULL);
+
+        /* Receive statistics from every slave, print them. */
+        stats_recv(&stats, mtc->slave_cnt);
+        print_stats(&stats);
+
+        return primary_errno;
 }
 
 
@@ -393,6 +393,7 @@ static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno = E_OK;
         struct mem_insert_callback_data callback_data = {0};
+        struct stats stats = {0};
 
         /* Initialize aggregation memory and set memory parameters. */
         primary_errno = init_aggr_mem(&callback_data.mem,
@@ -433,10 +434,14 @@ static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
                 }
         }
 
+        /* Receive statistics from every slave, print them. */
+        stats_recv(&stats, mtc->slave_cnt);
+
         /* Print all records in memory. */
         primary_errno = print_aggr_mem(callback_data.mem,
                         mtc->ms_shared.rec_limit, mtc->ms_shared.agg_params,
                         mtc->ms_shared.agg_params_cnt);
+        print_stats(&stats);
 
 free_lnf_rec:
         lnf_rec_free(callback_data.rec);
@@ -490,17 +495,14 @@ static error_code_t mode_aggr_main(const struct master_task_ctx *mtc)
                 }
         }
 
+        /* Receive statistics from every slave, print them. */
+        stats_recv(&stats, mtc->slave_cnt);
+
         /* Print all records in memory. */
         primary_errno = print_aggr_mem(aggr_mem, mtc->ms_shared.rec_limit,
                         mtc->ms_shared.agg_params,
                         mtc->ms_shared.agg_params_cnt);
-        if (primary_errno != E_OK) {
-                goto free_aggr_mem;
-        }
-
-        /* Receive statistics from every slave, print them. */
-        stats_recv(&stats, mtc->slave_cnt);
-        stats_print(&stats);
+        print_stats(&stats);
 
 free_aggr_mem:
         free_aggr_mem(aggr_mem);

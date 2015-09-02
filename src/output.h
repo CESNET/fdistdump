@@ -83,6 +83,12 @@ typedef enum {
         OUTPUT_IP_PROTO_CONV_STR,
 } output_ip_proto_conv_t;
 
+typedef enum {
+        OUTPUT_SUMMARY_UNSET,
+        OUTPUT_SUMMARY_YES,
+        OUTPUT_SUMMARY_NO,
+} output_summary_t;
+
 
 struct output_params {
         output_format_t format;
@@ -91,10 +97,10 @@ struct output_params {
         char *ts_conv_str;
 
         output_stat_conv_t stat_conv;
-
         output_tcp_flags_conv_t tcp_flags_conv;
-
         output_ip_proto_conv_t ip_proto_conv;
+
+        output_summary_t summary;
 };
 
 void output_setup(struct output_params op);
@@ -103,5 +109,8 @@ const char * field_to_str(int field, const void *data);
 
 error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
                 const struct agg_param *ap, size_t ap_cnt);
+
+/* Print statistics. */
+void print_stats(const struct stats *stats);
 
 #endif //OUTPUT_H
