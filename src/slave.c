@@ -197,7 +197,8 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                         /* Increment shared counter and check record limit. */
                         #pragma omp atomic
                         stc->proc_rec_cntr += XCHG_BUFF_ELEMS;
-                        if (stc->proc_rec_cntr >= stc->ms_shared.rec_limit) {
+                        if (stc->ms_shared.rec_limit && stc->proc_rec_cntr >=
+                                        stc->ms_shared.rec_limit) {
                                 break; //record limit reached
                         }
                 }
@@ -213,14 +214,15 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
         }
 
         /* Set record limit reached flag we read rec_limit or more records. */
-        if (stc->proc_rec_cntr >= stc->ms_shared.rec_limit) {
+        if (stc->ms_shared.rec_limit && stc->proc_rec_cntr >=
+                        stc->ms_shared.rec_limit) {
                 stc->rec_limit_reached = true;
         /* Otherwise check if we reach end of file. */
         } else if (secondary_errno != LNF_EOF){
                 primary_errno = E_LNF; //no, we didn't, a problem occured
         }
 
-        print_debug("/%d/ file %s: read %lu, processed %lu",
+        print_debug("[thread %d] file %s: read %lu, processed %lu",
                         omp_get_thread_num(), path, file_rec_cntr,
                         file_proc_rec_cntr);
 
