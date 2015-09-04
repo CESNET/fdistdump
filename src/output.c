@@ -49,7 +49,7 @@
 #include <assert.h>
 #include <string.h>
 
-#include <arpa/inet.h> //inet_ntop()
+#include <arpa/inet.h> //inet_ntop(), ntohl()
 
 #define FIELDS_SIZE (LNF_FLD_TERM_ + 1) //currently 256 bits
 #define PRETTY_PRINT_SPACING 4
@@ -401,8 +401,8 @@ static const char * mylnf_addr_to_str(const lnf_ip_t *addr)
         case OUTPUT_IP_ADDR_CONV_NONE:
                 snprintf(global_str, sizeof (global_str),
                                 "%" PRIu32 ":%" PRIu32 ":%" PRIu32 ":%" PRIu32,
-                                addr->data[0], addr->data[1], addr->data[2],
-                                addr->data[3]);
+                                ntohl(addr->data[0]), ntohl(addr->data[1]),
+                                ntohl(addr->data[2]), ntohl(addr->data[3]));
                 break;
 
         case OUTPUT_IP_ADDR_CONV_STR:
