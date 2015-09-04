@@ -354,7 +354,7 @@ static const char * tcp_flags_to_str(const uint8_t *flags)
                 break;
 
         default:
-                assert(!"unknown ip protocol conversion");
+                assert(!"unknown IP protocol conversion");
         }
 
         return global_str;
@@ -385,8 +385,10 @@ static const char * ip_proto_to_str(const uint8_t *proto)
 
 /** \brief Convert libnf IP address to string.
  *
- * Distinguish IPv4 vs IPv6 address and use inet_ntop() to convert binary
- * representation to string.
+ * Without conversion, IP address is converted to
+ * UINT[0]:UINT[1]:UINT[2]:UINT[3]. If IPv4 is present, first three UINTs are
+ * zero. With conversion, inet_ntop() is used to convert binary representation
+ * to string.
  *
  * \param[in] addr Binary IP address representation.
  * \return String IP address representation. Static memory.
@@ -395,15 +397,29 @@ static const char * mylnf_addr_to_str(const lnf_ip_t *addr)
 {
         const char *ret;
 
-        if (IN6_IS_ADDR_V4COMPAT(addr->data)) { //IPv4 compatibile
-                ret = inet_ntop(AF_INET, addr->data + 3, global_str,
-                                INET_ADDRSTRLEN);
-        } else { //IPv6
-                ret = inet_ntop(AF_INET6, addr->data, global_str,
-                                INET6_ADDRSTRLEN);
-        }
+        switch (output_params.ip_addr_conv) {
+        case OUTPUT_IP_ADDR_CONV_NONE:
+                snprintf(global_str, sizeof (global_str),
+                                "%" PRIu32 ":%" PRIu32 ":%" PRIu32 ":%" PRIu32,
+                                addr->data[0], addr->data[1], addr->data[2],
+                                addr->data[3]);
+                break;
 
-        assert(ret != NULL);
+        case OUTPUT_IP_ADDR_CONV_STR:
+                if (IN6_IS_ADDR_V4COMPAT(addr->data)) { //IPv4 compatibile
+                        ret = inet_ntop(AF_INET, addr->data + 3, global_str,
+                                        INET_ADDRSTRLEN);
+                } else { //IPv6
+                        ret = inet_ntop(AF_INET6, addr->data, global_str,
+                                        INET6_ADDRSTRLEN);
+                }
+                assert(ret != NULL);
+
+                break;
+
+        default:
+                assert(!"unknown IP address conversion");
+        }
 
         return global_str;
 }

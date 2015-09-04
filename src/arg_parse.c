@@ -69,6 +69,7 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_TS_CONV, //output timestamp conversion
         OPT_OUTPUT_STAT_CONV, //output statistics conversion
         OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
+        OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
         OPT_OUTPUT_SUMMARY, //print summary?
 
@@ -635,6 +636,22 @@ static error_code_t set_output_tcp_flags_conv(struct output_params *op,
         return E_OK;
 }
 
+static error_code_t set_output_ip_addr_conv(struct output_params *op,
+                char *ip_addr_conv_str)
+{
+        if (strcmp(ip_addr_conv_str, "none") == 0) {
+                op->ip_addr_conv = OUTPUT_IP_ADDR_CONV_NONE;
+        } else if (strcmp(ip_addr_conv_str, "str") == 0) {
+                op->ip_addr_conv = OUTPUT_IP_ADDR_CONV_STR;
+        } else {
+                print_err(E_ARG, 0, "unknown IP address conversion string "
+                                "\"%s\"", ip_addr_conv_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
 static error_code_t set_output_ip_proto_conv(struct output_params *op,
                 char *ip_proto_conv_str)
 {
@@ -699,6 +716,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         OPT_OUTPUT_STAT_CONV},
                 {"output-tcpflags-conv", required_argument, NULL,
                         OPT_OUTPUT_TCP_FLAGS_CONV},
+                {"output-addr-conv", required_argument, NULL,
+                        OPT_OUTPUT_IP_ADDR_CONV},
                 {"output-proto-conv", required_argument, NULL,
                         OPT_OUTPUT_IP_PROTO_CONV},
                 {"output-summary", required_argument, NULL, OPT_OUTPUT_SUMMARY},
@@ -773,6 +792,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 case OPT_OUTPUT_TCP_FLAGS_CONV:
                         primary_errno = set_output_tcp_flags_conv(
+                                        &args->output_params, optarg);
+                        break;
+
+                case OPT_OUTPUT_IP_ADDR_CONV:
+                        primary_errno = set_output_ip_addr_conv(
                                         &args->output_params, optarg);
                         break;
 
@@ -887,6 +911,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_TCP_FLAGS_CONV_STR;
                 }
 
+                if (args->output_params.ip_addr_conv ==
+                                OUTPUT_IP_ADDR_CONV_UNSET) {
+                        args->output_params.ip_addr_conv =
+                                OUTPUT_IP_ADDR_CONV_STR;
+                }
+
                 if (args->output_params.ip_proto_conv ==
                                 OUTPUT_IP_PROTO_CONV_UNSET) {
                         args->output_params.ip_proto_conv =
@@ -911,6 +941,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_TCP_FLAGS_CONV_UNSET) {
                         args->output_params.tcp_flags_conv =
                                 OUTPUT_TCP_FLAGS_CONV_NONE;
+                }
+
+                if (args->output_params.ip_addr_conv ==
+                                OUTPUT_IP_ADDR_CONV_UNSET) {
+                        args->output_params.ip_addr_conv =
+                                OUTPUT_IP_ADDR_CONV_NONE;
                 }
 
                 if (args->output_params.ip_proto_conv ==

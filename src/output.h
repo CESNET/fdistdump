@@ -78,6 +78,12 @@ typedef enum {
 } output_tcp_flags_conv_t;
 
 typedef enum {
+        OUTPUT_IP_ADDR_CONV_UNSET,
+        OUTPUT_IP_ADDR_CONV_NONE,
+        OUTPUT_IP_ADDR_CONV_STR,
+} output_ip_addr_conv_t;
+
+typedef enum {
         OUTPUT_IP_PROTO_CONV_UNSET,
         OUTPUT_IP_PROTO_CONV_NONE,
         OUTPUT_IP_PROTO_CONV_STR,
@@ -98,6 +104,7 @@ struct output_params {
 
         output_stat_conv_t stat_conv;
         output_tcp_flags_conv_t tcp_flags_conv;
+        output_ip_addr_conv_t ip_addr_conv;
         output_ip_proto_conv_t ip_proto_conv;
 
         output_summary_t summary;
