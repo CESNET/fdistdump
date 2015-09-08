@@ -268,6 +268,9 @@ static const char * timestamp_to_str(const uint64_t *ts)
         time_t sec;
         uint64_t msec;
         size_t off;
+        struct tm *(*timeconv)(const time_t *);
+
+        timeconv = output_params.ts_localtime ? localtime : gmtime;
 
         switch (output_params.ts_conv) {
         case OUTPUT_TS_CONV_NONE:
@@ -281,7 +284,7 @@ static const char * timestamp_to_str(const uint64_t *ts)
                 msec = *ts % 1000;
 
                 off = strftime(global_str, sizeof (global_str),
-                                output_params.ts_conv_str, gmtime(&sec));
+                                output_params.ts_conv_str, timeconv(&sec));
                 snprintf(global_str + off, sizeof (global_str) - off, ".%lu",
                                 msec);
                 break;

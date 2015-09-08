@@ -67,6 +67,7 @@ enum { //command line options, have to start above ASCII
 
         OPT_OUTPUT_FORMAT, //output (print) format
         OPT_OUTPUT_TS_CONV, //output timestamp conversion
+        OPT_OUTPUT_TS_LOCALTIME, //output timestamp in localtime
         OPT_OUTPUT_STAT_CONV, //output statistics conversion
         OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
@@ -712,6 +713,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
                 {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
                 {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
+                {"output-ts-localtime", no_argument, NULL,
+                        OPT_OUTPUT_TS_LOCALTIME},
                 {"output-stat-conv", required_argument, NULL,
                         OPT_OUTPUT_STAT_CONV},
                 {"output-tcpflags-conv", required_argument, NULL,
@@ -783,6 +786,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 case OPT_OUTPUT_TS_CONV:
                         primary_errno = set_output_ts_conv(&args->output_params,
                                         optarg);
+                        break;
+
+                case OPT_OUTPUT_TS_LOCALTIME:
+                        args->output_params.ts_localtime = true;
                         break;
 
                 case OPT_OUTPUT_STAT_CONV:

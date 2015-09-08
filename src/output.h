@@ -101,6 +101,7 @@ struct output_params {
 
         output_ts_conv_t ts_conv;
         char *ts_conv_str;
+        bool ts_localtime; //output timestamp in localtime instead of UTC
 
         output_stat_conv_t stat_conv;
         output_tcp_flags_conv_t tcp_flags_conv;
