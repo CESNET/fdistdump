@@ -56,11 +56,11 @@
 #define ROOT_PROC 0 //MPI root processor number
 
 #define MAX_STR_LEN 1024 //maximum length of a general string
-#define MAX_AGG_PARAMS 16 //maximum count of aggregation parameters
 
-#define XCHG_BUFF_MAX_SIZE (1024 * 1024) //KiB
-#define XCHG_BUFF_ELEMS (XCHG_BUFF_MAX_SIZE / sizeof(lnf_brec1_t))
-#define XCHG_BUFF_SIZE (XCHG_BUFF_ELEMS * sizeof(lnf_brec1_t))
+#define XCHG_BUFF_SIZE (1024 * 1024) //1 KiB
+
+#define FIELDS_DELIM "," //LNF fields delimiter
+#define MAX_LNF_FIELDS (LNF_FLD_TERM_ + 1) //currently 256
 
 //TODO: move to configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
@@ -117,22 +117,20 @@ struct stats {
         uint64_t bytes;
 };
 
-//XXX: reflect changes also in mpi_struct_agg_param
-#define STRUCT_AGG_PARAM_ELEMS 4
-struct agg_param {
-        int field;
+//XXX: reflect changes also in mpi_struct_shared_task_ctx
+#define STRUCT_FIELD_INFO_ELEMS 4
+struct field_info {
+        int id;
         int flags;
-        int numbits;
-        int numbits6;
+        int ipv4_bits;
+        int ipv6_bits;
 };
 
 //XXX: reflect changes also in mpi_struct_shared_task_ctx
-#define STRUCT_TASK_INFO_ELEMS 9
+#define STRUCT_SHARED_TASK_CTX_ELEMS 8
 struct shared_task_ctx {
         working_mode_t working_mode; //working mode
-
-        struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
-        size_t agg_params_cnt; //aggregation parameters count
+        struct field_info fields[LNF_FLD_TERM_]; //present LNF fields
 
         size_t filter_str_len; //filter expression string length
         size_t path_str_len; //path string length
@@ -144,9 +142,6 @@ struct shared_task_ctx {
 
         bool use_fast_topn; //enables fast top-N algorithm
 };
-
-//XXX: reflect changes in struct tm from time.h also in mpi_struct_tm
-#define STRUCT_TM_ELEMS 9
 /**
  * @}
  */ //common_struct
@@ -156,11 +151,11 @@ struct shared_task_ctx {
  * \defgroup func_like_macros Function-like macros
  * @{
  */
-//size of static allocated array
+//size of staticly allocated array
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 //size of structure member
-#define MEMBER_SIZE(type, member) (sizeof (((type *)0)->member))
+#define MEMBER_SIZE(type, member) (sizeof (((type *)NULL)->member))
 
 //intergral division with round up, aka ceil()
 #define INT_DIV_CEIL(a, b) (((a) + ((b) - 1)) / (b))
@@ -236,28 +231,6 @@ void print_warn(error_code_t prim_errno, int sec_errno,
 void print_debug(const char *format, ...);
 
 
-/** \brief Construct MPI structure mpi_struct_agg_param.
- *
- * Global variable MPI_Datatype mpi_struct_agg_param is constructed as mirror
- * to struct agg_param. Every change to struct agg_param must be reflected.
- */
-void create_mpi_struct_agg_param(void);
-
-/** \brief Destruct MPI structure mpi_struct_agg_param.
- */
-void free_mpi_struct_agg_param(void);
-
-/** \brief Construct MPI contiguous mpi_struct_tm.
- *
- * Global variable MPI_Datatype mpi_struct_tm is constructed as mirror
- * to struct tm. Every change to struct tm must be reflected.
- */
-void create_mpi_struct_tm(void);
-
-/** \brief Destruct MPI contiguous mpi_struct_tm.
- */
-void free_mpi_struct_tm(void);
-
 /** \brief Construct MPI structure mpi_struct_shared_task_ctx.
  *
  * Global variable MPI_Datatype mpi_struct_shared_task_ctx is constructed as
@@ -277,10 +250,10 @@ void free_mpi_struct_shared_task_ctx(void);
  * allocated, therefore have to be freed by free_aggr_mem().
  *
  * \param[inout] mem Pointer to pointer to LNF memory structure.
- * \return E_OK on success, error code otherwise.
+ * \param[in] fields LNF fields and theirs parameters.
+ * \return E_OK on success, E_LNF on error.
  */
-error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
-                size_t ap_cnt);
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields);
 
 /** \brief Free LNF aggregation memory.
  *
@@ -317,5 +290,9 @@ int tm_diff(const struct tm a, const struct tm b);
  * \return Calendar time representation of tm.
  */
 time_t mktime_utc(struct tm *tm);
+
+
+int field_get_type(int field);
+size_t field_get_size(int field);
 
 #endif //COMMON_H
