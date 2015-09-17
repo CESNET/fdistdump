@@ -60,9 +60,7 @@
  * \defgroup glob_var Global variables
  * @{
  */
-extern MPI_Datatype mpi_struct_agg_param;
 extern MPI_Datatype mpi_struct_shared_task_ctx;
-extern MPI_Datatype mpi_struct_tm;
 extern int secondary_errno;
 /**
  * @}
@@ -83,7 +81,6 @@ extern int secondary_errno;
 static char * proc_info_to_str(void)
 {
         static char msg[MAX_PROC_INFO_NAME];
-        size_t msg_offset = 0;
         char proc_name[MPI_MAX_PROCESSOR_NAME];
         int world_rank, world_size, result_len;
 
@@ -91,15 +88,8 @@ static char * proc_info_to_str(void)
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
         MPI_Get_processor_name(proc_name, &result_len);
 
-        if (world_rank == ROOT_PROC) {
-                msg_offset += snprintf(msg, MAX_PROC_INFO_NAME, "master, ");
-        } else {
-                msg_offset += snprintf(msg, MAX_PROC_INFO_NAME, "slave, ");
-        }
-
-        snprintf(msg + msg_offset, MAX_PROC_INFO_NAME - msg_offset,
-                        "rank %d/%d with processor name %s", world_rank,
-                        world_size, proc_name);
+        snprintf(msg, MAX_PROC_INFO_NAME, "%d/%d, %s", world_rank, world_size,
+                        proc_name);
 
         return msg;
 }
@@ -247,63 +237,44 @@ void print_debug(const char *format, ...)
  * \defgroup mpi_type_func Functions constructing/destructing MPI data types
  * @{
  */
-void create_mpi_struct_agg_param(void)
-{
-        int block_lengths[STRUCT_AGG_PARAM_ELEMS] = {1, 1, 1, 1 /*, NEW */};
-        MPI_Aint displacements[STRUCT_AGG_PARAM_ELEMS];
-        MPI_Datatype types[STRUCT_AGG_PARAM_ELEMS] = {MPI_INT, MPI_INT, MPI_INT,
-                MPI_INT /*, NEW */};
-
-        displacements[0] = offsetof(struct agg_param, field);
-        displacements[1] = offsetof(struct agg_param, flags);
-        displacements[2] = offsetof(struct agg_param, numbits);
-        displacements[3] = offsetof(struct agg_param, numbits6);
-        /* displacements[NEW] = offsetof(struct agg_param, NEW); */
-
-        MPI_Type_create_struct(STRUCT_AGG_PARAM_ELEMS, block_lengths,
-                        displacements, types, &mpi_struct_agg_param);
-        MPI_Type_commit(&mpi_struct_agg_param);
-}
-
-void free_mpi_struct_agg_param(void)
-{
-        MPI_Type_free(&mpi_struct_agg_param);
-}
-
-void create_mpi_struct_tm(void)
-{
-        MPI_Type_contiguous(STRUCT_TM_ELEMS, MPI_INT, &mpi_struct_tm);
-        MPI_Type_commit(&mpi_struct_tm);
-}
-
-
-void free_mpi_struct_tm(void)
-{
-        MPI_Type_free(&mpi_struct_tm);
-}
-
+#define STRUCT_TM_ELEMS 9
 void create_mpi_struct_shared_task_ctx(void)
 {
-        int block_lengths[STRUCT_TASK_INFO_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
-                1, 1, 1, 1 /*, NEW */};
-        MPI_Aint displacements[STRUCT_TASK_INFO_ELEMS];
-        MPI_Datatype types[STRUCT_TASK_INFO_ELEMS] = {MPI_INT,
-                mpi_struct_agg_param, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
-                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, mpi_struct_tm,
-                mpi_struct_tm, MPI_C_BOOL /*, NEW */};
+        int block_lengths[STRUCT_SHARED_TASK_CTX_ELEMS] = {
+                1, //working_mode
+                (STRUCT_FIELD_INFO_ELEMS * LNF_FLD_TERM_), //fields
+                1, //filter_str_len
+                1, //path_str_len
+                1, //rec_limit
+                STRUCT_TM_ELEMS, //interval_begin
+                STRUCT_TM_ELEMS, //interval_end
+                1, //use_fast_topn
+                /* NEW */
+        };
+        MPI_Aint displacements[STRUCT_SHARED_TASK_CTX_ELEMS] = {
+                offsetof(struct shared_task_ctx, working_mode),
+                offsetof(struct shared_task_ctx, fields),
+                offsetof(struct shared_task_ctx, filter_str_len),
+                offsetof(struct shared_task_ctx, path_str_len),
+                offsetof(struct shared_task_ctx, rec_limit),
+                offsetof(struct shared_task_ctx, interval_begin),
+                offsetof(struct shared_task_ctx, interval_end),
+                offsetof(struct shared_task_ctx, use_fast_topn),
+                /* offsetof(struct shared_task_ctx, NEW), */
+        };
+        MPI_Datatype types[STRUCT_SHARED_TASK_CTX_ELEMS] = {
+                MPI_INT, //working_mode
+                MPI_INT, //fields
+                MPI_UNSIGNED_LONG, //filter_str_len
+                MPI_UNSIGNED_LONG, //path_str_len
+                MPI_UNSIGNED_LONG, //rec_limit
+                MPI_INT, //interval_begin
+                MPI_INT, //interval_end
+                MPI_C_BOOL, //use_fast_topn
+                /* NEW */
+        };
 
-        displacements[0] = offsetof(struct shared_task_ctx, working_mode);
-        displacements[1] = offsetof(struct shared_task_ctx, agg_params);
-        displacements[2] = offsetof(struct shared_task_ctx, agg_params_cnt);
-        displacements[3] = offsetof(struct shared_task_ctx, filter_str_len);
-        displacements[4] = offsetof(struct shared_task_ctx, path_str_len);
-        displacements[5] = offsetof(struct shared_task_ctx, rec_limit);
-        displacements[6] = offsetof(struct shared_task_ctx, interval_begin);
-        displacements[7] = offsetof(struct shared_task_ctx, interval_end);
-        displacements[8] = offsetof(struct shared_task_ctx, use_fast_topn);
-        /* displacements[NEW] = offsetof(struct shared_task_ctx, NEW); */
-
-        MPI_Type_create_struct(STRUCT_TASK_INFO_ELEMS, block_lengths,
+        MPI_Type_create_struct(STRUCT_SHARED_TASK_CTX_ELEMS, block_lengths,
                         displacements, types, &mpi_struct_shared_task_ctx);
         MPI_Type_commit(&mpi_struct_shared_task_ctx);
 }
@@ -321,8 +292,7 @@ void free_mpi_struct_shared_task_ctx(void)
  * \defgroup aggr_mem Functions operating with aggregation memory
  * @{
  */
-error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
-                size_t ap_cnt)
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields)
 {
         secondary_errno = lnf_mem_init(mem);
         if (secondary_errno != LNF_OK) {
@@ -330,20 +300,51 @@ error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
                 return E_LNF;
         }
 
-        /* Default aggragation fields: first, last, flows, packets, bytes. */
-        secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
-                free_aggr_mem(*mem);
-                return E_LNF;
+        /* Is it possible to apply fast aggregation? */
+        if (fields[LNF_FLD_FIRST].id &&
+                        ((fields[LNF_FLD_FIRST].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_MIN) &&
+                        fields[LNF_FLD_LAST].id &&
+                        ((fields[LNF_FLD_LAST].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_MAX) &&
+                        fields[LNF_FLD_DOCTETS].id &&
+                        ((fields[LNF_FLD_DOCTETS].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_SUM) &&
+                        fields[LNF_FLD_DPKTS].id &&
+                        ((fields[LNF_FLD_DPKTS].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_SUM) &&
+                        fields[LNF_FLD_AGGR_FLOWS].id &&
+                        ((fields[LNF_FLD_AGGR_FLOWS].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_SUM))
+        {
+                secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
+                if (secondary_errno != LNF_OK) {
+                        print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
+                        free_aggr_mem(*mem);
+                        *mem = NULL;
+                        return E_LNF;
+                }
         }
 
-        for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
-                secondary_errno = lnf_mem_fadd(*mem, ap->field, ap->flags,
-                                ap->numbits, ap->numbits6);
+        /* Loop through the fields. */
+        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+                if (fields[i].id == 0) {
+                        continue; //field is not present
+                }
+
+                if (fields[i].id >= LNF_FLD_CALC_BPS &&
+                                fields[i].id <= LNF_FLD_CALC_BPP) {
+                        continue;
+                }
+
+                secondary_errno = lnf_mem_fadd(*mem, fields[i].id,
+                                fields[i].flags, fields[i].ipv4_bits,
+                                fields[i].ipv6_bits);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
+                        print_err(E_LNF, secondary_errno,
+                                        "lnf_mem_fadd()");
                         free_aggr_mem(*mem);
+                        *mem = NULL;
                         return E_LNF;
                 }
         }
@@ -415,3 +416,67 @@ time_t mktime_utc(struct tm *tm)
 /**
  * @}
  */ //time_func
+
+
+/**
+ * \defgroup lnf_fields_func LNF fields related functions
+ * @{
+ */
+int field_get_type(int field)
+{
+        int type;
+
+        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
+                return -1;
+        }
+
+        lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
+
+        return type;
+}
+
+size_t field_get_size(int field)
+{
+        const int type = field_get_type(field);
+
+        if (type == -1) {
+                return 0;
+        }
+
+        switch (type) {
+        case LNF_UINT8:
+                return sizeof (uint8_t);
+
+        case LNF_UINT16:
+                return sizeof (uint16_t);
+
+        case LNF_UINT32:
+                return sizeof (uint32_t);
+
+        case LNF_UINT64:
+                return sizeof (uint64_t);
+
+        case LNF_DOUBLE:
+                return sizeof (double);
+
+        case LNF_ADDR:
+                return sizeof (lnf_ip_t);
+
+        case LNF_MAC:
+                return sizeof (lnf_mac_t);
+
+        case LNF_BASIC_RECORD1:
+                return sizeof (lnf_brec1_t);
+
+        case LNF_NONE:
+        case LNF_STRING:
+        case LNF_MPLS:
+                assert(!"unimplemented LNF data type");
+
+        default:
+                assert(!"unknown LNF data type");
+        }
+}
+/**
+ * @}
+ */ //lnf_fields_func

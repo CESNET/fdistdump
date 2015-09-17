@@ -56,9 +56,7 @@
 
 
 /* Global varables. */
-MPI_Datatype mpi_struct_agg_param;
 MPI_Datatype mpi_struct_shared_task_ctx;
-MPI_Datatype mpi_struct_tm;
 int secondary_errno;
 
 int main(int argc, char **argv)
@@ -117,8 +115,6 @@ int main(int argc, char **argv)
         }
 
         /* Create MPI data types (global variables). */
-        create_mpi_struct_agg_param();
-        create_mpi_struct_tm();
         create_mpi_struct_shared_task_ctx();
 
         /* Start time measurement. */
@@ -142,8 +138,6 @@ int main(int argc, char **argv)
 
         /* Free MPI data types (global variables). */
         free_mpi_struct_shared_task_ctx();
-        free_mpi_struct_tm();
-        free_mpi_struct_agg_param();
 
         MPI_Finalize();
         if (primary_errno == E_OK || primary_errno == E_PASS) {

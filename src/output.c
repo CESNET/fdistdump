@@ -43,7 +43,6 @@
  */
 
 #include "output.h"
-#include "bit_array.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -51,9 +50,10 @@
 
 #include <arpa/inet.h> //inet_ntop(), ntohl()
 
-#define FIELDS_SIZE (LNF_FLD_TERM_ + 1) //currently 256 bits
-#define PRETTY_PRINT_SPACING 4
-#define CSV_SEP ","
+#define PRETTY_PRINT_SEP " "
+#define PRETTY_PRINT_COL_WIDTH 5
+#define COL_WIDTH_RESERVE 3
+#define CSV_SEP ','
 #define TCP_FLAG_UNSET_CHAR '.'
 
 #if MAX_STR_LEN < INET6_ADDRSTRLEN
@@ -62,8 +62,14 @@
 
 
 extern int secondary_errno;
+
 static char global_str[MAX_STR_LEN];
-static struct output_params output_params;
+static struct output_params output_params; //output parameters
+static struct {
+        int id;
+        size_t size;
+} fields[LNF_FLD_TERM_]; //fields array compressed for faster access
+static size_t fields_cnt = 0; //number of fields present in fields array
 
 static const char *ip_proto_str_table[] = {
         [0] = "HOPOPT",
@@ -242,7 +248,7 @@ static const char *binary_unit_table[] = {
 static const char tcp_flags_table[] = {
     'C', //CWR Congestion Window Reduced
     'E', //ECE
-    'U', //URG Urgent pointer URG
+    'U', //URG Urgent pointer
     'A', //ACK Acknowledgment field
     'P', //PSH Push function
     'R', //RST Reset the connection
@@ -252,6 +258,7 @@ static const char tcp_flags_table[] = {
 
 
 typedef const char *(*field_to_str_t)(const void *);
+static const char * field_to_str(int field, const void *data);
 
 
 /** \brief Convert timestamp in uint64_t to string.
@@ -285,7 +292,7 @@ static const char * timestamp_to_str(const uint64_t *ts)
 
                 off = strftime(global_str, sizeof (global_str),
                                 output_params.ts_conv_str, timeconv(&sec));
-                snprintf(global_str + off, sizeof (global_str) - off, ".%lu",
+                snprintf(global_str + off, sizeof (global_str) - off, ".%.3lu",
                                 msec);
                 break;
 
@@ -471,7 +478,7 @@ static const char * uint64_t_to_str(const uint64_t *u64)
 
 static const char * double_to_str(const double *d)
 {
-        snprintf(global_str, sizeof (global_str), "%f", *d);
+        snprintf(global_str, sizeof (global_str), "%.1f", *d);
 
         return global_str;
 }
@@ -523,29 +530,38 @@ static const char * mylnf_brec_to_str(const lnf_brec1_t *brec)
                 break;
 
         case OUTPUT_FORMAT_CSV:
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_FIRST, &brec->first));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_LAST, &brec->last));
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_FIRST, &brec->first),
+                                CSV_SEP);
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_LAST, &brec->last),
+                                CSV_SEP);
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_PROT, &brec->prot));
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_PROT, &brec->prot),
+                                CSV_SEP);
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_SRCADDR, &brec->srcaddr));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_SRCPORT, &brec->srcport));
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_SRCADDR, &brec->srcaddr),
+                                CSV_SEP);
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_SRCPORT, &brec->srcport),
+                                CSV_SEP);
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_DSTADDR, &brec->dstaddr));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_DSTPORT, &brec->dstport));
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_DSTADDR, &brec->dstaddr),
+                                CSV_SEP);
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_DSTPORT, &brec->dstport),
+                                CSV_SEP);
 
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_DOCTETS, &brec->bytes));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s" CSV_SEP,
-                                field_to_str(LNF_FLD_DPKTS, &brec->pkts));
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_DOCTETS, &brec->bytes),
+                                CSV_SEP);
+                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
+                                field_to_str(LNF_FLD_DPKTS, &brec->pkts),
+                                CSV_SEP);
                 off += snprintf(res + off, MAX_STR_LEN - off, "%s",
                                 field_to_str(LNF_FLD_AGGR_FLOWS, &brec->flows));
                 break;
@@ -583,7 +599,7 @@ field_to_str_t field_to_str_func_table[] = {
 };
 
 
-static char * field_get_name(int field)
+static const char * field_get_name(int field)
 {
         static char fld_name_buff[LNF_INFO_BUFSIZE];
 
@@ -596,70 +612,8 @@ static char * field_get_name(int field)
         return fld_name_buff;
 }
 
-static int field_get_type(int field)
-{
-        int type;
 
-        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
-                return -1;
-        }
-
-        lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
-
-        return type;
-}
-
-static size_t field_get_size(int field)
-{
-        const int type = field_get_type(field);
-
-        if (type == -1) {
-                return 0;
-        }
-
-        switch (type) {
-        case LNF_UINT8:
-                return sizeof (uint8_t);
-
-        case LNF_UINT16:
-                return sizeof (uint16_t);
-
-        case LNF_UINT32:
-                return sizeof (uint32_t);
-
-        case LNF_UINT64:
-                return sizeof (uint64_t);
-
-        case LNF_DOUBLE:
-                return sizeof (double);
-
-        case LNF_ADDR:
-                return sizeof (lnf_ip_t);
-
-        case LNF_MAC:
-                return sizeof (lnf_mac_t);
-
-        case LNF_BASIC_RECORD1:
-                return sizeof (lnf_brec1_t);
-
-        case LNF_NONE:
-        case LNF_STRING:
-        case LNF_MPLS:
-                assert(!"unimplemented LNF data type");
-
-        default:
-                assert(!"unknown LNF data type");
-        }
-}
-
-
-void output_setup(struct output_params op)
-{
-        output_params = op;
-}
-
-
-const char * field_to_str(int field, const void *data)
+static const char * field_to_str(int field, const void *data)
 {
         const int type = field_get_type(field);
         field_to_str_t to_str_func = field_to_str_func_table[field];
@@ -722,76 +676,128 @@ const char * field_to_str(int field, const void *data)
         return to_str_func(data);
 }
 
-
-error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
-                const struct agg_param *ap, size_t ap_cnt)
+static void print_field(const char *string, size_t string_width,
+                size_t space_width, bool last)
 {
-        error_code_t primary_errno = E_OK;
-        size_t rec_cntr = 0;
-        lnf_mem_cursor_t *cursor;
-        lnf_rec_t *rec;
-        int field;
-        size_t field_cnt = 0;
-        size_t field_max_size = 0;
-        size_t max_data_str_len[LNF_FLD_TERM_] = {0};
-        struct bit_array *ba;
-        size_t printed_field_cnt = 0;
-
-        ba = bit_array_init(FIELDS_SIZE);
-        if (ba == NULL) {
-                print_err(E_MEM, 0, "bit_array_init()");
-                return E_MEM;
+        if (last) { //no spacing or CSV separator after last field
+                puts(string); //appends newline
+                return;
         }
+
+        switch (output_params.format) {
+        case OUTPUT_FORMAT_PRETTY:
+                printf("%-*s%*s", (int)string_width, string, (int)space_width,
+                                PRETTY_PRINT_SEP);
+                break;
+
+        case OUTPUT_FORMAT_CSV:
+                printf("%s%c" , string, CSV_SEP);
+                break;
+
+        default:
+                assert(!"unknown output format");
+        }
+}
+
+
+void output_setup(struct output_params op, const struct field_info *fi)
+{
+        output_params = op;
+
+        /* Fill fields array. */
+        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+                if (fi[i].id == 0) {
+                        continue; //field is not present
+                }
+                fields[fields_cnt].id = i;
+                fields[fields_cnt].size = field_get_size(i);
+                fields_cnt++;
+        }
+}
+
+
+void print_rec(const uint8_t *data)
+{
+        size_t off = 0;
+        static bool first_rec = 1;
+        static size_t col_width[LNF_FLD_TERM_];
+
+        if (first_rec) {
+                for (size_t i = 0; i < fields_cnt; ++i) {
+                        const char *header_str = field_get_name(fields[i].id);
+                        const size_t header_str_len = strlen(header_str);
+                        const size_t field_str_len = strlen(field_to_str(
+                                                fields[i].id, data + off));
+
+                        col_width[i] = header_str_len > field_str_len ?
+                                header_str_len : field_str_len;
+                        col_width[i] += COL_WIDTH_RESERVE;
+                        off += fields[i].size;
+
+                        print_field(header_str, col_width[i],
+                                        PRETTY_PRINT_COL_WIDTH -
+                                        COL_WIDTH_RESERVE,
+                                        i == (fields_cnt - 1));
+                }
+
+                off = 0;
+                first_rec = false;
+        }
+
+        /* Loop through the fields in one record. */
+        for (size_t i = 0; i < fields_cnt; ++i) {
+                print_field(field_to_str(fields[i].id, data + off),
+                                col_width[i], PRETTY_PRINT_COL_WIDTH -
+                                COL_WIDTH_RESERVE,
+                                i == (fields_cnt - 1));
+                off += fields[i].size;
+        }
+}
+
+
+error_code_t print_mem(lnf_mem_t *mem, size_t limit)
+{
+        lnf_rec_t *rec; //record = line
+        size_t rec_cntr = 0; //aka lines counter
+
+        lnf_mem_cursor_t *cursor; //current record (line) cursor
+        size_t fld_max_size = 0; //maximum data size length in bytes
+        size_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
+
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
-                goto free_bit_array;
-        }
-
-        /* Default aggragation fields: first, last, flows, packets, bytes. */
-        bit_array_set(ba, LNF_FLD_FIRST);
-        bit_array_set(ba, LNF_FLD_LAST);
-        bit_array_set(ba, LNF_FLD_AGGR_FLOWS);
-        bit_array_set(ba, LNF_FLD_DPKTS);
-        bit_array_set(ba, LNF_FLD_DOCTETS);
-        for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
-                bit_array_set(ba, ap->field);
+                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
+                return E_LNF;
         }
 
 
-        /* Find out maximum data type size of present fields. */
-        bit_array_iter_init(ba);
-        while ((field = bit_array_iter_next(ba)) != -1) {
-                size_t field_size = field_get_size(field);
+        /*
+         * Find out maximum data type size of present fields, length of headers
+         * and last present field ID.
+         */
+        for (size_t i = 0; i < fields_cnt; ++i) {
+                size_t header_str_len = strlen(field_get_name(fields[i].id));
 
-                field_cnt++;
-                MAX_ASSIGN(field_max_size, field_size);
+                MAX_ASSIGN(fld_max_size, fields[i].size);
+                MAX_ASSIGN(data_max_strlen[fields[i].id], header_str_len);
         }
 
-
-        /* Find out maximum length of each field data converted to string. */
-        bit_array_iter_init(ba);
-        while ((field = bit_array_iter_next(ba)) != -1) {
-                size_t header_str_len = strlen(field_get_name(field));
-
-                MAX_ASSIGN(max_data_str_len[field], header_str_len);
-        }
-
+        /* Find out max data length, converted to string. */
         lnf_mem_first_c(mem, &cursor);
-        while (cursor != NULL) {
-                char buff[field_max_size];
+        while (cursor != NULL) { //row loop
+                char buff[fld_max_size];
 
                 lnf_mem_read_c(mem, cursor, rec);
 
-                bit_array_iter_init(ba);
-                while ((field = bit_array_iter_next(ba)) != -1) {
+                for (size_t i = 0; i < fields_cnt; ++i) { //column loop
                         size_t data_str_len;
 
-                        assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
-                        data_str_len = strlen(field_to_str(field, buff));
-                        MAX_ASSIGN(max_data_str_len[field], data_str_len);
+                        //XXX: lnf_rec_fget() may return LNF_ERR_UNKFLD even if
+                        //fields is present. Eg if duration is zero.
+                        lnf_rec_fget(rec, fields[i].id, buff);
+                        data_str_len = strlen(field_to_str(fields[i].id, buff));
+                        MAX_ASSIGN(data_max_strlen[fields[i].id], data_str_len);
                 }
 
                 if (++rec_cntr == limit) {
@@ -804,70 +810,28 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
 
 
         /* Actual printing: header. */
-        bit_array_iter_init(ba);
-        while ((field = bit_array_iter_next(ba)) != -1) {
-                size_t field_size = field_get_size(field);
-
-                switch (output_params.format) {
-                case OUTPUT_FORMAT_PRETTY:
-                        printf("%-*s", (int)max_data_str_len[field] +
-                                        PRETTY_PRINT_SPACING,
-                                        field_get_name(field));
-                        break;
-
-                case OUTPUT_FORMAT_CSV:
-                        if (printed_field_cnt == field_cnt - 1) {
-                                printf("%s", field_get_name(field));
-                        } else {
-                                printf("%s" CSV_SEP, field_get_name(field));
-                        }
-                        break;
-
-                default:
-                        assert(!"unknown output format");
-                }
-
-                printed_field_cnt++;
-                MAX_ASSIGN(field_max_size, field_size);
+        for (size_t i = 0; i < fields_cnt; ++i) { //column loop
+                print_field(field_get_name(fields[i].id),
+                                data_max_strlen[fields[i].id],
+                                PRETTY_PRINT_COL_WIDTH, i == (fields_cnt - 1));
         }
-        putchar('\n');
-        printed_field_cnt = 0;
 
-        /* Field data. */
+        /* Actual printing: field data converted to string. */
         lnf_mem_first_c(mem, &cursor);
-        while (cursor != NULL) {
-                char buff[field_max_size];
+        while (cursor != NULL) { //row loop
+                char buff[fld_max_size];
 
                 lnf_mem_read_c(mem, cursor, rec);
 
-                bit_array_iter_init(ba);
-                while ((field = bit_array_iter_next(ba)) != -1) {
-                        assert(lnf_rec_fget(rec, field, buff) == LNF_OK);
+                for (size_t i = 0; i < fields_cnt; ++i) { //column loop
+                        //XXX: see above lnf_rec_fget()
+                        lnf_rec_fget(rec, fields[i].id, buff);
 
-                        switch (output_params.format) {
-                        case OUTPUT_FORMAT_PRETTY:
-                                printf("%-*s", (int)(max_data_str_len[field]) +
-                                                PRETTY_PRINT_SPACING,
-                                                field_to_str(field, buff));
-                                break;
-
-                        case OUTPUT_FORMAT_CSV:
-                                if (printed_field_cnt == field_cnt - 1) {
-                                        printf("%s", field_to_str(field, buff));
-                                } else {
-                                        printf("%s" CSV_SEP, field_to_str(field,
-                                                                buff));
-                                }
-                                break;
-
-                        default:
-                                assert(!"unknown output format");
-                        }
-
-                        printed_field_cnt++;
+                        print_field(field_to_str(fields[i].id, buff),
+                                        data_max_strlen[fields[i].id],
+                                        PRETTY_PRINT_COL_WIDTH,
+                                        i == (fields_cnt - 1));
                 }
-                putchar('\n');
-                printed_field_cnt = 0;
 
                 if (++rec_cntr == limit) {
                         break;
@@ -877,10 +841,8 @@ error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit,
         }
 
         lnf_rec_free(rec);
-free_bit_array:
-        bit_array_free(ba);
 
-        return primary_errno;
+        return E_OK;
 }
 
 void print_stats(const struct stats *stats)
