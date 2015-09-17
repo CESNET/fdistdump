@@ -632,7 +632,7 @@ static error_code_t set_output_stat_conv(struct output_params *op,
                 op->stat_conv = OUTPUT_STAT_CONV_BINARY_PREFIX;
         } else {
                 print_err(E_ARG, 0, "unknown output statistics conversion "
-                                "string "\"%s\"", stat_conv_str);
+                                "string \"%s\"", stat_conv_str);
                 return E_ARG;
         }
 
