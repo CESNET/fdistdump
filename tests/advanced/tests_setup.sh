@@ -1,11 +1,10 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
 #
-# Description: This tests creation of custom MPI structures. It starts testing
-# binary with given count of processes (first parameter or default value). Test
-# result is evaluated according to return code of test binary.
+# Description: Common variables for tests aimed on comparing FDistDump and
+# NFDump results.
 #
 #
 #
@@ -43,22 +42,26 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_DESC="Creation of MPI datatypes"
+#if [ ! -z "$FDD_ADV_TESTS_MISSING" ]; then
+#      echo "Common setup: Error: Mandatory programs for advanced test are not installed ($FDD_ADV_TESTS_MISSING)."
+#      return 77
+#fi
 
+LOC_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+# data source file in nfdump format for fdd/nfd queries
+G_INPUT_DATA="${LOC_DIR}/test_data.nfcap"
 
-if [ -z $1 ]; then
-        proc_cnt=3
-else
-        proc_cnt=$1
-fi
+# output files with results from queries (fdd/nfd)
+G_FDD_RESULTS="${LOC_DIR}/fdd.results"
+G_NFD_RESULTS="${LOC_DIR}/nfd.results"
 
-mpirun -np $proc_cnt ./create_mpi_struct
+# location of FDistDump binary
+G_FDIST_DUMP=${LOC_DIR}/../../src/fdistdump
 
-if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
-        exit 0
-else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
-        exit 1
-fi
+# query types
+G_QTYPE_LISTFLOWS=1
+G_QTYPE_AGGREG=2
+G_QTYPE_STATS=3
+
+return 0

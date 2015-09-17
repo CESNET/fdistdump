@@ -1,11 +1,9 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
 #
-# Description: This tests creation of custom MPI structures. It starts testing
-# binary with given count of processes (first parameter or default value). Test
-# result is evaluated according to return code of test binary.
+# Description: Test for aggregation by multiple fields.
 #
 #
 #
@@ -43,22 +41,63 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_DESC="Creation of MPI datatypes"
+ADV_TESTS_HOME=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+# import common setup
+. ${ADV_TESTS_HOME}/tests_setup.sh
 
-
-if [ -z $1 ]; then
-        proc_cnt=3
-else
-        proc_cnt=$1
+ret_code=$?
+if [[ $ret_code == 77 ]]; then
+      exit 77
+elif [[ $ret_code != 0 ]]; then
+      echo "Error in common setup"
+      exit 1
 fi
 
-mpirun -np $proc_cnt ./create_mpi_struct
+TEST_DESC="Query with Aggregation by multiple fields"
 
-if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
-        exit 0
-else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
+
+
+#order is important for output (results) corrections
+AGG_FIELD="srcport,srcip,proto"
+
+# run FDistDump query (store same command for logging)
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -a $AGG_FIELD --output-format=csv"
+mpirun -np 2 $G_FDIST_DUMP -r "$G_INPUT_DATA" -a $AGG_FIELD --output-format=csv >"$G_FDD_RESULTS"
+ret_code=$?
+if [ ! $ret_code -eq 0 ]; then
+        echo "Error: FDistDump returned $ret_code."
+        rm -f $G_FDD_RESULTS
         exit 1
 fi
+
+# run NFDump query (store same command for logging)
+NFD_CMD="nfdump -r $G_INPUT_DATA -o pipe -A $AGG_FIELD"
+nfdump -r "$G_INPUT_DATA" -o pipe -A $AGG_FIELD>"$G_NFD_RESULTS"
+ret_code=$?
+if [ ! $ret_code -eq 0 ]; then
+        echo "Error: FNDump returned $ret_code."
+        rm -f $G_FDD_RESULTS $G_NFD_RESULTS
+        exit 1
+fi
+
+# compare results
+. ${ADV_TESTS_HOME}/diff_results.sh "$G_FDD_RESULTS" "$G_NFD_RESULTS" "$G_QTYPE_AGGREG" $AGG_FIELD
+#store return code
+ret_code=$?
+
+rm -f $G_FDD_RESULTS $G_NFD_RESULTS
+
+# check return code from comparison
+if [ $ret_code -eq 0 ]; then
+        echo "${TEST_DESC} was successful."
+        echo "     fdd-cmd: ${FDD_CMD}"
+        echo "     nfd-cmd: ${NFD_CMD}"
+else
+        echo "${TEST_DESC} failed - returned $ret_code."
+        echo "     fdd-cmd: ${FDD_CMD}"
+        echo "     nfd-cmd: ${NFD_CMD}"
+        exit 1
+fi
+
+exit 0

@@ -13,7 +13,8 @@
 
 #define INITIAL_TIMESTAMP       1433222111000
 
-#define FILENAME "./test-file.tmp"
+#define DEFAULT_FILENAME "test.nfcap"
+
 
 enum protocols {
         P_ICMP = 1,
@@ -61,7 +62,7 @@ enum uf_fields {
         UF_TYPE,
 };
 
-/// Between given addresses was transfered B bytes in P packets and F flows.
+/// B bytes in P packets and F flows was transfered among given addresses.
 /// Given port is port bonded to source IP.
 const int unique_flows [UNIQUE_FLOWS_CNT] [8] = {
         // {srcIP, dstIP, Port, Proto, Bytes, Packets, Flows, Type}
@@ -122,16 +123,37 @@ int main (int argc, char **argv)
         uint32_t input, output;
 
         int compress = 1;
-        int aggip = 1;
+//        int aggip = 1;
         int rec_cnt = 0;
 
-        char *filename = "test.nfcap";
+        char *filename = DEFAULT_FILENAME;
 
-        /* open lnf file desriptor */
-        if (lnf_open(&filep, filename, LNF_WRITE | ( compress ? LNF_COMP : 0 ), "myfile") != LNF_OK) {
-                fprintf(stderr, "Can not open file.\n");
+        /// Getting filename >>>
+        if (argc > 1) {
+                if (argc == 2){
+                        filename = argv[1];
+                } else {
+                    fprintf(stderr, "Unexpected program arguments \
+                            (expecting optional filename only).\n");
+                    exit(1);
+                }
+        }
+
+        if (strlen(filename) < 1){
+                fprintf(stderr, "Wrong output filename with size %d.\n",
+                        (int) strlen(filename));
                 exit(1);
         }
+        /// <<<
+
+        /// Try to open output file >>>
+        /* open lnf file descriptor */
+        if (lnf_open(&filep, filename, LNF_WRITE | ( compress ? LNF_COMP : 0 ),
+                     "myfile") != LNF_OK) {
+                fprintf(stderr, "Can not open file \"%s\".\n", filename);
+                exit(1);
+        }
+        /// <<<
 
         srand(time(NULL));
 
@@ -204,35 +226,10 @@ int main (int argc, char **argv)
                             rand_volume[j][0] = 20 + bytes;
                             rand_volume[j][1] = 1 + packets;
                         }
-                        /// ////////////////////////////////////////////////////
-                        /// ////////////////////////////////////////////////////
-                        /// ////////////////////////////////////////////////////
-//                        const char *saddr;
-//                        const char *daddr;
-//
-//                        if (unique_flows[i][UF_TYPE] == AF_INET){
-//                                saddr = v4_addresses[unique_flows[i][UF_SRCIP]];
-//                                daddr = v4_addresses[unique_flows[i][UF_DSTIP]];
-//                        } else {
-//                                saddr = v6_addresses[unique_flows[i][UF_SRCIP]];
-//                                daddr = v6_addresses[unique_flows[i][UF_DSTIP]];
-//                        }
-//
-//                        printf("%d. %s:%u -> %s:%u, %i, %i, %i\n",
-//                                j,
-//                                saddr,
-//                                ports[unique_flows[i][UF_PORT]],
-//                                daddr,
-//                                rand_ports[j],
-//                                unique_flows[i][UF_PROTO],
-//                                rand_volume[j][0],
-//                                rand_volume[j][1]);
 
                         b_sum += rand_volume[j][0];
                         p_sum += rand_volume[j][1];
-                        /// ////////////////////////////////////////////////////
-                        /// ////////////////////////////////////////////////////
-                        /// ////////////////////////////////////////////////////
+
                         /* prepare data in asic record1 (lnf_brec1_t) */
                         brec.first = INITIAL_TIMESTAMP + i * 50000 + j * 1000;
                         brec.last =  brec.first + rand() % 300000 + 10;
@@ -321,36 +318,13 @@ int main (int argc, char **argv)
 //                                unique_flows[i][UF_FLOWS]);
 //                printf("##########################################\n");
         }
-//
-//        /* write records to file */
-//        for (i = 0; i < UNIQUE_FLOWS_CNT; i++) {
-//
-//                input = i % 5; /* make input index interface 0 - 5 */
-//                output = i % 10; /* make output index interface 0 - 5 */
-//
-//                if (aggip) {
-//                        brec.bytes = i;
-//                        brec.srcaddr.data[1] = 1000 + (i % aggip);
-//                }
-//                /* prepare record */
-//                lnf_rec_fset(recp, LNF_FLD_BREC1, &brec);
-//
-//                /* set input and output interface */
-//                lnf_rec_fset(recp, LNF_FLD_INPUT, &input);
-//                lnf_rec_fset(recp, LNF_FLD_OUTPUT, &output);
-//
-//                /* write record to file */
-//                if (lnf_write(filep, recp) != LNF_OK) {
-//                        fprintf(stderr, "Can not write record no %d\n", i);
-//                }
-//        }
 
         /* return memory */
         lnf_rec_free(recp);
         lnf_close(filep);
 
         printf("%d records was written to %s\n", rec_cnt, filename);
-        printf("You can read it via cmd 'nfdump -r %s -o raw'\n", filename);
+//        printf("You can read it via cmd 'nfdump -r %s -o raw'\n", filename);
 
         return 0;
 }
