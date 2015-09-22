@@ -61,8 +61,8 @@ TEST_DESC="Simple aggregation query"
 AGG_FIELD="srcip"
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -a $AGG_FIELD --output-format=csv"
-mpirun -np 2 $G_FDIST_DUMP -r "$G_INPUT_DATA" -a $AGG_FIELD --output-format=csv >"$G_FDD_RESULTS"
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -a $AGG_FIELD --output-format=csv --fields=first,last,bytes,pkts"
+eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FDistDump returned $ret_code."
@@ -71,8 +71,8 @@ if [ ! $ret_code -eq 0 ]; then
 fi
 
 # run NFDump query (store same command for logging)
-NFD_CMD="nfdump -r $G_INPUT_DATA -o pipe -A $AGG_FIELD"
-nfdump -r "$G_INPUT_DATA" -o pipe -A $AGG_FIELD>"$G_NFD_RESULTS"
+NFD_CMD="nfdump -r $G_INPUT_DATA -q -o pipe -A $AGG_FIELD"
+eval "$NFD_CMD" > "$G_NFD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FNDump returned $ret_code."

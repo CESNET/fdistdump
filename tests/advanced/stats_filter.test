@@ -60,10 +60,12 @@ TEST_DESC="Simple statistics with filter"
 
 STAT_FIELD="srcip"
 SORT_FIELD="flows"
+FILTER="\"proto UDP and port >100\""
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -s $STAT_FIELD -f \"proto UDP and port >100\" -l 3  --output-format=csv --output-ts-conv=\"%F %T\" --output-addr-conv=str"
-mpirun -np 2 $G_FDIST_DUMP -r "$G_INPUT_DATA" -s $STAT_FIELD -f "proto UDP and port >100" -l 3  --output-format=csv --output-ts-conv="%F %T" --output-ts-localtime --output-addr-conv=str>"$G_FDD_RESULTS"
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -s $STAT_FIELD -f $FILTER \
+        --output-format=csv --fields=first,last,bytes,pkts"
+eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FDistDump returned $ret_code."
@@ -72,8 +74,9 @@ if [ ! $ret_code -eq 0 ]; then
 fi
 
 # run NFDump query (store same command for logging)
-NFD_CMD="nfdump -r $G_INPUT_DATA -o csv -s $STAT_FIELD -s srcip -n 3 \"proto UDP and port >100\""
-nfdump -r "$G_INPUT_DATA" -o csv -s $STAT_FIELD -n 3 "proto UDP and port >100">"$G_NFD_RESULTS"
+NFD_CMD="nfdump -r $G_INPUT_DATA -q -o pipe -A $STAT_FIELD -O $SORT_FIELD -n 10\
+        $FILTER"
+eval "$NFD_CMD" > "$G_NFD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FNDump returned $ret_code."

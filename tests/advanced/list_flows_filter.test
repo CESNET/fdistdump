@@ -55,12 +55,15 @@ elif [[ $ret_code != 0 ]]; then
 fi
 
 TEST_DESC="Basic list flows query with filter"
+FILTER="\"port 23\""
 
 
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -l 50 -f \"port 23\" --output-format=csv"
-mpirun -np 2 $G_FDIST_DUMP -r "$G_INPUT_DATA" -l 50 -f "port 23" --output-format=csv >"$G_FDD_RESULTS"
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -l 50 -f $FILTER \
+        --output-format=csv \
+        --fields=first,last,bytes,pkts,srcport,dstport,tcpflags,srcip,dstip,proto"
+eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FDistDump returned $ret_code."
@@ -69,8 +72,8 @@ if [ ! $ret_code -eq 0 ]; then
 fi
 
 # run NFDump query (store same command for logging)
-NFD_CMD="nfdump -r $G_INPUT_DATA -o pipe -c 50 \"port 23\""
-nfdump -r "$G_INPUT_DATA" -o pipe -c 50 "port 23">"$G_NFD_RESULTS"
+NFD_CMD="nfdump -r $G_INPUT_DATA -q -o pipe -c 50 $FILTER"
+eval "$NFD_CMD" > "$G_NFD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FNDump returned $ret_code."

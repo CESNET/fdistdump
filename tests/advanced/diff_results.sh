@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
+# Author: Jan Wrona, <wrona@cesnet.cz>
 # Date: 2015
 #
 # Description: Compare results from FDistDump and NFDump queries. Return 0 if
@@ -66,7 +67,8 @@ function unify_sort {
         unset __last_line
         while read line || [[ -n "$line" ]]; do
                 if [[ ! -z $__last_line ]]; then
-                        if [ `echo $line | cut -d"," -f${__sf}` -eq `echo $__last_line | cut -d"," -f${__sf}` ]; then
+                        #if [ `echo $line | cut -d"," -f${__sf}` -eq `echo $__last_line | cut -d"," -f${__sf}` ]; then
+                        if [[ `echo $line | cut -d"," -f${__sf}` == `echo $__last_line | cut -d"," -f${__sf}` ]]; then
                                 echo $__last_line >> $__tmp_sort
                                 __c=$(expr $__c + 1)
                         else
@@ -140,11 +142,47 @@ else
         result_is_sorted=0
 fi
 
+AWK_LIST_NFD2FDD='{
+        first_sec = $2
+        first_msec = $3
+        last_sec = $4
+        last_msec = $5
+        proto = $6
+        srcip=$7":"$8":"$9":"$10
+        srcport=$11
+        dstip=$12":"$13":"$14":"$15
+        dstport=$16
+        tcpflags=$21
+        pkts=$23
+        bytes=$24
+
+        first = first_sec * 1000 + first_msec
+        last = last_sec * 1000 + last_msec
+
+        print first","last","bytes","pkts","srcport","dstport","tcpflags","srcip","dstip","proto
+}'
+
+AWK_AGGR_NFD2FDD='{
+        first_sec = $2
+        first_msec = $3
+        last_sec = $4
+        last_msec = $5
+        pkts=$23
+        bytes=$24
+
+        first = first_sec * 1000 + first_msec
+        last = last_sec * 1000 + last_msec
+
+        print first","last","bytes","pkts","F_SPEC
+}'
+
 if [[ $query_type -eq $G_QTYPE_LISTFLOWS ]]; then
         #fdd results formating
-        cut -d"," -f1-9 $fddr >$fddr_tmp
+        sed "1d" $fddr > $fddr_tmp
+
         #nfd results formating
-        awk -F "|" 'NF>20{ts=$3;te=$5;for(i=length($3);i<3;i++)ts="0" ts;for(i=length($5);i<3;i++)te="0" te;$2=$2 ts;$4=$4 te;print $2","$4","$6","$7":"$8":"$9":"$10","$11","$12":"$13":"$14":"$15","$16","$24","$23;}' $nfdr >$nfdr_tmp
+        awk -F "|" "$AWK_LIST_NFD2FDD" $nfdr >$nfdr_tmp
+
 elif [[ $query_type -eq $G_QTYPE_AGGREG ]]; then
         #create column specification string for awk - driven by selected aggregation fields
         f_spec=""
@@ -176,58 +214,70 @@ elif [[ $query_type -eq $G_QTYPE_AGGREG ]]; then
         done
 
         #fdd results formating
-        tail -n +2 $fddr | cut -d"," -f1-4,6- >$fddr_tmp
+        sed "1d" $fddr > $fddr_tmp
+
         #nfd results formating
-        awk -F "|" 'NF>20{ts=$3;te=$5;for(i=length($3);i<3;i++)ts="0" ts;for(i=length($5);i<3;i++)te="0" te;$2=$2 ts;$4=$4 te;print $2","$4","$24","$23","'$f_spec';}' $nfdr >$nfdr_tmp
+        awk -F "|" "${AWK_AGGR_NFD2FDD/F_SPEC/$f_spec}" $nfdr > $nfdr_tmp
+
 elif [[ $query_type -eq $G_QTYPE_STATS ]]; then
-        if [[ "$AGG_FIELDS" == "srcip" ]] || [[ "$AGG_FIELDS" == "dstip" ]]; then
-                tail -n +2 $fddr | sed -E 's#([0-9]{2}:[0-9]{2}:[0-9]{2})\.[0-9]{1,3},#\1,#g' > $fddr_tmp
-                tail -n +2 $nfdr | awk -F "," 'NF>10{print $1","$2","$10","$8","$6","$5;}' > $nfdr_tmp
-        else
-                tail -n +2 $fddr > $fddr_tmp
-                awk -F "|" 'NF>10{ts=$3;te=$5;for(i=length($3);i<3;i++)ts="0" ts;for(i=length($5);i<3;i++)te="0" te;$2=$2 ts;$4=$4 te;print $2","$4","$10","$9","$8","$7;}' $nfdr > $nfdr_tmp
-        fi
+        #create column specification string for awk - driven by selected aggregation fields
+        f_spec=""
+        for f in ${AGG_FIELDS[@]}; do
+                if [ ! -z $f_spec ]; then
+                        f_spec=${f_spec}"\",\""
+                fi
+
+                case "$f" in
+                "srcport")
+                        f_spec="${f_spec}\$11"
+                        ;;
+                "dstport")
+                        f_spec="${f_spec}\$16"
+                        ;;
+                "proto")
+                        f_spec="${f_spec}\$6"
+                        ;;
+                "srcip")
+                        f_spec="${f_spec}\$7\":\"\$8\":\"\$9\":\"\$10"
+                        ;;
+                "dstip")
+                        f_spec="${f_spec}\$12\":\"\$13\":\"\$14\":\"\$15"
+                        ;;
+                *)
+                        echo "Diff results: Error: Unknown aggregation field $f."
+                        return 1
+                esac
+        done
+
+        #fdd results formating
+        sed "1d" $fddr | cut -d, -f -4,6- > $fddr_tmp
+
+        #nfd results formating
+        awk -F "|" "${AWK_AGGR_NFD2FDD/F_SPEC/$f_spec}" $nfdr > $nfdr_tmp
 else
         echo "Diff results: Error: Unknown query type specification."
         return 1
 fi
 
-diff1="${ADV_TESTS_HOME}/diff1.txt"
-diff2="${ADV_TESTS_HOME}/diff2.txt"
-
-rm -f $diff1 $diff2
-touch $diff1 $diff2
 
 if [[ $result_is_sorted == 1 ]]; then
         #sorting of results was requested in query, so lines order have to be considered
         unify_sort $fddr_tmp $sort_field
         unify_sort $nfdr_tmp $sort_field
-        diff $fddr_tmp $nfdr_tmp >$diff1
 else
-        grep -vxFf $fddr_tmp $nfdr_tmp >$diff1
-        grep -vxFf $nfdr_tmp $fddr_tmp >$diff2
+        sort -o $fddr_tmp $fddr_tmp
+        sort -o $nfdr_tmp $nfdr_tmp
 fi
 
-echo "=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#"
-cat $fddr_tmp
-echo "=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#"
-cat $nfdr_tmp
-echo "=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#"
 
-rm -f $fddr_tmp $nfdr_tmp
-
-if [[ -s $diff1 ]] || [[ -s $diff2 ]]; then
+DIFF=$(diff $fddr_tmp $nfdr_tmp)
+ret_code=$?
+if [[ $ret_code -ne 0 ]]; then
         echo "Diff results: Results do not match."
-        echo "-- diff1: ------------------------------->>>"
-        cat $diff1
-        echo "<<<------------------------------------ diff1"
-        echo "-- diff2: ------------------------------->>>"
-        cat $diff2
-        echo "<<<------------------------------------ diff2"
-        rm -f $diff1 $diff2
-        return 1
+        echo "$DIFF"
 else
         echo "Diff results: Results match."
-        rm -f $diff1 $diff2
-        return 0
 fi
+
+rm -f $fddr_tmp $nfdr_tmp
+return $ret_code

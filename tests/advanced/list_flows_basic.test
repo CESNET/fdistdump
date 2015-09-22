@@ -59,8 +59,9 @@ TEST_DESC="Basic list flows query"
 
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA --output-format=csv"
-mpirun -np 2 $G_FDIST_DUMP -r "$G_INPUT_DATA" --output-format=csv >"$G_FDD_RESULTS"
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA --output-format=csv \
+        --fields=first,last,bytes,pkts,srcport,dstport,tcpflags,srcip,dstip,proto"
+eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FDistDump returned $ret_code."
@@ -69,8 +70,8 @@ if [ ! $ret_code -eq 0 ]; then
 fi
 
 # run NFDump query (store same command for logging)
-NFD_CMD="nfdump -r $G_INPUT_DATA -o pipe"
-nfdump -r "$G_INPUT_DATA" -o pipe >"$G_NFD_RESULTS"
+NFD_CMD="nfdump -r $G_INPUT_DATA -q -o pipe"
+eval "$NFD_CMD" > "$G_NFD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FNDump returned $ret_code."

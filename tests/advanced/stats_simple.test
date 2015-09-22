@@ -62,8 +62,9 @@ STAT_FIELD="proto"
 SORT_FIELD="flows"
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -s $STAT_FIELD --output-format=csv"
-mpirun -np 2 $G_FDIST_DUMP -r "$G_INPUT_DATA" -s $STAT_FIELD --output-format=csv >"$G_FDD_RESULTS"
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -s $STAT_FIELD \
+        --output-format=csv --fields=first,last,bytes,pkts"
+eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FDistDump returned $ret_code."
@@ -72,8 +73,8 @@ if [ ! $ret_code -eq 0 ]; then
 fi
 
 # run NFDump query (store same command for logging)
-NFD_CMD="nfdump -r $G_INPUT_DATA -o pipe -s $STAT_FIELD"
-nfdump -r "$G_INPUT_DATA" -o pipe -s $STAT_FIELD >"$G_NFD_RESULTS"
+NFD_CMD="nfdump -r $G_INPUT_DATA -q -o pipe -A $STAT_FIELD -O $SORT_FIELD -n 10"
+eval "$NFD_CMD" > "$G_NFD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
         echo "Error: FNDump returned $ret_code."
@@ -101,7 +102,7 @@ fi
 #store return code
 ret_code=$?
 
-rm -f $G_FDD_RESULTS $G_NFD_RESULTS
+#rm -f $G_FDD_RESULTS $G_NFD_RESULTS
 
 # check return code from comparison
 if [ $ret_code -eq 0 ]; then
