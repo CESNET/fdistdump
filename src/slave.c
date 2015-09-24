@@ -46,6 +46,7 @@
 #define _BSD_SOURCE //d_type
 
 #include "slave.h"
+#include "flookup.h"
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -85,9 +86,8 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
-        data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX]; //file or directory path string
-        DIR *dir_ctx; //used in case of directory as data source
+        f_array_t files;
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
@@ -140,10 +140,12 @@ static void stats_send(struct stats *s)
 
 
 static error_code_t task_send_file(struct slave_task_ctx *stc,
-                const char *path)
+                                   const size_t f_index)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
+
+        char *path = stc->files.f_items[f_index].f_name; // shortcut
 
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
@@ -281,10 +283,13 @@ close_file:
 
 
 static error_code_t task_store_file(struct slave_task_ctx *stc,
-                const char *path)
+                                    const size_t f_index)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
+
+        char *path = stc->files.f_items[f_index].f_name; // shortcut
+
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
         lnf_file_t *file;
@@ -350,111 +355,16 @@ close_file:
         return primary_errno;
 }
 
-
-/* Retrun value have to be freed. */
-static error_code_t task_get_next_file(struct slave_task_ctx *stc, char **fn)
-{
-        static bool no_more_files;
-        struct dirent *dir_entry;
-        char *path;
-
-        assert(stc != NULL && fn != NULL);
-
-        if (no_more_files) {
-                return E_EOF;
-        }
-
-        switch (stc->data_source) {
-        case DATA_SOURCE_FILE: //one file
-                no_more_files = true;
-                path = strdup(stc->path_str);
-                if (path == NULL) {
-                        print_err(E_MEM, 0, "strdup()");
-                        return E_MEM;
-                }
-                break;
-
-        case DATA_SOURCE_DIR: //whole directory without descending
-                do { //skip all directories
-                        dir_entry = readdir(stc->dir_ctx);
-                } while (dir_entry && dir_entry->d_type == DT_DIR);
-
-                if (dir_entry == NULL) { //didn't find any new file
-                        no_more_files = true;
-                        return E_EOF;
-                }
-
-                /* Found new file -> construct path. */
-                path = malloc((stc->shared.path_str_len +
-                                        strlen(dir_entry->d_name) + 1) *
-                                sizeof (char));
-                if (path == NULL) {
-                        print_err(E_MEM, 0, "malloc()");
-                        return E_MEM;
-                }
-                strcpy(path, stc->path_str); //copy dirname
-                strcat(path, dir_entry->d_name); //append filename
-                break;
-
-        case DATA_SOURCE_INTERVAL: //all files coresponding to time interval
-                path = malloc(PATH_MAX * sizeof (char));
-                if (path == NULL) {
-                        print_err(E_MEM, 0, "malloc()");
-                        return E_MEM;
-                }
-
-                /* Loop through entire interval, ctx kept in interval_begin. */
-                while (tm_diff(stc->shared.interval_end,
-                                        stc->shared.interval_begin) > 0) {
-                        /* Construct path string from time. */
-                        if (strftime(path, PATH_MAX, FLOW_FILE_PATH,
-                                                &stc->shared.interval_begin)
-                                        == 0) {
-                                secondary_errno = 0;
-                                print_err(E_PATH, secondary_errno,
-                                                "strftime()");
-                                free(path);
-                                return E_PATH;
-                        }
-                        /* Increment context by rotation interval, normalize. */
-                        stc->shared.interval_begin.tm_sec +=
-                                FLOW_FILE_ROTATION_INTERVAL;
-                        mktime_utc(&stc->shared.interval_begin);
-
-                        if (access(path, F_OK) == 0) {
-                                *fn = path;
-                                return E_OK; //file exists
-                        }
-
-                        //TODO: master should know about this
-                        print_warn(E_PATH, 0, "skipping non existing file "
-                                        "\"%s\"", path);
-                }
-
-                free(path);
-                no_more_files = true;
-                return E_EOF; //whole interval read
-
-        default:
-                assert(!"unknown data source");
-        }
-
-        *fn = path;
-        return E_OK; //file exists
-}
-
-
 static void task_free(struct slave_task_ctx *stc)
 {
-        if (stc->dir_ctx) {
-                closedir(stc->dir_ctx);
-        }
         if (stc->filter) {
                 lnf_filter_free(stc->filter);
         }
         if (stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
         }
+
+        f_array_free(&stc->files);
 }
 
 
@@ -515,6 +425,8 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
 
         assert(stc != NULL);
 
+        f_array_init(&stc->files);
+
         switch (stc->shared.working_mode) {
         case MODE_LIST:
                 return E_OK;
@@ -550,58 +462,6 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
 
         return primary_errno;
 }
-
-
-static error_code_t task_init_data_source(struct slave_task_ctx *stc)
-{
-        int err;
-        struct stat stat_buff;
-
-        /* Don't have path string - construct file names from time interval. */
-        if (stc->shared.path_str_len == 0) {
-                stc->data_source = DATA_SOURCE_INTERVAL;
-                return E_OK;
-        }
-
-        /* Have path string, don't know if file or direcory yet. */
-        err = stat(stc->path_str, &stat_buff);
-        if (err == -1) { //path doesn't exist, permissions, ...
-                secondary_errno = errno;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
-                                stc->path_str);
-                return E_PATH;
-        }
-
-        if (!S_ISDIR(stat_buff.st_mode)) { //path isn't directory
-                stc->data_source = DATA_SOURCE_FILE;
-                return E_OK;
-        }
-
-        /* Now we know that path points to directory. */
-        if (stc->shared.path_str_len >= (PATH_MAX - NAME_MAX) - 1) {
-                secondary_errno = ENAMETOOLONG;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"",
-                                strerror(secondary_errno), stc->path_str);
-                return E_PATH;
-        }
-
-        stc->data_source = DATA_SOURCE_DIR;
-        stc->dir_ctx = opendir(stc->path_str);
-        if (stc->dir_ctx == NULL) { //cannot access directory
-                secondary_errno = errno;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
-                                stc->path_str);
-                return E_PATH;
-        }
-
-        /* Check/add missing terminating slash. One byte should be available. */
-        if (stc->path_str[stc->shared.path_str_len - 1] != '/') {
-                stc->path_str[stc->shared.path_str_len++] = '/';
-        }
-
-        return E_OK;
-}
-
 
 static error_code_t send_loop(struct slave_task_ctx *stc)
 {
@@ -938,48 +798,36 @@ error_code_t slave(int world_size)
                 goto finalize_task;
         }
         /* Data source specific initialization. */
-        primary_errno = task_init_data_source(&stc);
-        if (primary_errno != E_OK) {
-                goto finalize_task;
+        if (stc.shared.path_str_len == 0) {
+//                primary_errno = flist_lookup_files_time(stc.files,
+//                                                        stc.time_expr);
+                if (primary_errno != E_OK) {
+                        goto finalize_task;
+                }
+        } else {
+                primary_errno = flist_lookup_files_path(&stc.files,
+                                                        stc.path_str);
+                if (primary_errno != E_OK) {
+                        goto finalize_task;
+                }
         }
 
         //TODO: return codes, secondary_errno
         #pragma omp parallel
         {
-                #pragma omp single
-                {
-                        char *path;
-
-                        primary_errno = task_get_next_file(&stc, &path);
-                        while (primary_errno == E_OK) {
-                                #pragma omp task firstprivate(path)
-                                {
-                                        if (stc.aggr_mem) {
-                                                primary_errno = task_store_file(
-                                                                &stc, path);
-                                        } else if (!stc.rec_limit_reached) {
-                                                primary_errno = task_send_file(
-                                                                &stc, path);
-                                        }
-
-                                        assert(primary_errno == E_OK);
-                                        free(path);
-                                }
-
-                                primary_errno = task_get_next_file(&stc, &path);
+                #pragma omp for
+                for (size_t i = 0; i < stc.files.f_cnt; ++i){
+                        if (stc.aggr_mem) {
+                                primary_errno = task_store_file(&stc, i);
+                        } else if (!stc.rec_limit_reached) {
+                                primary_errno = task_send_file(&stc, i);
                         }
                 }
 
                 if (stc.aggr_mem) {
                         lnf_mem_merge_threads(stc.aggr_mem);
                 }
-
-                /* Check if we read all files. */
-                //if (!stc.rec_limit_reached && primary_errno != E_EOF) {
-                //        //goto finalize_task; //no, we didn't, some problem occured
-                //}
-        } //pragma omp parallel
-
+        }
         /*
          * In case of aggregation or sorting, records were stored into memory
          * and we need to process and send them to master.
