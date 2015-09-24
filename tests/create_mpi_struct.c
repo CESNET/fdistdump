@@ -69,13 +69,13 @@ int main(int argc, char **argv)
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-        create_mpi_struct_agg_param();
-        create_mpi_struct_tm();
+//        create_mpi_struct_agg_param();
+//        create_mpi_struct_tm();
         create_mpi_struct_shared_task_ctx();
 
         free_mpi_struct_shared_task_ctx();
-        free_mpi_struct_tm();
-        free_mpi_struct_agg_param();
+//        free_mpi_struct_tm();
+//        free_mpi_struct_agg_param();
 
         MPI_Finalize();
 

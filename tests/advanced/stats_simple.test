@@ -102,7 +102,7 @@ fi
 #store return code
 ret_code=$?
 
-#rm -f $G_FDD_RESULTS $G_NFD_RESULTS
+rm -f $G_FDD_RESULTS $G_NFD_RESULTS
 
 # check return code from comparison
 if [ $ret_code -eq 0 ]; then
