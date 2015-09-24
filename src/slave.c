@@ -224,7 +224,6 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                                 break; //record limit reached
                         }
 
-
                         /* Clear buffer context variables. */
                         db_off = 0;
                         db_rec_cntr = 0;
@@ -234,7 +233,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
 
                 stats_update(&stats, rec); //increment private stats counters
 
-                db[db_off] = rec_size;
+                *(uint32_t *)(db + db_off) = rec_size;
                 db_off += sizeof (rec_size);
 
                 /* Loop through the fields and fill the data buffer. */

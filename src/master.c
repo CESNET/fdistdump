@@ -269,6 +269,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
         MPI_Status status;
 
         size_t rec_cntr = 0; //processed records
+        size_t byte_cntr = 0; //received bytes
         bool limit_exceeded = false;
 
 
@@ -335,6 +336,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                 if (msg_size == 0) {
                         continue; //empty message -> slave finished
                 }
+                byte_cntr += msg_size;
 
                 rec_ptr = db[slave_idx][db_idx[slave_idx]]; //first record
                 msg_end = rec_ptr + msg_size; //end of the last record
@@ -375,6 +377,8 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
 free_db_mem:
         free(db_mem);
 
+        print_debug("<irecv_loop> processed %zu records, received %zu bytes",
+                        rec_cntr, byte_cntr);
         return primary_errno;
 }
 
