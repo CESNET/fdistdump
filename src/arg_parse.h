@@ -80,9 +80,9 @@ struct cmdline_args {
 };
 
 
-/** \brief Parse command line arguments and fill params struct.
+/** \brief Parse command line arguments and fill parameters structure.
  *
- * If all arguments are successfuly parsed and stored, E_OK is returned.
+ * If all arguments are successfully parsed and stored, E_OK is returned.
  * If help or version was required, help string is printed and E_PASS is
  * returned.
  * On error (invalid options or arguments, ...), error string is printed and

@@ -63,7 +63,7 @@
 extern int secondary_errno;
 
 enum { //command line options, have to start above ASCII
-        OPT_NO_FAST_TOPN = 256, //disable fast topn-N algorithm
+        OPT_NO_FAST_TOPN = 256, //disable fast top-N algorithm
 
         OPT_OUTPUT_FORMAT, //output (print) format
         OPT_OUTPUT_TS_CONV, //output timestamp conversion
@@ -83,8 +83,8 @@ enum { //command line options, have to start above ASCII
 
 static const char *const date_formats[] = {
         "%Y-%m-%d", //standard date, 2015-12-31
-        "%d.%m.%Y", //european, 31.12.2015
-        "%m/%d/%Y", //american, 12/31/2015
+        "%d.%m.%Y", //European, 31.12.2015
+        "%m/%d/%Y", //American, 12/31/2015
 };
 
 static const char *const time_formats[] = {
@@ -123,14 +123,15 @@ static int str_yes_or_no(const char *str)
  * time_formats[] or UTC flag is set, if token matches to one of utc_strings[].
  * If none of these categories is detected, E_ARG is returned.
  * Time structure is overwritten by parsed-out values. If more then one valid
+ /// TODO kdy je vhodne povolit vice nez jeden token stejne kategorie?
  * token of the same category is found, the later one is used. If only date is
  * found in time_str, used time is 00:00. If only time is found in time_str,
  * date used is today. If both date and time is present, both is used.
- * If string is successfuly parsed, E_OK is returned. On error, content
+ * If string is successfully parsed, E_OK is returned. On error, content
  * of tm structure is undefined and E_ARG is returned.
  *
  * \param[in] time_str Time string, usually gathered from command line.
- * \param[out] utc Set it one of utc_strings[] is found.
+ * \param[out] utc Set if one of utc_strings[] is found.
  * \param[out] tm Time structure filled with parsed-out time and date.
  * \return Error code. E_OK or E_ARG.
  */
@@ -195,7 +196,7 @@ next_token:
  * interval_end with appropriate values on success. Beginning and ending dates
  * (and times) are  separated with INTERVAL_DELIM, if ending date is not
  * specified, current time is used.
- * If interval string is successfuly parsed, E_OK is returned. On error, content
+ * If interval string is successfully parsed, E_OK is returned. On error, content
  * of interval_begin and interval_end is undefined and E_ARG is returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
@@ -271,8 +272,9 @@ static error_code_t set_time_interval(struct cmdline_args *args,
                 return E_ARG;
         }
 
-        /* Align begining time to closest greater rotation interval. */
+        /* Align beginning time to closest greater rotation interval. */
         while (mktime_utc(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL){
+                /// TODO tm_sec rozsah 0-59(resp. 61) - preteceni?
                 args->interval_begin.tm_sec++;;
         }
 
@@ -362,7 +364,7 @@ static error_code_t add_fields_from_str(struct field_info *fields,
                         return E_ARG;
                 }
 
-                /* There are some limitations on aggreagation key. */
+                /* There are some limitations on aggregation key. */
                 if (is_aggr_key) {
                         if (fld >= LNF_FLD_CALC_BPS &&
                                         fld <= LNF_FLD_CALC_BPP) {
@@ -465,8 +467,11 @@ static error_code_t set_sort_field(struct field_info *fields, char *sort_str)
  * aggregation, sort and limit. Therefore statistic string is expected as
  * "fields[/sort_key]". Aggregation fields are set. If sort key isn't present,
  * DEFAULT_STAT_SORT_KEY is used. Record limit will be overwritten by
+ /// TODO toto bych nedelal, myslim ze je spatne zadavat povinne poradi parametru
+ /// inicializujme limit na DEFAULT_STAT_REC_LIMIT hned na zacatku a pak uz na nej
+ /// sahejme jen v pripade parametru -l
  * DEFAULT_STAT_REC_LIMIT. It is possible to alter limit, but -l have to
- * appear after -s on command line. If statistic string is successfuly parsed,
+ * appear after -s on command line. If statistic string is successfully parsed,
  * E_OK is returned. On error, E_ARG is returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
@@ -521,10 +526,10 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_str)
 
 /** \brief Check and save filter expression string.
  *
- * Function checks filter by initialising it using libnf lnf_filter_init(). If
- * filter syntax is correct, pointer to filter string is stored in args struct
- * and E_OK is returned. Otherwise args struct remains untouched and E_ARG is
- * returned.
+ * Function checks filter by initializing it using libnf lnf_filter_init(). If
+ * filter syntax is correct, pointer to filter string is stored in arguments
+ * structure and E_OK is returned. Otherwise arguments structure remains
+ * untouched and E_ARG is returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
@@ -556,8 +561,8 @@ static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
  *
  * Function converts limit string into unsigned integer. If string is correct
  * and conversion was successful, args->rec_limit is set and E_OK is returned.
- * On error (overflow, invalid characters, negative value, ...) args struct is
- * kept untouched and E_ARG is returned.
+ * On error (overflow, invalid characters, negative value, ...) arguments
+ * structure is kept untouched and E_ARG is returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
@@ -763,7 +768,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         while (true) {
                 opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
                 if (opt == -1) {
-                        break; //all options processed successfuly
+                        break; //all options processed successfully
                 }
 
                 switch (opt) {
@@ -876,6 +881,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 }
         }
 
+        /// TODO ?positional?
         if (optind != argc) { //remaining arguments
                 print_err(E_ARG, 0, "unknown positional argument \"%s\"",
                                 argv[optind]);
@@ -884,6 +890,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         }
 
         /* Correct data input check. */
+        /// TODO parameter -i
         if (input_arg_cnt == 0) {
                 print_err(E_ARG, 0, "missing data input specifier (-i or -r)");
                 fprintf(stderr, usage_string);
@@ -893,6 +900,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 fprintf(stderr, usage_string);
                 return E_ARG;
         }
+        /// TODO vypise chybu i pri path_str == NULL
         if (args->path_str && (strlen(args->path_str) >= PATH_MAX)) {
                 print_err(E_ARG, 0, "path string too long (limit is %lu)",
                                 PATH_MAX);
@@ -927,6 +935,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                  * Reasons to disable fast top-N algorithm:
                  * - user request by command line argument
                  * - no record limit (all records would be exchanged anyway)
+         /// TODO "stored field"/"traffic volume fields" misto "statistical field"?
                  * - sort key isn't statistical field (flows, pkts, bytes, ...)
                  */
                 if (args->rec_limit == 0) {

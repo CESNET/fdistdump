@@ -69,7 +69,7 @@ int main(int argc, char **argv)
         struct cmdline_args args = {0};
 
         /*
-         * Init MPI and check suported thread level. We need at least
+         * Initialize MPI and check supported thread level. We need at least
          * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
          * OpenMPI doc says: "It is only lightly tested and likely does not work
          * for thread-intensive applications."

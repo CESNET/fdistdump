@@ -284,7 +284,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
          * There are two buffers for each slave. The first one is passed to
          * nonblocking MPI receive function, the second one is processed at the
          * same time. After both these operations are completed, buffers are
-         * switched. Buffer switching (toggling) is independet for each slave,
+         * switched. Buffer switching (toggling) is independent for each slave,
          * that's why array db_idx[slave_cnt] is needed.
          * db_mem is partitioned in db in the following manner:
          *
@@ -310,7 +310,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
         memset(db_idx, 0, slave_cnt * sizeof (db_idx[0]));
 
         /* Start first individual nonblocking data receive from every slave. */
-        for (size_t i = 0; i < slave_cnt ; ++i) {
+        for (size_t i = 0; i < slave_cnt; ++i) {
                 uint8_t *free_buff = db[i][db_idx[i]]; //shortcut
 
                 MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1, TAG_DATA,
@@ -345,7 +345,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                                 MPI_BYTE, status.MPI_SOURCE, TAG_DATA,
                                 MPI_COMM_WORLD, &requests[slave_idx]);
 
-                if (limit_exceeded) {
+                if (limit_exceeded) {/// TODO ceka se kvuli statistikam? budou potom statistiky korektni?
                         continue; //do not process but continue receiving
                 }
 
