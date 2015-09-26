@@ -165,7 +165,6 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
                 for (size_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
                         ret = strptime(token, date_formats[i], &garbage);
                         if (ret != NULL && *ret == '\0') {
-                                printf("date format: %s\n", date_formats[i]);
                                 /* Conversion succeeded, fill real struct tm. */
                                 strptime(token, date_formats[i], tm);
                                 goto next_token;
