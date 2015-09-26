@@ -213,22 +213,31 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
 
                 /* Is there enough space in the buffer for the next record? */
                 if (db_off + rec_size + sizeof (rec_size) > XCHG_BUFF_SIZE) {
+                        /* Check record limit and break if exceeded. */
+                        if (stc->rec_limit_reached) {
+                                db_rec_cntr = 0;
+                                break; //record limit reached by another thread
+                        }
+
                         isend_bytes(db, db_off, &request);
                         file_sent_bytes += db_off;
 
-                        /* Increment shared counter and check record limit. */
+                        /* Increment shared counter. */
                         #pragma omp atomic
                         stc->proc_rec_cntr += db_rec_cntr;
-                        if (stc->shared.rec_limit && stc->proc_rec_cntr >=
-                                        stc->shared.rec_limit) {
-                                break; //record limit reached
-                        }
 
                         /* Clear buffer context variables. */
                         db_off = 0;
                         db_rec_cntr = 0;
                         db_mem_idx = !db_mem_idx; //toggle data buffers
                         db = db_mem[db_mem_idx];
+
+                        /* Check record limit again and break if exceeded. */
+                        if (stc->shared.rec_limit && stc->proc_rec_cntr >=
+                                        stc->shared.rec_limit) {
+                                stc->rec_limit_reached = true;
+                                break; //record limit reached by this thread
+                        }
                 }
 
                 stats_update(&stats, rec); //increment private stats counters
@@ -260,7 +269,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 stc->rec_limit_reached = true;
         /* Otherwise check if EOF was reached. */
         } else if (secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF; //no, we didn't, a problem occured
+                primary_errno = E_LNF; //no it wasn't, a problem occured
         }
 
         stats_share(&stc->stats, &stats); //atomic increment of shared stats
@@ -575,6 +584,7 @@ static error_code_t fast_topn_send_loop(struct slave_task_ctx *stc)
         assert(sort_key != LNF_SORT_NONE);
 
         /* Compute threshold from sort key of Nth record. */
+        //TODO: handle also ascending order
         secondary_errno = lnf_mem_read_c(stc->aggr_mem, read_cursor, rec);
         assert(secondary_errno != LNF_EOF);
         if (secondary_errno == LNF_OK) {

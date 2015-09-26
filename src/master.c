@@ -347,7 +347,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                                 MPI_BYTE, status.MPI_SOURCE, TAG_DATA,
                                 MPI_COMM_WORLD, &requests[slave_idx]);
 
-                if (limit_exceeded) {/// TODO ceka se kvuli statistikam? budou potom statistiky korektni?
+                if (limit_exceeded) {
                         continue; //do not process but continue receiving
                 }
 
@@ -408,6 +408,7 @@ static error_code_t mode_list_main(const struct master_task_ctx *mtc)
                         print_rec_callback, NULL);
 
         /* Receive statistics from every slave, print them. */
+        //TODO: stats with record limit are incorrect
         stats_recv(&stats, mtc->slave_cnt);
         print_stats(&stats);
 

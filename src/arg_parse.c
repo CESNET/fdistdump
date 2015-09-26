@@ -942,18 +942,18 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 }
         }
 
-        /// TODO ?positional?
-        if (optind != argc) { //remaining arguments
-                print_err(E_ARG, 0, "unknown positional argument \"%s\"",
+
+        /* Non-option arguments are undesirable. */
+        if (optind != argc) {
+                print_err(E_ARG, 0, "unknown non-option argument \"%s\"",
                                 argv[optind]);
                 fprintf(stderr, usage_string);
                 return E_ARG;
         }
 
         /* Correct data input check. */
-        /// TODO parameter -i
         if (input_arg_cnt == 0) {
-                print_err(E_ARG, 0, "missing data input specifier (-i or -r)");
+                print_err(E_ARG, 0, "missing data input specifier (-r or -t)");
                 fprintf(stderr, usage_string);
                 return E_ARG;
         } else if (input_arg_cnt > 1) {
@@ -961,7 +961,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 fprintf(stderr, usage_string);
                 return E_ARG;
         }
-        /// TODO vypise chybu i pri path_str == NULL
+
         if (args->path_str && (strlen(args->path_str) >= PATH_MAX)) {
                 print_err(E_ARG, 0, "path string too long (limit is %lu)",
                                 PATH_MAX);
@@ -974,6 +974,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 args->rec_limit = 0;
         }
 
+        /* Set some mode specific defaluts. */
         switch (args->working_mode) {
         case MODE_LIST:
                 if (!have_fields) {
@@ -998,16 +999,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                         E_OK);
                 }
 
-                /* Fast top-N makes sense only under certain conditions.
-                 * Reasons to disable fast top-N algorithm:
-                 * - user request by command line argument
-                 * - no record limit (all records would be exchanged anyway)
-         /// TODO "stored field"/"traffic volume fields" misto "statistical field"?
-                 * - sort key isn't statistical field (flows, pkts, bytes, ...)
-                 */
-                if (args->rec_limit == 0) {
-                        args->use_fast_topn = false;
-                }
                 /* Find sort key in fields. */
                 for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
                         if (args->fields[i].flags & LNF_SORT_FLAGS) {
@@ -1015,8 +1006,16 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 break;
                         }
                 }
-                /* Only statistical items makes sense. */
-                if (sort_key <LNF_FLD_DOCTETS || sort_key >LNF_FLD_AGGR_FLOWS) {
+
+                /* Fast top-N makes sense only under certain conditions. Reasons
+                 * to disable fast top-N algorithm are:
+                 * - user request by command line argument
+                 * - no record limit (all records would be exchanged anyway)
+                 * - sort key isn't one of traffic volume fields (data octets,
+                 *   packets, out bytes, out packets and aggregated flows)
+                 */
+                if (args->rec_limit == 0 || sort_key < LNF_FLD_DOCTETS ||
+                                sort_key > LNF_FLD_AGGR_FLOWS) {
                         args->use_fast_topn = false;
                 }
 
@@ -1029,7 +1028,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 assert(!"unknown working mode");
         }
 
-        /* Set default output parameters. */
+
+        /* Set default output format and conversion parameters. */
         if (args->output_params.format == OUTPUT_FORMAT_UNSET) {
                 args->output_params.format = OUTPUT_FORMAT_PRETTY;
         }
