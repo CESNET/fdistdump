@@ -525,15 +525,11 @@ static error_code_t set_sort_field(struct field_info *fields, char *sort_str)
 /** \brief Parse statistic string and save parameters.
  *
  * Function tries to parse statistic string. Statistic is only shortcut for
- * aggregation, sort and limit. Therefore statistic string is expected as
+ * aggregation, sort and limit. Therefore, statistic string is expected as
  * "fields[/sort_key]". Aggregation fields are set. If sort key isn't present,
- * DEFAULT_STAT_SORT_KEY is used. Record limit will be overwritten by
- /// TODO toto bych nedelal, myslim ze je spatne zadavat povinne poradi parametru
- /// inicializujme limit na DEFAULT_STAT_REC_LIMIT hned na zacatku a pak uz na nej
- /// sahejme jen v pripade parametru -l
- * DEFAULT_STAT_REC_LIMIT. It is possible to alter limit, but -l have to
- * appear after -s on command line. If statistic string is successfully parsed,
- * E_OK is returned. On error, E_ARG is returned.
+ * DEFAULT_STAT_SORT_KEY is used. Record limit will be set to
+ * DEFAULT_STAT_REC_LIMIT in case it was not set previously. If statistic string
+ * is successfully parsed, E_OK is returned. On error, E_ARG is returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
@@ -579,7 +575,10 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_str)
                 return E_ARG;
         }
 
-        args->rec_limit = DEFAULT_STAT_REC_LIMIT; //overwrite limit
+        /* If record limit is unset, set it to DEFAULT_STAT_REC_LIMIT. */
+        if (args->rec_limit == SIZE_MAX) {
+                args->rec_limit = DEFAULT_STAT_REC_LIMIT;
+        }
 
         return E_OK;
 }
@@ -652,7 +651,7 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
                 return E_ARG;
         }
 
-        args->rec_limit = (size_t)limit;
+        args->rec_limit = limit; //will never reach SIZE_MAX (hopefully)
 
         return E_OK;
 }
@@ -823,6 +822,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
         /* Set argument default values. */
         args->use_fast_topn = true;
+        args->rec_limit = SIZE_MAX; //SIZE_MAX means record limit is unset
 
 
         /* Loop through all the command-line arguments. */
@@ -966,6 +966,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 print_err(E_ARG, 0, "path string too long (limit is %lu)",
                                 PATH_MAX);
                 return E_ARG;
+        }
+
+
+        /* If record limit was not set, disable record limit. */
+        if (args->rec_limit == SIZE_MAX) {
+                args->rec_limit = 0;
         }
 
         switch (args->working_mode) {
