@@ -46,7 +46,7 @@
 #ifndef FLOOKUP_H
 #define FLOOKUP_H
 
-#define F_ARRAY_RESIZE_AMOUNT       50
+#define F_ARRAY_RESIZE_AMOUNT 50
 
 #include "common.h"
 
@@ -54,14 +54,14 @@
 
 /* linked list of file names */
 typedef struct f_item_s {
-    char *f_name;
-    off_t f_size;
+        char *f_name;
+        off_t f_size;
 } f_item;
 
-typedef struct f_array_s{
-    f_item *f_items;
-    size_t f_cnt;
-    size_t a_size;
+typedef struct f_array_s {
+        f_item *f_items;
+        size_t f_cnt;
+        size_t a_size;
 } f_array_t;
 
 
@@ -75,7 +75,7 @@ error_code_t f_array_add(f_array_t *fa, char *f_name, off_t f_size);
 //error_code_t flist_push(flist_t **fl, char *f_name);
 //error_code_t flist_pop(flist_t **fl, char *f_buff);
 //size_t flist_count(flist_t **fl);
-error_code_t flist_lookup_files_time(f_array_t *fa, char *time_expr);
-error_code_t flist_lookup_files_path(f_array_t *fa, char *path);
+error_code_t f_array_fill_from_time(f_array_t *fa, char *time_expr);
+error_code_t f_array_fill_from_path(f_array_t *fa, char *path);
 
 #endif

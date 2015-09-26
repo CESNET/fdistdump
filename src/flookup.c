@@ -70,8 +70,8 @@ void f_array_init(f_array_t *fa)
 /* free all allocated filenames-array memory*/
 void f_array_free(f_array_t *fa)
 {
-        for (size_t i = 0; i < fa->f_cnt; ++i){
-                free (fa->f_items[i].f_name);
+        for (size_t i = 0; i < fa->f_cnt; ++i) {
+                free(fa->f_items[i].f_name);
         }
 
         free(fa->f_items);
@@ -86,9 +86,9 @@ error_code_t f_array_resize(f_array_t *fa)
         f_item *new_array;
 
         /// TODO consider of removing this, allocate F_ARRAY_RESIZE_AMOUNT right away
-        if (fa->a_size == 0){ // first record, allocate memory only for one file
-                fa->f_items = malloc(sizeof(f_item));
-                if (fa->f_items == NULL){
+        if (fa->a_size == 0) { // first record, allocate memory only for one file
+                fa->f_items = malloc(sizeof (f_item));
+                if (fa->f_items == NULL) {
                         return E_MEM;
                 }
                 fa->a_size = 1;
@@ -112,10 +112,10 @@ error_code_t f_array_resize(f_array_t *fa)
 /* add filename-item into filename-array */
 error_code_t f_array_add(f_array_t *fa, char *f_name, off_t f_size)
 {
-        if (fa->f_cnt == fa->a_size){
+        if (fa->f_cnt == fa->a_size) {
                 error_code_t ret = f_array_resize(fa);
-                if (ret != E_OK){
-                    return ret;
+                if (ret != E_OK) {
+                        return ret;
                 }
         }
 
@@ -131,8 +131,8 @@ error_code_t f_array_add(f_array_t *fa, char *f_name, off_t f_size)
         return E_OK;
 }
 
-/* lookup all files according to time range expression */
-error_code_t flist_lookup_files_time(f_array_t *fa, char *time_expr)
+/* fill file array by file names according to time range expression */
+error_code_t f_array_fill_from_time(f_array_t *fa, char *time_expr)
 {
         (void) fa;
         (void) time_expr;
@@ -140,10 +140,9 @@ error_code_t flist_lookup_files_time(f_array_t *fa, char *time_expr)
         return E_OK;
 }
 
-/* lookup all files according to path expression */
-error_code_t flist_lookup_files_path(f_array_t *fa, char *path)
+/* fill file array by file names according to path expression */
+error_code_t f_array_fill_from_path(f_array_t *fa, char *path)
 {
-
         DIR *dirp;
         struct dirent *dp;
         struct stat fs_buff;
@@ -173,7 +172,6 @@ error_code_t flist_lookup_files_path(f_array_t *fa, char *path)
 
                 /// TODO consider NORMAL profiles dir structure here ------>>>
                 /* get all relevant filenames */
-
                 while ((dp = readdir(dirp)) != NULL) {
                         /* ignore file names starting with dot */
                         /// TODO ignore unwanted subprofiles dirs OR
@@ -182,8 +180,8 @@ error_code_t flist_lookup_files_path(f_array_t *fa, char *path)
                                 strcpy(new_path, path);
                                 strcat(new_path, "/");
                                 strcat(new_path, dp->d_name);
-                                error_code_t ret = flist_lookup_files_path(fa,
-                                                                    new_path);
+                                error_code_t ret = f_array_fill_from_path(fa,
+                                                new_path);
                                 if (ret != E_OK) {
                                         return ret;
                                 }
@@ -197,16 +195,17 @@ error_code_t flist_lookup_files_path(f_array_t *fa, char *path)
 }
 
 /*
-int main(void) {
+int main(void)
+{
         f_array_t files;
 
         f_array_init(&files);
 
         flist_lookup_files_path(&files, "..");
 
-        for (size_t i = 0; i < files.f_cnt; ++i){
-              printf("Processing: %s (%zu)\n", files.f_items[i].f_name,
-                                            files.f_items[i].f_size);
+        for (size_t i = 0; i < files.f_cnt; ++i) {
+                printf("Processing: %s (%zu)\n", files.f_items[i].f_name,
+                                files.f_items[i].f_size);
         }
 
         f_array_free(&files);

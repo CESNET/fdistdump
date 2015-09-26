@@ -87,7 +87,6 @@ struct slave_task_ctx {
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
         char path_str[PATH_MAX]; //file or directory path string
-        f_array_t files;
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
@@ -139,13 +138,10 @@ static void stats_send(struct stats *s)
 }
 
 
-static error_code_t task_send_file(struct slave_task_ctx *stc,
-                                   const size_t f_index)
+static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
-
-        char *path = stc->files.f_items[f_index].f_name; // shortcut
 
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
@@ -291,12 +287,10 @@ close_file:
 
 
 static error_code_t task_store_file(struct slave_task_ctx *stc,
-                                    const size_t f_index)
+                const char *path)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
-
-        char *path = stc->files.f_items[f_index].f_name; // shortcut
 
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
@@ -371,8 +365,6 @@ static void task_free(struct slave_task_ctx *stc)
         if (stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
         }
-
-        f_array_free(&stc->files);
 }
 
 
@@ -432,8 +424,6 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
         error_code_t primary_errno = E_OK;
 
         assert(stc != NULL);
-
-        f_array_init(&stc->files);
 
         switch (stc->shared.working_mode) {
         case MODE_LIST:
@@ -790,8 +780,10 @@ error_code_t slave(int world_size)
 {
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
+        f_array_t files;
 
         memset(&stc, 0, sizeof (stc));
+        f_array_init(&files);
 
         stc.slave_cnt = world_size - 1; //all nodes without master
 
@@ -806,16 +798,15 @@ error_code_t slave(int world_size)
         if (primary_errno != E_OK) {
                 goto finalize_task;
         }
+
         /* Data source specific initialization. */
         if (stc.shared.path_str_len == 0) {
-//                primary_errno = flist_lookup_files_time(stc.files,
-//                                                        stc.time_expr);
+                //primary_errno = f_array_fill_from_time(&files, stc.time_expr);
                 if (primary_errno != E_OK) {
                         goto finalize_task;
                 }
         } else {
-                primary_errno = flist_lookup_files_path(&stc.files,
-                                                        stc.path_str);
+                primary_errno = f_array_fill_from_path(&files, stc.path_str);
                 if (primary_errno != E_OK) {
                         goto finalize_task;
                 }
@@ -825,11 +816,13 @@ error_code_t slave(int world_size)
         #pragma omp parallel
         {
                 #pragma omp for
-                for (size_t i = 0; i < stc.files.f_cnt; ++i){
+                for (size_t i = 0; i < files.f_cnt; ++i) {
+                        const char *path = files.f_items[i].f_name;
+
                         if (stc.aggr_mem) {
-                                primary_errno = task_store_file(&stc, i);
+                                primary_errno = task_store_file(&stc, path);
                         } else if (!stc.rec_limit_reached) {
-                                primary_errno = task_send_file(&stc, i);
+                                primary_errno = task_send_file(&stc, path);
                         }
                 }
 
@@ -851,6 +844,8 @@ finalize_task:
                                 MPI_COMM_WORLD);
         }
 
+        f_array_free(&files);
         task_free(&stc);
+
         return primary_errno;
 }
