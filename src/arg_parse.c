@@ -82,14 +82,17 @@ enum { //command line options, have to start above ASCII
 
 
 static const char *const date_formats[] = {
+        /* Date formats. */
         "%Y-%m-%d", //standard date, 2015-12-31
         "%d.%m.%Y", //European, 31.12.2015
         "%m/%d/%Y", //American, 12/31/2015
-};
 
-static const char *const time_formats[] = {
+        /* Time formats. */
         "%H:%M", //23:59
-        "%H:%M", //23:59
+
+        /* Special formats. */
+        "%a", //weekday according to the current locale, abbreviated or full
+        "%b", //month according to the current locale, abbreviated or full
 };
 
 static const char *const utc_strings[] = {
@@ -117,18 +120,22 @@ static int str_yes_or_no(const char *str)
 /** \brief Convert string into tm structure.
  *
  * Function tries to parse time string and fills tm with appropriate values on
- * success. String is split into tokens according to TIME_DELIM delimiter. Each
- * token is converted (from left to right) into one of three categories. Date,
- * if it corresponds to one of date_formats[], time if if corresponds to one of
- * time_formats[] or UTC flag is set, if token matches to one of utc_strings[].
- * If none of these categories is detected, E_ARG is returned.
- * Time structure is overwritten by parsed-out values. If more then one valid
- /// TODO kdy je vhodne povolit vice nez jeden token stejne kategorie?
- * token of the same category is found, the later one is used. If only date is
- * found in time_str, used time is 00:00. If only time is found in time_str,
- * date used is today. If both date and time is present, both is used.
- * If string is successfully parsed, E_OK is returned. On error, content
- * of tm structure is undefined and E_ARG is returned.
+ * success. String is split into tokens according to TIME_DELIM delimiters. Each
+ * token is either converted (from left to right) into date, if it corresponds
+ * to one of date_formats[], or UTC flag is set, if token matches one of
+ * utc_strings[]. If nor date nor UTF flag is detected, E_ARG is returned.
+ *
+ * If NO DATE is given, today is assumed if the given hour is lesser than the
+ * current hour and yesterday is assumed if it is more. If NO TIME is given,
+ * midnight is assumed. If ONLY THE WEEKDAY is given, today is assumed if the
+ * given day is less or equal to the current day and last week if it is more.
+ * If ONLY THE MONTH is given, the current year is assumed if the given month is
+ * less or equal to the current month and last year if it is more and no year is
+ * given.
+ *
+ * Time structure is overwritten by parsed-out values. If string is successfully
+ * parsed, E_OK is returned. On error, content of tm structure is undefined and
+ * E_ARG is returned.
  *
  * \param[in] time_str Time string, usually gathered from command line.
  * \param[out] utc Set if one of utc_strings[] is found.
@@ -140,35 +147,28 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
         char *ret;
         char *token;
         char *saveptr = NULL;
-        struct tm garbage = {0}; //strptime() failure would ruin tm values
+        struct tm garbage; //strptime() failure would ruin tm values
+        struct tm now_tm;
         const time_t now = time(NULL);
 
-        /* Default is today midnight. */
-        localtime_r(&now, tm);
-        tm->tm_sec = 0;
-        tm->tm_min = 0;
-        tm->tm_hour = 0;
+        localtime_r(&now, &now_tm);
+
+        tm->tm_sec = tm->tm_min = tm->tm_hour = INT_MIN;
+        tm->tm_wday = tm->tm_mday = tm->tm_yday = INT_MIN;
+        tm->tm_mon = tm->tm_year = INT_MIN;
+        tm->tm_isdst = -1;
 
         /* Separate time and date in time string. */
         token = strtok_r(time_str, TIME_DELIM, &saveptr); //first token
         while (token != NULL) {
-                /* Try to parse date.*/
+                /* Try to parse date. */
                 for (size_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
                         ret = strptime(token, date_formats[i], &garbage);
                         if (ret != NULL && *ret == '\0') {
+                                printf("date format: %s\n", date_formats[i]);
                                 /* Conversion succeeded, fill real struct tm. */
                                 strptime(token, date_formats[i], tm);
                                 goto next_token;
-                        }
-                }
-
-                /* Try to parse time.*/
-                for (size_t i = 0; i < ARRAY_SIZE(time_formats); ++i) {
-                        ret = strptime(token, time_formats[i], &garbage);
-                        if (ret != NULL && *ret == '\0') {
-                                /* Conversion succeeded, fill real struct tm. */
-                                strptime(token, time_formats[i], tm);
-                                goto next_token; //success
                         }
                 }
 
@@ -186,6 +186,61 @@ next_token:
                 token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
         }
 
+
+        /* Only the weekday is given. */
+        if (tm->tm_wday >= 0 && tm->tm_wday <= 6 && tm->tm_year == INT_MIN &&
+                        tm->tm_mon == INT_MIN && tm->tm_mday == INT_MIN) {
+                tm->tm_year = now_tm.tm_year;
+                tm->tm_mon = now_tm.tm_mon;
+                tm->tm_mday = now_tm.tm_mday -
+                        (now_tm.tm_wday - tm->tm_wday + 7) % 7;
+        }
+
+        /* Only the month is given. */
+        if (tm->tm_mon >= 0 && tm->tm_mon <= 11 && tm->tm_mday == INT_MIN) {
+                if (tm->tm_year == INT_MIN) {
+                        if (tm->tm_mon - now_tm.tm_mon > 0) { //last year
+                                tm->tm_year = now_tm.tm_year - 1;
+                        } else { //this year
+                                tm->tm_year = now_tm.tm_year;
+                        }
+                }
+
+                tm->tm_mday = 1;
+        }
+
+        /* No time is given. */
+        if (tm->tm_hour == INT_MIN) {
+                tm->tm_hour = 0;
+        }
+        if (tm->tm_min == INT_MIN) {
+                tm->tm_min = 0;
+        }
+        if (tm->tm_sec == INT_MIN) {
+                tm->tm_sec = 0;
+        }
+
+        /* No date is given. */
+        if (tm->tm_hour >= 0 && tm->tm_hour <= 23 && tm->tm_mon == INT_MIN &&
+                        tm->tm_mday == INT_MIN && tm->tm_wday == INT_MIN)
+        {
+                tm->tm_mon = now_tm.tm_mon;
+                if (tm->tm_hour - now_tm.tm_hour > 0) { //yesterday
+                        tm->tm_mday = now_tm.tm_mday - 1;
+                } else { //today
+                        tm->tm_mday = now_tm.tm_mday;
+                }
+        }
+
+        /* Fill in the gaps. */
+        if (tm->tm_year == INT_MIN) {
+                tm->tm_year = now_tm.tm_year;
+        }
+        if (tm->tm_mon == INT_MIN) {
+                tm->tm_mon = now_tm.tm_mon;
+        }
+
+        mktime_utc(tm); //normalization
         return E_OK;
 }
 
@@ -196,8 +251,9 @@ next_token:
  * interval_end with appropriate values on success. Beginning and ending dates
  * (and times) are  separated with INTERVAL_DELIM, if ending date is not
  * specified, current time is used.
- * If interval string is successfully parsed, E_OK is returned. On error, content
- * of interval_begin and interval_end is undefined and E_ARG is returned.
+ * If interval string is successfully parsed, E_OK is returned. On error,
+ * content of interval_begin and interval_end is undefined and E_ARG is
+ * returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
@@ -268,13 +324,19 @@ static error_code_t set_time_interval(struct cmdline_args *args,
 
         /* Check interval sanity. */
         if (tm_diff(args->interval_end, args->interval_begin) <= 0) {
+                char begin[255], end[255];
+
+                strftime(begin, sizeof(begin), "%c", &args->interval_begin);
+                strftime(end, sizeof(end), "%c", &args->interval_end);
+
                 print_err(E_ARG, 0, "zero or negative interval duration");
+                print_err(E_ARG, 0, "interval: %s - %s", begin, end);
+
                 return E_ARG;
         }
 
         /* Align beginning time to closest greater rotation interval. */
         while (mktime_utc(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL){
-                /// TODO tm_sec rozsah 0-59(resp. 61) - preteceni?
                 args->interval_begin.tm_sec++;;
         }
 
