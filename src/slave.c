@@ -43,8 +43,6 @@
  *
  */
 
-#define _BSD_SOURCE //d_type
-
 #include "slave.h"
 #include "flookup.h"
 
@@ -782,10 +780,12 @@ error_code_t slave(int world_size)
         struct slave_task_ctx stc;
         f_array_t files;
 
+
         memset(&stc, 0, sizeof (stc));
         f_array_init(&files);
 
         stc.slave_cnt = world_size - 1; //all nodes without master
+
 
         /* Wait for reception of task context from master. */
         primary_errno = task_receive_ctx(&stc);
@@ -801,7 +801,9 @@ error_code_t slave(int world_size)
 
         /* Data source specific initialization. */
         if (stc.shared.path_str_len == 0) {
-                //primary_errno = f_array_fill_from_time(&files, stc.time_expr);
+                primary_errno = f_array_fill_from_time(&files,
+                                stc.shared.interval_begin,
+                                stc.shared.interval_end);
                 if (primary_errno != E_OK) {
                         goto finalize_task;
                 }
@@ -812,10 +814,12 @@ error_code_t slave(int world_size)
                 }
         }
 
+
         //TODO: return codes, secondary_errno
         #pragma omp parallel
         {
-                #pragma omp for
+                /* Parallel loop through all the files. */
+                #pragma omp for schedule(guided)
                 for (size_t i = 0; i < files.f_cnt; ++i) {
                         const char *path = files.f_items[i].f_name;
 
@@ -826,10 +830,12 @@ error_code_t slave(int world_size)
                         }
                 }
 
+                /* Merge thread specific hash tables into one. */
                 if (stc.aggr_mem) {
                         lnf_mem_merge_threads(stc.aggr_mem);
                 }
         }
+
         /*
          * In case of aggregation or sorting, records were stored into memory
          * and we need to process and send them to master.

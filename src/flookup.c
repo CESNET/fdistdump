@@ -56,6 +56,9 @@
 #include <sys/stat.h>
 
 
+#define F_ARRAY_INIT_SIZE 50
+
+
 extern int secondary_errno;
 
 
@@ -84,33 +87,23 @@ void f_array_free(f_array_t *fa)
 error_code_t f_array_resize(f_array_t *fa)
 {
         f_item *new_array;
+        const size_t new_size = (fa->a_size == 0) ?
+                F_ARRAY_INIT_SIZE : fa->a_size * 2;
 
-        /// TODO consider of removing this, allocate F_ARRAY_RESIZE_AMOUNT right away
-        if (fa->a_size == 0) { // first record, allocate memory only for one file
-                fa->f_items = malloc(sizeof (f_item));
-                if (fa->f_items == NULL) {
-                        return E_MEM;
-                }
-                fa->a_size = 1;
-        } else {
-                new_array = realloc(fa->f_items,
-                                    (fa->a_size + F_ARRAY_RESIZE_AMOUNT) *
-                                    sizeof(f_item));
-
-                if (new_array == NULL){
-                        // f_array_free(fa);
-                        return E_MEM;
-                }
-
-                fa->f_items = new_array;
-                fa->a_size += F_ARRAY_RESIZE_AMOUNT;
+        new_array = realloc(fa->f_items, new_size * sizeof (f_item));
+        if (new_array == NULL) {
+                print_err(E_MEM, 0, "realloc()");
+                return E_MEM;
         }
+
+        fa->f_items = new_array;
+        fa->a_size = new_size;
 
         return E_OK;
 }
 
 /* add filename-item into filename-array */
-error_code_t f_array_add(f_array_t *fa, char *f_name, off_t f_size)
+error_code_t f_array_add(f_array_t *fa, const char *f_name, off_t f_size)
 {
         if (fa->f_cnt == fa->a_size) {
                 error_code_t ret = f_array_resize(fa);
@@ -121,27 +114,67 @@ error_code_t f_array_add(f_array_t *fa, char *f_name, off_t f_size)
 
         fa->f_items[fa->f_cnt].f_name = strdup(f_name);
         if (fa->f_items[fa->f_cnt].f_name == NULL) {
+                print_err(E_MEM, 0, "strdup()");
                 return E_MEM;
         }
 
         fa->f_items[fa->f_cnt].f_size = f_size;
-
         fa->f_cnt++;
 
         return E_OK;
 }
 
-/* fill file array by file names according to time range expression */
-error_code_t f_array_fill_from_time(f_array_t *fa, char *time_expr)
+
+/* return number of files in file array */
+size_t f_array_get_count(const f_array_t *fa)
 {
-        (void) fa;
-        (void) time_expr;
+        return fa->f_cnt;
+}
+
+/* return sum of sizes of all files in file array */
+off_t f_array_get_size_sum(const f_array_t *fa)
+{
+        off_t size_sum = 0;
+
+        for (size_t i = 0; i < fa->f_cnt; ++i) {
+                size_sum += fa->f_items[i].f_size;
+        }
+
+        return size_sum;
+}
+
+
+/* fill file array by file names according to time range expression */
+error_code_t f_array_fill_from_time(f_array_t *fa, const struct tm begin,
+                const struct tm end)
+{
+        error_code_t primary_errno = E_OK;
+        char new_path[PATH_MAX] = "";
+        struct tm ctx = begin;
+
+        /* Loop through entire interval. */
+        while (tm_diff(end, ctx) > 0) {
+                /* Construct path string from time. */
+                if (strftime(new_path, PATH_MAX, FLOW_FILE_PATH, &ctx) == 0) {
+                        print_err(E_PATH, 0, "strftime()");
+                        return E_PATH;
+                }
+
+                /* Increment context by rotation interval and normalize. */
+                ctx.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
+                mktime_utc(&ctx);
+
+                primary_errno = f_array_fill_from_path(fa, new_path);
+                if (primary_errno != E_OK) {
+                        return primary_errno;
+                }
+        }
 
         return E_OK;
 }
 
 /* fill file array by file names according to path expression */
-error_code_t f_array_fill_from_path(f_array_t *fa, char *path)
+error_code_t f_array_fill_from_path(f_array_t *fa, const char *path)
 {
         DIR *dirp;
         struct dirent *dp;
@@ -151,14 +184,13 @@ error_code_t f_array_fill_from_path(f_array_t *fa, char *path)
         /* detect file type */
         if (stat(path, &fs_buff) != 0) {
                 secondary_errno = errno;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
-                                path);
-                return E_PATH;
+                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                strerror(errno), path);
+                return E_OK;
         }
 
         /* regular file */
         if (S_ISREG(fs_buff.st_mode)) {
-                /// TODO report size
                 return f_array_add(fa, path, fs_buff.st_size);
 
         /* directory */
