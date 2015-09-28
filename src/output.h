@@ -90,6 +90,12 @@ typedef enum {
 } output_ip_proto_conv_t;
 
 typedef enum {
+        OUTPUT_DURATION_CONV_UNSET,
+        OUTPUT_DURATION_CONV_NONE,
+        OUTPUT_DURATION_CONV_STR,
+} output_duration_conv_t;
+
+typedef enum {
         OUTPUT_SUMMARY_UNSET,
         OUTPUT_SUMMARY_YES,
         OUTPUT_SUMMARY_NO,
@@ -107,6 +113,7 @@ struct output_params {
         output_tcp_flags_conv_t tcp_flags_conv;
         output_ip_addr_conv_t ip_addr_conv;
         output_ip_proto_conv_t ip_proto_conv;
+        output_duration_conv_t duration_conv;
 
         output_summary_t summary;
 };

@@ -72,6 +72,7 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
+        OPT_OUTPUT_DURATION_CONV, //output IP protocol conversion
         OPT_OUTPUT_SUMMARY, //print summary?
 
         OPT_FIELDS, //specification of listed fields
@@ -752,6 +753,22 @@ static error_code_t set_output_ip_proto_conv(struct output_params *op,
         return E_OK;
 }
 
+static error_code_t set_output_duration_conv(struct output_params *op,
+                char *duration_conv_str)
+{
+        if (strcmp(duration_conv_str, "none") == 0) {
+                op->duration_conv = OUTPUT_DURATION_CONV_NONE;
+        } else if (strcmp(duration_conv_str, "str") == 0) {
+                op->duration_conv = OUTPUT_DURATION_CONV_STR;
+        } else {
+                print_err(E_ARG, 0, "unknown duration conversion string \"%s\"",
+                                duration_conv_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
 static error_code_t set_output_summary(struct output_params *op,
                 char *summary_str)
 {
@@ -809,6 +826,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         OPT_OUTPUT_IP_ADDR_CONV},
                 {"output-proto-conv", required_argument, NULL,
                         OPT_OUTPUT_IP_PROTO_CONV},
+                {"output-duration-conv", required_argument, NULL,
+                        OPT_OUTPUT_DURATION_CONV},
                 {"output-summary", required_argument, NULL, OPT_OUTPUT_SUMMARY},
 
                 {"fields", required_argument, NULL, OPT_FIELDS},
@@ -907,6 +926,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 case OPT_OUTPUT_IP_PROTO_CONV:
                         primary_errno = set_output_ip_proto_conv(
+                                        &args->output_params, optarg);
+                        break;
+
+                case OPT_OUTPUT_DURATION_CONV:
+                        primary_errno = set_output_duration_conv(
                                         &args->output_params, optarg);
                         break;
 
@@ -1064,6 +1088,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_IP_PROTO_CONV_STR;
                 }
 
+                if (args->output_params.duration_conv ==
+                                OUTPUT_DURATION_CONV_UNSET) {
+                        args->output_params.duration_conv =
+                                OUTPUT_DURATION_CONV_STR;
+                }
+
                 if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
                         args->output_params.summary = OUTPUT_SUMMARY_YES;
                 }
@@ -1094,6 +1124,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_IP_PROTO_CONV_UNSET) {
                         args->output_params.ip_proto_conv =
                                 OUTPUT_IP_PROTO_CONV_NONE;
+                }
+
+                if (args->output_params.duration_conv ==
+                                OUTPUT_DURATION_CONV_UNSET) {
+                        args->output_params.duration_conv =
+                                OUTPUT_DURATION_CONV_NONE;
                 }
 
                 if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
