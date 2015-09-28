@@ -371,6 +371,7 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
         assert(filter != NULL && filter_str != NULL && strlen(filter_str) != 0);
 
         /* Initialize filter. */
+        //TODO: try new filter
         secondary_errno = lnf_filter_init(filter, filter_str);
         //secondary_errno = lnf_filter_init_v2(filter, filter_str);
         if (secondary_errno != LNF_OK) {
@@ -779,6 +780,7 @@ error_code_t slave(int world_size)
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
         f_array_t files;
+        size_t tmp;
 
 
         memset(&stc, 0, sizeof (stc));
@@ -814,6 +816,10 @@ error_code_t slave(int world_size)
                 }
         }
 
+        /* Report number of files to be processed. */
+        MPI_Reduce(&files.f_cnt, &tmp, 1, MPI_UNSIGNED_LONG, MPI_SUM, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
 
         //TODO: return codes, secondary_errno
         #pragma omp parallel
@@ -828,6 +834,10 @@ error_code_t slave(int world_size)
                         } else if (!stc.rec_limit_reached) {
                                 primary_errno = task_send_file(&stc, path);
                         }
+
+                        /* Report that another file has been processed. */
+                        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
+                                        MPI_COMM_WORLD);
                 }
 
                 /* Merge thread specific hash tables into one. */

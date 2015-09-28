@@ -101,6 +101,7 @@ typedef enum { //working modes
 enum { //tags
         TAG_DATA, //message contains data (records)
         TAG_STATS, //message contains statistics
+        TAG_PROGRESS, //message containg progress info
 };
 /**
  * @}

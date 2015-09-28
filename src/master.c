@@ -222,7 +222,8 @@ static error_code_t recv_loop(size_t slave_cnt, size_t rec_limit,
         int rec_len = 0;
         uint8_t rec_buff[LNF_MAX_RAW_LEN]; //TODO: receive mutliple records
         MPI_Status status;
-        size_t rec_cntr = 0, active_slaves = slave_cnt; //every slave is active
+        size_t rec_cntr = 0;
+        size_t active_slaves = slave_cnt; //every slave is active
         bool limit_exceeded = false;
 
         /* Data receiving loop. */
@@ -537,8 +538,34 @@ free_aggr_mem:
 }
 
 
+void print_progress(void)
+{
+        size_t files = 0;
+
+        //TODO: MPI methods are not thread safe
+        /* Receive number of files to be processed. */
+        MPI_Reduce(MPI_IN_PLACE, &files, 1, MPI_UNSIGNED_LONG,
+                        MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
+
+        fprintf(stderr, "files processed: %zu/%zu (%u %%)\r", 0ul, files, 0u);
+        fflush(stderr);
+
+        for (size_t i = 0; i < files; ++i) {
+                /* Receive processed file report. */
+                MPI_Recv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
+                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                fprintf(stderr, "files processed: %zu/%zu (%.0f %%)\r", i + 1,
+                                files, ((double)i / files) * 100.0);
+                fflush(stderr);
+        }
+        //fprintf(stderr, "\n");
+}
+
+
 error_code_t master(int world_size, const struct cmdline_args *args)
 {
+        error_code_t primary_errno = E_OK;
         struct master_task_ctx mtc;
 
         memset(&mtc, 0, sizeof (mtc));
@@ -562,22 +589,39 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         }
 
 
-        /* Send, receive, process. */
-        switch (mtc.shared.working_mode) {
-        case MODE_PASS: //only termination msg will be received from each slave
-        case MODE_LIST:
-                return mode_list_main(&mtc);
+        #pragma omp parallel sections num_threads(2)
+        {
+                #pragma omp section
+                {
+                        if (mtc.shared.working_mode != MODE_PASS) {
+                                print_progress();
+                        }
+                }
 
-        case MODE_SORT:
-                return mode_sort_main(&mtc);
+                #pragma omp section
+                {
+                        /* Send, receive, process. */
+                        switch (mtc.shared.working_mode) {
+                                case MODE_PASS:
+                                        //only termination message will be
+                                        //received from each slave
+                                case MODE_LIST:
+                                        primary_errno = mode_list_main(&mtc);
+                                        break;
 
-        case MODE_AGGR:
-                return mode_aggr_main(&mtc);
+                                case MODE_SORT:
+                                        primary_errno = mode_sort_main(&mtc);
+                                        break;
 
-        default:
-                assert(!"unknown working mode");
+                                case MODE_AGGR:
+                                        primary_errno = mode_aggr_main(&mtc);
+                                        break;
+
+                                default:
+                                        assert(!"unknown working mode");
+                        }
+                }
         }
 
-
-        assert(!"master()");
+        return primary_errno;
 }
