@@ -56,10 +56,10 @@
 typedef struct f_item_s {
         char *f_name;
         off_t f_size;
-} f_item;
+} f_item_t;
 
 typedef struct f_array_s {
-        f_item *f_items;
+        f_item_t *f_items;
         size_t f_cnt;
         size_t a_size;
 } f_array_t;
