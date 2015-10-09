@@ -378,7 +378,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
 free_db_mem:
         free(db_mem);
 
-        print_debug("<irecv_loop> processed %zu records, received %zu bytes",
+        print_debug("<irecv_loop> processed %zu records, received %zu B",
                         rec_cntr, byte_cntr);
         return primary_errno;
 }
@@ -461,7 +461,7 @@ static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
                         goto free_lnf_rec;
                 }
         } else { //fast ordering, minimum of records exchanged
-                primary_errno = recv_loop(mtc->slave_cnt, 0,
+                primary_errno = irecv_loop(mtc->slave_cnt, 0,
                                 mem_write_raw_callback, mwcd.mem);
                 if (primary_errno != E_OK) {
                         goto free_lnf_rec;
@@ -496,7 +496,7 @@ static error_code_t mode_aggr_main(const struct master_task_ctx *mtc)
                 return primary_errno;
         }
 
-        primary_errno = recv_loop(mtc->slave_cnt, 0, mem_write_raw_callback,
+        primary_errno = irecv_loop(mtc->slave_cnt, 0, mem_write_raw_callback,
                         aggr_mem);
         if (primary_errno != E_OK) {
                 goto free_aggr_mem;
