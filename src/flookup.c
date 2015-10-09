@@ -86,11 +86,11 @@ void f_array_free(f_array_t *fa)
 /* resize filenames-array */
 error_code_t f_array_resize(f_array_t *fa)
 {
-        f_item *new_array;
+        f_item_t *new_array;
         const size_t new_size = (fa->a_size == 0) ?
                 F_ARRAY_INIT_SIZE : fa->a_size * 2;
 
-        new_array = realloc(fa->f_items, new_size * sizeof (f_item));
+        new_array = realloc(fa->f_items, new_size * sizeof (f_item_t));
         if (new_array == NULL) {
                 print_err(E_MEM, 0, "realloc()");
                 return E_MEM;
