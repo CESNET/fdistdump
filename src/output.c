@@ -942,3 +942,56 @@ void print_stats(const struct stats *stats)
         printf("%s bytes", stat_to_str(&stats->bytes));
         putchar('\n');
 }
+
+void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
+                progress_bar_t type)
+{
+        size_t sum_cur = 0;
+        size_t sum_tot = 0;
+        FILE *out_stream;
+
+
+        for (size_t i = 0; i < cnt; ++i) {
+                sum_cur += cur[i];
+                sum_tot += tot[i];
+        }
+
+        if (type == PROGRESS_BAR_BASIC || type == PROGRESS_BAR_EXTENDED) {
+                out_stream = stderr;
+
+                fprintf(out_stream, "[progress] ");
+                fprintf(out_stream, "master: %zu/%zu (%.0f %%)", sum_cur,
+                                sum_tot, (double)sum_cur / sum_tot * 100);
+
+                if (type == PROGRESS_BAR_EXTENDED) {
+                        for (size_t i = 0; i < cnt; ++i) {
+                                fprintf(out_stream, " | %zu: %zu/%zu (%.0f %%)",
+                                                i + 1, cur[i], tot[i],
+                                                (double)cur[i] / tot[i] * 100);
+                        }
+                }
+
+                putc('\r', out_stream);
+                fflush(out_stream);
+        }
+
+        if (type == PROGRESS_BAR_FILE) {
+                out_stream = fopen("progress.json", "w");
+                assert(out_stream != NULL);
+
+                putc('{', out_stream);
+
+                fprintf(out_stream, "\"master\":%.0f",
+                                (double)sum_cur / sum_tot * 100);
+
+                for (size_t i = 0; i < cnt; ++i) {
+                        fprintf(out_stream, ",\"%zu\":%.0f", i + 1,
+                                        (double)cur[i] / tot[i] * 100);
+                }
+
+                putc('}', out_stream);
+                putc('\n', out_stream);
+
+                fclose(out_stream);
+        }
+}

@@ -76,6 +76,7 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_SUMMARY, //print summary?
 
         OPT_FIELDS, //specification of listed fields
+        OPT_PROGRESS_BAR, //specification of listed fields
 
         OPT_HELP, //print help
         OPT_VERSION, //print version
@@ -788,6 +789,26 @@ static error_code_t set_output_summary(struct output_params *op,
         return E_OK;
 }
 
+static error_code_t set_progress_bar(progress_bar_t *progress_bar,
+                const char *progress_bar_str)
+{
+        if (strcmp(progress_bar_str, "none") == 0) {
+                *progress_bar = PROGRESS_BAR_NONE;
+        } else if (strcmp(progress_bar_str, "basic") == 0) {
+                *progress_bar = PROGRESS_BAR_BASIC;
+        } else if (strcmp(progress_bar_str, "extended") == 0) {
+                *progress_bar = PROGRESS_BAR_EXTENDED;
+        } else if (strcmp(progress_bar_str, "file") == 0) {
+                *progress_bar = PROGRESS_BAR_FILE;
+        } else {
+                print_err(E_ARG, 0, "unknown progress bar type \"%s\"",
+                                progress_bar_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
 
 error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 {
@@ -831,6 +852,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"output-summary", required_argument, NULL, OPT_OUTPUT_SUMMARY},
 
                 {"fields", required_argument, NULL, OPT_FIELDS},
+                {"progress-bar", required_argument, NULL, OPT_PROGRESS_BAR},
 
                 {"help", no_argument, NULL, OPT_HELP},
                 {"version", no_argument, NULL, OPT_VERSION},
@@ -946,6 +968,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         have_fields = true;
                         break;
 
+                case OPT_PROGRESS_BAR:
+                        primary_errno = set_progress_bar(&args->progress_bar,
+                                        optarg);
+                        break;
+
 
                 case OPT_HELP: //help
                         printf(usage_string);
@@ -997,6 +1024,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         if (args->rec_limit == SIZE_MAX) {
                 args->rec_limit = 0;
         }
+
+        /* If progress bar type was not set, enable basic progress bar. */
+        if (args->progress_bar == PROGRESS_BAR_UNSET) {
+                args->progress_bar = PROGRESS_BAR_BASIC;
+        }
+
 
         /* Set some mode specific defaluts. */
         switch (args->working_mode) {

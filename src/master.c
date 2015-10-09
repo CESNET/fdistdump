@@ -538,28 +538,43 @@ free_aggr_mem:
 }
 
 
-void print_progress(void)
+void progress_bar(progress_bar_t type, size_t slave_cnt)
 {
-        size_t files = 0;
+        size_t files_slave_cur[slave_cnt];
+        size_t files_slave_sum[slave_cnt];
+        size_t files_all_sum = 0;
+
+        MPI_Status status;
+
 
         //TODO: MPI methods are not thread safe
         /* Receive number of files to be processed. */
-        MPI_Reduce(MPI_IN_PLACE, &files, 1, MPI_UNSIGNED_LONG,
-                        MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Gather(MPI_IN_PLACE, 0, NULL, files_slave_sum - 1, 1,
+                        MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
+        for (size_t i = 0; i < slave_cnt; ++i) {
+                files_all_sum += files_slave_sum[i];
+                files_slave_cur[i] = 0;
+        }
 
-        fprintf(stderr, "files processed: %zu/%zu (%u %%)\r", 0ul, files, 0u);
-        fflush(stderr);
 
-        for (size_t i = 0; i < files; ++i) {
+        if (type != PROGRESS_BAR_NONE) {
+                print_progress_bar(files_slave_cur, files_slave_sum, slave_cnt,
+                                type);
+        }
+
+        for (size_t i = 0; i < files_all_sum; ++i) {
                 /* Receive processed file report. */
                 MPI_Recv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
-                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                                MPI_COMM_WORLD, &status);
+                files_slave_cur[status.MPI_SOURCE - 1]++;
 
-                fprintf(stderr, "files processed: %zu/%zu (%.0f %%)\r", i + 1,
-                                files, ((double)i / files) * 100.0);
-                fflush(stderr);
+                if (type == PROGRESS_BAR_NONE) {
+                        break;
+                }
+
+                print_progress_bar(files_slave_cur, files_slave_sum, slave_cnt,
+                                type);
         }
-        //fprintf(stderr, "\n");
 }
 
 
@@ -594,7 +609,7 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                 #pragma omp section
                 {
                         if (mtc.shared.working_mode != MODE_PASS) {
-                                print_progress();
+                                progress_bar(args->progress_bar, mtc.slave_cnt);
                         }
                 }
 

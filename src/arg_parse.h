@@ -51,6 +51,7 @@
 #include <stddef.h> //size_t
 #include <stdbool.h>
 
+
 #define STAT_DELIM "/" //statistic/order
 #define INTERVAL_DELIM "#" //begin#end
 #define SORT_DELIM "#" //flows#asc
@@ -61,6 +62,7 @@
 #define DEFAULT_AGGR_FIELDS "duration,flows,pkts,bytes,bps,pps,bpp"
 #define DEFAULT_STAT_SORT_KEY "flows"
 #define DEFAULT_STAT_REC_LIMIT 10
+
 
 //TODO: include shared_task_ctx
 struct cmdline_args {
@@ -76,7 +78,9 @@ struct cmdline_args {
         struct tm interval_end; //end of time interval
 
         bool use_fast_topn; //enables fast top-N algorithm
+
         struct output_params output_params; //output (printing) parameters
+        progress_bar_t progress_bar;
 };
 
 

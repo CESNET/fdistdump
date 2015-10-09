@@ -103,6 +103,14 @@ enum { //tags
         TAG_STATS, //message contains statistics
         TAG_PROGRESS, //message containg progress info
 };
+
+typedef enum { //progress bar type
+        PROGRESS_BAR_UNSET,
+        PROGRESS_BAR_NONE,
+        PROGRESS_BAR_BASIC,
+        PROGRESS_BAR_EXTENDED,
+        PROGRESS_BAR_FILE,
+} progress_bar_t;
 /**
  * @}
  */ //common_enum

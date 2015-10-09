@@ -780,7 +780,6 @@ error_code_t slave(int world_size)
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
         f_array_t files;
-        size_t tmp;
 
 
         memset(&stc, 0, sizeof (stc));
@@ -817,8 +816,8 @@ error_code_t slave(int world_size)
         }
 
         /* Report number of files to be processed. */
-        MPI_Reduce(&files.f_cnt, &tmp, 1, MPI_UNSIGNED_LONG, MPI_SUM, ROOT_PROC,
-                        MPI_COMM_WORLD);
+        MPI_Gather(&files.f_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0,
+                        MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
 
 
         //TODO: return codes, secondary_errno
