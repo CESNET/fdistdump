@@ -1,8 +1,10 @@
-AC_PREREQ([2.69])
+#initialization
 AC_INIT([fdistdump], [0.1], [], [], [https://github.com/CESNET/fdistdump])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror])
-AC_CONFIG_SRCDIR([config.h.in])
 AC_CONFIG_HEADERS([config.h])
+
+#create Makefiles
+AC_CONFIG_FILES([Makefile src/Makefile tests/Makefile tests/advanced/Makefile])
 
 #check for compiler
 AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
@@ -11,12 +13,10 @@ CFLAGS="$CFLAGS -pedantic -W -Wall -Wextra -Winit-self -Wcast-align \
 -Wcast-qual -Wmissing-include-dirs -Wshadow"
 AM_PROG_CC_C_O
 
-# Checks for programs.
-AC_PROG_AWK
+#checks for programs
 AC_PROG_INSTALL
-AC_PROG_MAKE_SET
 
-# Checks for libraries.
+#checks for libraries
 AC_SEARCH_LIBS([lnf_open], [nf], [], [AC_MSG_ERROR([unable to find the libnf \
                 library])])
 
@@ -32,40 +32,42 @@ AC_OPENMP
 CFLAGS="$CFLAGS $OPENMP_CFLAGS"
 CPPFLAGS="$CPPFLAGS $OPENMP_CFLAGS"
 
-# Checks for header files.
-AC_CHECK_HEADERS([arpa/inet.h inttypes.h limits.h stddef.h stdlib.h string.h sys/socket.h unistd.h])
+#checks for header files
+AC_CHECK_HEADERS([arpa/inet.h assert.h dirent.h errno.h getopt.h inttypes.h \
+                  libnf.h limits.h mpi.h omp.h stdarg.h stdbool.h stddef.h \
+                  stdio.h stdlib.h string.h sys/stat.h time.h unistd.h])
 
-# Checks for typedefs, structures, and compiler characteristics.
-AC_CHECK_HEADER_STDBOOL
+
+#checks for typedefs, structures, and compiler characteristics
 AC_C_INLINE
+AC_TYPE_OFF_T
 AC_TYPE_SIZE_T
+AC_TYPE_UINT8_T
 AC_TYPE_UINT16_T
 AC_TYPE_UINT32_T
 AC_TYPE_UINT64_T
-AC_TYPE_UINT8_T
 
-# Checks for library functions.
+#checks for library functions
 AC_FUNC_MALLOC
-AC_FUNC_MKTIME
 AC_FUNC_REALLOC
-AC_CHECK_FUNCS([localtime_r memset setenv strdup strerror strtol strtoull tzset])
+AC_FUNC_MKTIME
 
-AC_CONFIG_FILES([Makefile
-                 src/Makefile
-                 tests/Makefile
-                 tests/advanced/Makefile])
-AC_ARG_ENABLE([tests], AC_HELP_STRING([--disable-tests],[Compile with testing modules]),
+#define arguments
+AC_ARG_ENABLE([tests], AC_HELP_STRING([--disable-tests],
+              [enable testing modules (enabled by default)]),
         [AM_CONDITIONAL([ENABLE_TESTS], [test "x$enableval" = xyes])],
         [AM_CONDITIONAL([ENABLE_TESTS], [true])])
 
-AC_ARG_ENABLE([advanced-tests], AC_HELP_STRING([--enable-advanced-tests], [Run advanced tests (--enable-tests must be used for any effect)]),
+AC_ARG_ENABLE([advanced-tests], AC_HELP_STRING([--enable-advanced-tests],
+              [enable advanced testsing modules, requires --enable-tests (disabled by default)]),
         [AM_CONDITIONAL([ENABLE_ADV_TESTS], [test "x$enableval" = xyes])],
         [AM_CONDITIONAL([ENABLE_ADV_TESTS], [false])])
 
+#check if we can run advanced tests
 if test -z "$ENABLE_ADV_TESTS_TRUE";then
         AC_PROG_SED
         if test -z "$SED"; then
-                AC_MSG_WARN(["sed" is not installed (needed by advanced tests).])
+                AC_MSG_WARN(["sed" is not installed (needed by advanced tests)])
                 if test ! -z "$__SKIP_ADVANCED"; then
                         __SKIP_ADVANCED+="\" and \""
                 fi
@@ -74,7 +76,7 @@ if test -z "$ENABLE_ADV_TESTS_TRUE";then
 
         AC_PROG_AWK
         if test -z "$AWK"; then
-                AC_MSG_WARN(["awk" is not installed (needed by advanced tests).])
+                AC_MSG_WARN(["awk" is not installed (needed by advanced tests)])
                 if test ! -z "$__SKIP_ADVANCED"; then
                         __SKIP_ADVANCED+="\" and \""
                 fi
@@ -83,7 +85,7 @@ if test -z "$ENABLE_ADV_TESTS_TRUE";then
 
         AC_CHECK_PROGS([CUT], [cut], [])
         if test -z "$CUT"; then
-                AC_MSG_WARN(["cut" is not installed (needed by advanced tests).])
+                AC_MSG_WARN(["cut" is not installed (needed by advanced tests)])
                 if test ! -z "$__SKIP_ADVANCED"; then
                         __SKIP_ADVANCED+="\" and \""
                 fi
@@ -92,7 +94,7 @@ if test -z "$ENABLE_ADV_TESTS_TRUE";then
 
         AC_CHECK_PROGS([NFD], [nfdump], [])
         if test -z "$NFD"; then
-                AC_MSG_WARN(["nfdump" is not installed (needed by advanced tests).])
+                AC_MSG_WARN(["nfdump" is not installed (needed by advanced tests)])
                 if test ! -z "$__SKIP_ADVANCED"; then
                         __SKIP_ADVANCED+="\" and \""
                 fi
@@ -115,11 +117,6 @@ echo
 echo
 echo "Configuration Options Summary:"
 echo
-#echo "  ASM.(32 bit only)..: $ASM"
-#echo "  Static binary......: $static"
-#echo
-#echo "Documentation..........: `if test "x$DX_FLAG_doc" = x1; then echo enabled; else echo disabled; fi`"
-#echo
 echo "Compilation............: make (or gmake)"
 echo "  CPPFLAGS.............: $CPPFLAGS"
 echo "  CFLAGS...............: $CFLAGS"
@@ -129,11 +126,21 @@ echo
 echo "Installation...........: make install (as root if needed, with 'su' or 'sudo')"
 echo "  prefix...............: $prefix"
 echo
-echo "Tests..................: `if [[ -z "$ENABLE_TESTS_TRUE" ]]; then echo enabled; else echo disabled; fi`"
-echo "Advanced tests.........: `if [[ -z "$ENABLE_ADV_TESTS_TRUE" ]]; then echo enabled; else echo disabled; fi`"
-if test -z "$ENABLE_ADV_TESTS_TRUE";then
-        if test ! -z "$__SKIP_ADVANCED"; then
-                echo "  Advanced tests will be skipped since \"$__SKIP_ADVANCED\" is not installed."
+echo "Tests..................: `if [[ -z "$ENABLE_TESTS_TRUE" ]]; then \
+        echo enabled; else echo disabled; fi`"
+
+if test -z "$ENABLE_ADV_TESTS_TRUE"
+then
+        ADV_STR="enabled"
+else
+        ADV_STR="disabled"
+
+        if test ! -z "$__SKIP_ADVANCED"
+        then
+                ADV_STR+=" (missing "
+                ADV_STR+=$__SKIP_ADVANCED
+                ADV_STR+=")"
         fi
 fi
+echo "Advanced tests.........: $ADV_STR"
 echo
