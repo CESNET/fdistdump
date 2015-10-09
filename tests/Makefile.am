@@ -1,9 +1,19 @@
-TESTS = mpi_init.test create_mpi_struct.test arguments.test mem_init.test mem_setup.test mem_store_print.test
+if ENABLE_ADV_TESTS
+if !SKIP_ADVANCED_TESTS
+SUBDIRS=advanced
+endif
+endif
+
+TESTS=mpi_init.test create_mpi_struct.test arguments.test mem_init.test mem_setup.test
+
+#mem_store_print.test
 #EXTRA_DIST =
 
-#check_PROGRAMS =
+check_PROGRAMS=mpi_init create_mpi_struct arguments mem_init mem_setup
+#mem_store_print
 
-bin_PROGRAMS = mpi_init create_mpi_struct arguments mem_init mem_setup mem_store_print create_test_data
+bin_PROGRAMS=mpi_init create_mpi_struct arguments mem_init mem_setup
+#mem_store_print
 
 #AM_LDFLAGS=-lnf
 COM_CPPFLAGS=-I../src
@@ -26,9 +36,11 @@ mem_setup_SOURCES=mem_setup.c test_common.c ../src/common.c \
                   ../src/arg_parse.c
 mem_setup_CPPFLAGS=$(COM_CPPFLAGS)
 
-mem_store_print_SOURCES=mem_store_print.c test_common.c ../src/common.c \
-                  ../src/arg_parse.c
-mem_store_print_CPPFLAGS=$(COM_CPPFLAGS)
+#mem_store_print_SOURCES=mem_store_print.c test_common.c ../src/common.c \
+#                  ../src/arg_parse.c
+#mem_store_print_CPPFLAGS=$(COM_CPPFLAGS)
 
-create_test_data_SOURCES=create_test_data.c test_common.c
-create_test_data_CPPFLAGS=$(COM_CPPFLAGS)
+
+clean-local:
+	rm -f mpi_init create_mpi_struct arguments mem_init mem_setup
+	rm -f *.o

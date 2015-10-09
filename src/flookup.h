@@ -1,10 +1,7 @@
 /**
- * \file create_mpi_struct.c
- * \brief Test of creation of custom MPI structures.
- *
- * This tests creation of custom MPI structures used for communication in
- * FDistDump. Structures are created and filled by testing data TODO.
- *
+ * \file flookup.h
+ * \brief
+ * \author Tomas Podermanski
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
  */
@@ -46,38 +43,39 @@
  *
  */
 
-#include "test_common.h"
-#include "../src/common.h"
+#ifndef FLOOKUP_H
+#define FLOOKUP_H
 
-#include <stdio.h>
-#include <stdlib.h>
 
-#include <mpi.h>
+#include "common.h"
 
-MPI_Datatype mpi_struct_agg_param;
-MPI_Datatype mpi_struct_shared_task_ctx;
-MPI_Datatype mpi_struct_tm;
-int secondary_errno; // unused, declared for ../src/common.c
+#include <stddef.h> //size_t
 
-int main(int argc, char **argv)
-{
-        int world_rank;
-        int world_size;
-        int state = TE_OK;
 
-        MPI_Init(&argc, &argv);
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+/* linked list of file names */
+typedef struct f_item_s {
+        char *f_name;
+        off_t f_size;
+} f_item_t;
 
-//        create_mpi_struct_agg_param();
-//        create_mpi_struct_tm();
-        create_mpi_struct_shared_task_ctx();
+typedef struct f_array_s {
+        f_item_t *f_items;
+        size_t f_cnt;
+        size_t a_size;
+} f_array_t;
 
-        free_mpi_struct_shared_task_ctx();
-//        free_mpi_struct_tm();
-//        free_mpi_struct_agg_param();
 
-        MPI_Finalize();
+/* file list operations */
+void f_array_init(f_array_t *fa);
+void f_array_free(f_array_t *fa);
+error_code_t f_array_resize(f_array_t *fa);
+error_code_t f_array_add(f_array_t *fa, const char *f_name, off_t f_size);
 
-        return state;
-}
+size_t f_array_get_count(const f_array_t *fa);
+off_t f_array_get_size_sum(const f_array_t *fa);
+
+error_code_t f_array_fill_from_time(f_array_t *fa, const struct tm begin,
+                const struct tm end);
+error_code_t f_array_fill_from_path(f_array_t *fa, const char *path);
+
+#endif

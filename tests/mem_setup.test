@@ -44,10 +44,9 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_LOG_FILE=mem_setup.testlog
 TEST_DESC="Memory setup"
 
-rm -f $TEST_LOG_FILE
+
 
 if [ -z $1 ]; then
         proc_cnt=3
@@ -55,15 +54,14 @@ else
         proc_cnt=$1
 fi
 
-
-mpirun -np $proc_cnt ./mem_setup -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f "src port 80 and proto TCP" >>$TEST_LOG_FILE 2>&1
+mpirun -np $proc_cnt ./mem_setup -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f "src port 80 and proto TCP"
 
 if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)." >>$TEST_LOG_FILE
-        echo "     test-args: -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f \"src port 80 and proto TCP\"" >>$TEST_LOG_FILE
+        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
+        echo "     test-args: -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f \"src port 80 and proto TCP\""
         exit 0
 else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)." >>$TEST_LOG_FILE
-        echo "     test-args: -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f \"src port 80 and proto TCP\"" >>$TEST_LOG_FILE
+        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
+        echo "     test-args: -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f \"src port 80 and proto TCP\""
         exit 1
 fi

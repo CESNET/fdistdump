@@ -83,8 +83,7 @@ int main(int argc, char **argv)
                 }
 
                 for (int i = 0; i < 2; ++i){ // try normal and list mode
-                        if (init_aggr_mem(&mem, args.agg_params,
-                                                args.agg_params_cnt) != E_OK) {
+                        if (init_aggr_mem(&mem, args.fields) != E_OK) {
                                 state = TE_ERR;
                                 log_error("mem_setup: memory  init.");
                                 goto done;

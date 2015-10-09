@@ -44,10 +44,9 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_LOG_FILE=mpi_init.testlog
 TEST_DESC="MPI Initialization"
 
-rm -f $TEST_LOG_FILE
+
 
 if [ -z $1 ]; then
         proc_cnt=3
@@ -55,12 +54,12 @@ else
         proc_cnt=$1
 fi
 
-mpirun -np $proc_cnt ./mpi_init -c $proc_cnt >$TEST_LOG_FILE 2>&1
+mpirun -np $proc_cnt ./mpi_init -c $proc_cnt
 
 if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)." >>$TEST_LOG_FILE
+        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
         exit 0
 else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)." >>$TEST_LOG_FILE
+        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
         exit 1
 fi

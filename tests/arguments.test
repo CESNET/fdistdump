@@ -44,11 +44,9 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-
-TEST_LOG_FILE=arguments.testlog
 TEST_DESC="Processing of arguments"
 
-rm -f $TEST_LOG_FILE
+
 
 if [ -z $1 ]; then
         proc_cnt=3
@@ -69,20 +67,20 @@ filter[1]=""
 for i in ${!test_args[@]}; do
 
         if [ -z "${filter[$i]}" ]; then
-                mpirun -np $proc_cnt ./arguments ${test_args[$i]} >>$TEST_LOG_FILE 2>&1
+                mpirun -np $proc_cnt ./arguments ${test_args[$i]}
                 args="${test_args[$i]}"
         else
-                mpirun -np $proc_cnt ./arguments ${test_args[$i]} "${filter[$i]}" >>$TEST_LOG_FILE 2>&1
+                mpirun -np $proc_cnt ./arguments ${test_args[$i]} "${filter[$i]}"
                 args="${test_args[$i]} \"${filter[$i]}\""
         fi
 
 
         if [ $? -eq 0 ]; then
-                echo "${TEST_DESC} was successful (${proc_cnt} processes)." >>$TEST_LOG_FILE
-                echo "     test-args: ${args}" >>$TEST_LOG_FILE
+                echo "${TEST_DESC} was successful (${proc_cnt} processes)."
+                echo "     test-args: ${args}"
         else
-                echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)." >>$TEST_LOG_FILE
-                echo "     test-args: ${args}" >>$TEST_LOG_FILE
+                echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
+                echo "     test-args: ${args}"
                 exit 1
         fi
 done

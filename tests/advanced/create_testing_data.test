@@ -1,11 +1,11 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
 #
-# Description: This tests creation of custom MPI structures. It starts testing
-# binary with given count of processes (first parameter or default value). Test
-# result is evaluated according to return code of test binary.
+# Description: Creation of testing data. This test creates simple file in
+# NFDump format with predefined flows. Created file serves as input file for
+# test queries.
 #
 #
 #
@@ -43,22 +43,33 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_DESC="Creation of MPI datatypes"
+ADV_TESTS_HOME=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+# import common setup
+. ${ADV_TESTS_HOME}/tests_setup.sh
 
-
-if [ -z $1 ]; then
-        proc_cnt=3
-else
-        proc_cnt=$1
+ret_code=$?
+if [[ $ret_code == 77 ]]; then
+      exit 77
+elif [[ $ret_code != 0 ]]; then
+      echo "Error in common setup"
+      exit 1
 fi
 
-mpirun -np $proc_cnt ./create_mpi_struct
+TEST_DESC="Creation of testing data"
 
-if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
-        exit 0
+
+
+${ADV_TESTS_HOME}/create_test_data $G_INPUT_DATA
+
+ret_code=$?
+if [ $ret_code -eq 0 ]; then
+        echo "${TEST_DESC} was successful."
+        echo "     filename: ${G_INPUT_DATA}"
 else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
+        echo "${TEST_DESC} failed - returned $ret_code."
+        echo "     filename: ${G_INPUT_DATA}"
         exit 1
 fi
+
+exit 0

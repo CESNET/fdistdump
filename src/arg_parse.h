@@ -46,36 +46,47 @@
 #define ARG_PARSE_H
 
 #include "common.h"
+#include "output.h"
 
 #include <stddef.h> //size_t
 #include <stdbool.h>
 
-#define AGG_SEPARATOR "," //srcport,srcip
-#define STAT_SEPARATOR "/" //statistic/order
-#define INTERVAL_SEPARATOR "#" //begin#end
 
-#define DEFAULT_STAT_ORD "flows"
-#define DEFAULT_STAT_LIMIT 10
+#define STAT_DELIM "/" //statistic/order
+#define INTERVAL_DELIM "#" //begin#end
+#define SORT_DELIM "#" //flows#asc
+#define TIME_DELIM " \t\n\v\f\r" //whitespace
 
+#define DEFAULT_LIST_FIELDS "first,pkts,bytes,srcip,dstip,srcport,dstport,proto"
+#define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
+#define DEFAULT_AGGR_FIELDS "duration,flows,pkts,bytes,bps,pps,bpp"
+#define DEFAULT_STAT_SORT_KEY "flows"
+#define DEFAULT_STAT_REC_LIMIT 10
+
+
+//TODO: include shared_task_ctx
 struct cmdline_args {
         working_mode_t working_mode; //working mode (records, aggregation, topN)
-
-        struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation parameters
-        size_t agg_params_cnt; //aggregation parameters count
+        struct field_info fields[LNF_FLD_TERM_];
 
         char *filter_str; //filter expression string
+        char *path_str; //path string
+
         size_t rec_limit; //read/aggregate/topN record limit
 
-        char *path_str; //path string
-        struct tm interval_begin, interval_end; //begin and end of interval
+        struct tm interval_begin; //begin of time interval
+        struct tm interval_end; //end of time interval
 
         bool use_fast_topn; //enables fast top-N algorithm
+
+        struct output_params output_params; //output (printing) parameters
+        progress_bar_t progress_bar;
 };
 
 
-/** \brief Parse command line arguments and fill params struct.
+/** \brief Parse command line arguments and fill parameters structure.
  *
- * If all arguments are successfuly parsed and stored, E_OK is returned.
+ * If all arguments are successfully parsed and stored, E_OK is returned.
  * If help or version was required, help string is printed and E_PASS is
  * returned.
  * On error (invalid options or arguments, ...), error string is printed and

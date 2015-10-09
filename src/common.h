@@ -1,6 +1,6 @@
 /**
  * \file common.h
- * \brief
+ * \brief Common fdistdump prototypes, macros, data types, enumerations, etc.
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
@@ -49,16 +49,18 @@
 #include <stddef.h> //size_t
 #include <time.h> //struct tm
 #include <stdbool.h>
+#include <inttypes.h> //exact width integer types
 
 #include <libnf.h>
-#include <mpi.h>
 
-#define MAX_FN_LEN 2048
-#define MAX_AGG_PARAMS 16 //maximum count of -a parameters
+#define ROOT_PROC 0 //MPI root processor number
 
-#define XCHG_BUFF_MAX_SIZE (1024 * 1024) //KiB
-#define XCHG_BUFF_ELEMS (XCHG_BUFF_MAX_SIZE / sizeof(lnf_brec1_t))
-#define XCHG_BUFF_SIZE (XCHG_BUFF_ELEMS * sizeof(lnf_brec1_t))
+#define MAX_STR_LEN 1024 //maximum length of a general string
+
+#define XCHG_BUFF_SIZE (1024 * 1024) //1 KiB
+
+#define FIELDS_DELIM "," //LNF fields delimiter
+#define MAX_LNF_FIELDS (LNF_FLD_TERM_ + 1) //currently 256
 
 //TODO: move to configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
@@ -72,7 +74,10 @@
                 FLOW_FILE_NAME_FORMAT)
 
 
-/* Enumerations. */
+/**
+ * \defgroup common_enum Common enumerations usable everywhere
+ * @{
+ */
 typedef enum { //error return codes
         E_OK, //no error, continue processing
         E_PASS, //no error, no action required
@@ -93,24 +98,48 @@ typedef enum { //working modes
         MODE_PASS, //do nothing
 } working_mode_t;
 
-
-/* Data types. */
-//WATCH OUT: reflect changes also in mpi_struct_agg_param
-#define STRUCT_AGG_PARAM_ELEMS 4
-struct agg_param {
-        int field;
-        int flags;
-        int numbits;
-        int numbits6;
+enum { //tags
+        TAG_DATA, //message contains data (records)
+        TAG_STATS, //message contains statistics
+        TAG_PROGRESS, //message containg progress info
 };
 
-//WATCH OUT: reflect changes also in mpi_struct_shared_task_ctx
-#define STRUCT_TASK_INFO_ELEMS 9
+typedef enum { //progress bar type
+        PROGRESS_BAR_UNSET,
+        PROGRESS_BAR_NONE,
+        PROGRESS_BAR_BASIC,
+        PROGRESS_BAR_EXTENDED,
+        PROGRESS_BAR_FILE,
+} progress_bar_t;
+/**
+ * @}
+ */ //common_enum
+
+
+/**
+ * \defgroup common_struct Common structures usable everywhere
+ * @{
+ */
+struct stats {
+        uint64_t flows;
+        uint64_t pkts;
+        uint64_t bytes;
+};
+
+//XXX: reflect changes also in mpi_struct_shared_task_ctx
+#define STRUCT_FIELD_INFO_ELEMS 4
+struct field_info {
+        int id;
+        int flags;
+        int ipv4_bits;
+        int ipv6_bits;
+};
+
+//XXX: reflect changes also in mpi_struct_shared_task_ctx
+#define STRUCT_SHARED_TASK_CTX_ELEMS 8
 struct shared_task_ctx {
         working_mode_t working_mode; //working mode
-
-        struct agg_param agg_params[MAX_AGG_PARAMS]; //aggregation pamrameters
-        size_t agg_params_cnt; //aggregation parameters count
+        struct field_info fields[LNF_FLD_TERM_]; //present LNF fields
 
         size_t filter_str_len; //filter expression string length
         size_t path_str_len; //path string length
@@ -122,66 +151,106 @@ struct shared_task_ctx {
 
         bool use_fast_topn; //enables fast top-N algorithm
 };
-
-//WATCH OUT: reflect changes in struct tm from time.h also in mpi_struct_tm
-#define STRUCT_TM_ELEMS 9
-
-/* MPI related */
-#define ROOT_PROC 0
-
-enum { //tags
-        TAG_CMD,
-        TAG_TASK,
-        TAG_FILTER,
-        TAG_AGG,
-        TAG_DATA,
-        TAG_STATS,
-};
-
-enum { //control commands
-        CMD_RELEASE,
-};
+/**
+ * @}
+ */ //common_struct
 
 
-/* Function-like macros */
+/**
+ * \defgroup func_like_macros Function-like macros
+ * @{
+ */
+//size of staticly allocated array
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+//size of structure member
+#define MEMBER_SIZE(type, member) (sizeof (((type *)NULL)->member))
 
-/** \brief Print basic record.
+//intergral division with round up, aka ceil()
+#define INT_DIV_CEIL(a, b) (((a) + ((b) - 1)) / (b))
+
+//unsafe macros - double evaluation of arguments with side effects
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX_ASSIGN(a, b) ((a) = (a) > (b) ? (a) : (b))
+#define MIN_ASSIGN(a, b) ((a) = (a) < (b) ? (a) : (b))
+
+//safe, but braced-group within expression is GCC extension forbidden by ISO C
+#if 0
+#define MAX(a, b) \
+        ({ \
+                 __typeof__(a) _a = (a); \
+                 __typeof__(b) _b = (b); \
+                 _a > _b ? _a : _b; \
+         })
+#define MIN(a, b) \
+        ({ \
+                 __typeof__(a) _a = (a); \
+                 __typeof__(b) _b = (b); \
+                 _a > _b ? _a : _b; \
+         })
+#endif
+/**
+ * @}
+ */ //func_like_macros
+
+
+/** \brief Convert working_mode_t working mode to human-readable string.
  *
- * Prints instance of lnf_brec1_t on one line.
- *
- * \param[in] brec Basic record.
- * \return Error code. E_OK or E_INTERNAL.
+ * \return Static string at most MAX_STR_LEN long.
  */
-error_code_t print_brec(const lnf_brec1_t *brec);
+char * working_mode_to_str(working_mode_t working_mode);
 
 
 /** \brief Print error message.
  *
- * Wrapper to fprintf(), add prefix including process rank and name.
+ * Print detailed error information to stderr. Provided format is prefixed by
+ * error cause and MPI process info.
  *
- * \param[in] format Format string passed to fprintf().
+ * \param[in] prim_errno Primary errno.
+ * \param[in] sec_errno Secondary errno.
+ * \param[in] format Format string passed to vfprintf().
  * \param[in] va_list Variable argument list passed to vfprintf().
  */
 void print_err(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
+
+/** \brief Print warning message.
+ *
+ * Print detailed warning information to stderr. Provided format is prefixed by
+ * warning cause and MPI process info.
+ *
+ * \param[in] prim_errno Primary errno.
+ * \param[in] sec_errno Secondary errno.
+ * \param[in] format Format string passed to vfprintf().
+ * \param[in] va_list Variable argument list passed to vfprintf().
+ */
 void print_warn(error_code_t prim_errno, int sec_errno,
                 const char *format, ...);
+
+/** \brief Print debug message.
+ *
+ * If DEBUG is defined, print provided debug string to stdout. Format is
+ * prefixed by MPI process info. If DEBUG is not defined, function will do
+ * nothing.
+ *
+ * \param[in] format Format string passed to vfprintf().
+ * \param[in] va_list Variable argument list passed to vfprintf().
+ */
 void print_debug(const char *format, ...);
 
-char * working_mode_to_str(working_mode_t working_mode);
 
-void create_mpi_struct_agg_param(void);
-void free_mpi_struct_agg_param(void);
-void create_mpi_struct_tm(void);
-void free_mpi_struct_tm(void);
+/** \brief Construct MPI structure mpi_struct_shared_task_ctx.
+ *
+ * Global variable MPI_Datatype mpi_struct_shared_task_ctx is constructed as
+ * mirror to struct shared_task_ctx. Every change to struct shared_task_ctx must
+ * be reflected.
+ */
 void create_mpi_struct_shared_task_ctx(void);
+
+/** \brief Destruct MPI structure mpi_struct_shared_task_ctx.
+ */
 void free_mpi_struct_shared_task_ctx(void);
-
-
-error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit);
-error_code_t print_stat_mem(lnf_mem_t *mem);
 
 
 /** \brief Initialize LNF aggregation memory.
@@ -190,33 +259,16 @@ error_code_t print_stat_mem(lnf_mem_t *mem);
  * allocated, therefore have to be freed by free_aggr_mem().
  *
  * \param[inout] mem Pointer to pointer to LNF memory structure.
- * \return E_OK on success, error code otherwise.
+ * \param[in] fields LNF fields and theirs parameters.
+ * \return E_OK on success, E_LNF on error.
  */
-error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
-                size_t ap_cnt);
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields);
 
 /** \brief Free LNF aggregation memory.
  *
  * \param[inout] mem Pointer to LNF memory structure.
  */
 void free_aggr_mem(lnf_mem_t *mem);
-
-/** \brief Initialize LNF memory for traffic volume statistics.
- *
- * This memory is used for computing sum of flows, bytes and packets of all
- * processed records. mem will be allocated, therefore have to be freed by
- * free_aggr_mem().
- *
- * \param[inout] mem Pointer to pointer to LNF memory structure.
- * \return E_OK on success, error code otherwise.
- */
-error_code_t init_stat_mem(lnf_mem_t **mem);
-
-/** \brief Free LNF memory for traffic volume statistics.
- *
- * \param[inout] mem Pointer to LNF memory structure.
- */
-void free_stat_mem(lnf_mem_t *mem);
 
 
 /** \brief Yield the time difference between a and b.
@@ -247,5 +299,9 @@ int tm_diff(const struct tm a, const struct tm b);
  * \return Calendar time representation of tm.
  */
 time_t mktime_utc(struct tm *tm);
+
+
+int field_get_type(int field);
+size_t field_get_size(int field);
 
 #endif //COMMON_H

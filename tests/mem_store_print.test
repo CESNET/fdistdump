@@ -45,10 +45,9 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_LOG_FILE=mem_store_print.testlog
 TEST_DESC="Store records in memory and print them"
 
-rm -f $TEST_LOG_FILE
+
 
 if [ -z $1 ]; then
         proc_cnt=3
@@ -68,60 +67,68 @@ bytes="2000"
 tStart="1433222111000"
 tEnd="1433222666000"
 
-test_args="-c ${recCnt} -s ${srcIP} -S ${srcPort} -d ${dstIP} -D ${dstPort} -P ${proto} -f ${flows} -p ${pkts} -b ${bytes} -t ${tStart} -T ${tEnd}"
+tStart_pretty="2015-06-02 05:15:11.0"
+tEnd_pretty="2015-06-02 05:24:26.0"
 
-mpirun -np $proc_cnt ./mem_store_print $test_args >tmp_res 2>$TEST_LOG_FILE
+mpirun -np $proc_cnt ./mem_store_print -c ${recCnt} -s ${srcIP} -S ${srcPort} \
+        -d ${dstIP} -D ${dstPort} -P ${proto} -f ${flows} -p ${pkts} \
+        -b ${bytes} -t "${tStart}" -T "${tEnd}" >tmp_res
 
 
 if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)." >>$TEST_LOG_FILE
+        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
 else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)." >>$TEST_LOG_FILE
+        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
         exit 1
 fi
 
-for (( i=1; i<=$recCnt; i++ )); do
-        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $1}')
-        if [ "$x" != "$tStart" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, time_start)." >>$TEST_LOG_FILE
+for (( i=2; i<=$recCnt; i++ )); do
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $1, $2}')
+        if [ "$x" != "$tStart_pretty" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, time_start)."
                 exit 1
         fi
-        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $3}')
-        if [ "$x" != "$tEnd" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, time_end)." >>$TEST_LOG_FILE
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $3, $4}')
+        if [ "$x" != "$tEnd_pretty" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, time_end)."
                 exit 1
         fi
-        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $4}' | cut -d ":" -f1)
-        if [ "$x" != "$srcIP" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, src_ip)." >>$TEST_LOG_FILE
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $5}')
+        if [ "$x" != "$bytes" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, bytes)."
                 exit 1
         fi
-        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $4}' | cut -d ":" -f2)
-        if [ "$x" != "$srcPort" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, src_port)." >>$TEST_LOG_FILE
-                exit 1
-        fi
-        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $6}' | cut -d ":" -f1)
-        if [ "$x" != "$dstIP" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, dst_ip)." >>$TEST_LOG_FILE
-                exit 1
-        fi
-        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $6}' | cut -d ":" -f2)
-        if [ "$x" != "$dstPort" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, dst_port)." >>$TEST_LOG_FILE
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $6}')
+        if [ "$x" != "$pkts" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, packets)."
                 exit 1
         fi
         x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $7}')
-        if [ "$x" != "$pkts" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, packets)." >>$TEST_LOG_FILE
+        if [ "$x" != "$flows" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, packets)."
                 exit 1
         fi
         x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $8}')
-        if [ "$x" != "$bytes" ]; then
-                echo "${TEST_DESC}: bad result (line ${i}, bytes)." >>$TEST_LOG_FILE
+        if [ "$x" != "$srcPort" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, src_port)."
+                exit 1
+        fi
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $9}')
+        if [ "$x" != "$dstPort" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, dst_port)."
+                exit 1
+        fi
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $10}')
+        if [ "$x" != "$srcIP" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, src_ip)."
+                exit 1
+        fi
+        x=$(cat tmp_res | head -n $i | tail -n 1 | awk '{print $11}')
+        if [ "$x" != "$dstIP" ]; then
+                echo "${TEST_DESC}: bad result (line ${i}, dst_ip)."
                 exit 1
         fi
 done
 
-echo "${TEST_DESC}: results OK." >>$TEST_LOG_FILE
+echo "${TEST_DESC}: results OK."
 exit 0

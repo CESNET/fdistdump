@@ -43,9 +43,8 @@
  *
  */
 
-#define _BSD_SOURCE //d_type
-
 #include "slave.h"
+#include "flookup.h"
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -54,7 +53,6 @@
 #include <errno.h>
 #include <limits.h> //PATH_MAX
 #include <unistd.h> //access
-#include <stdint.h>
 
 #include <mpi.h>
 #include <omp.h>
@@ -62,6 +60,14 @@
 #include <dirent.h> //list directory
 #include <sys/stat.h> //stat()
 
+
+#if LNF_MAX_RAW_LEN > XCHG_BUFF_SIZE
+#error "LNF_MAX_RAW_LEN > XCHG_BUFF_SIZE"
+#endif
+
+#if LNF_MAX_RAW_LEN > UINT32_MAX
+#error "LNF_MAX_RAW_LEN > UINT32_MAX"
+#endif
 
 #define LOOKUP_CURSOR_INIT_SIZE 1024
 
@@ -81,47 +87,223 @@ typedef enum {
 /* Thread shared. */
 struct slave_task_ctx {
         /* Master and slave shared task context. Received from master. */
-        struct shared_task_ctx ms_shared; //master-slave shared
+        struct shared_task_ctx shared; //master-slave shared
 
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
-        lnf_mem_t *stat_mem; //LNF memory used for computation of statistics
         lnf_filter_t *filter; //LNF compiled filter expression
-        data_source_t data_source; //how flow files are obtained
         char path_str[PATH_MAX]; //file or directory path string
-        DIR *dir_ctx; //used in case of directory as data source
-        bool no_more_files; //true if there is no more files to read
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
+        struct stats stats;
 };
 
 
-static void isend_bytes(void *src, size_t bytes, MPI_Request *req)
+static void isend_bytes(void *data, size_t data_size, MPI_Request *req)
 {
         /* Lack of MPI_THREAD_MULTIPLE threading level implies this CS. */
         #pragma omp critical (mpi)
         {
                 MPI_Wait(req, MPI_STATUS_IGNORE);
-                MPI_Isend(src, bytes, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                MPI_Isend(data, data_size, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD, req);
         }
 }
 
 
-static error_code_t task_process_file(struct slave_task_ctx *stc,
+static void stats_update(struct stats *s, lnf_rec_t *rec)
+{
+        uint64_t tmp;
+
+        lnf_rec_fget(rec, LNF_FLD_AGGR_FLOWS, &tmp);
+        s->flows += tmp;
+
+        lnf_rec_fget(rec, LNF_FLD_DPKTS, &tmp);
+        s->pkts += tmp;
+
+        lnf_rec_fget(rec, LNF_FLD_DOCTETS, &tmp);
+        s->bytes += tmp;
+}
+
+static void stats_share(struct stats *shared, struct stats *private)
+{
+        #pragma omp atomic
+        shared->flows += private->flows;
+
+        #pragma omp atomic
+        shared->pkts += private->pkts;
+
+        #pragma omp atomic
+        shared->bytes += private->bytes;
+}
+
+static void stats_send(struct stats *s)
+{
+        MPI_Send(s, 3, MPI_UINT64_T, ROOT_PROC, TAG_STATS, MPI_COMM_WORLD);
+}
+
+
+static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
+{
+        error_code_t primary_errno = E_OK;
+        int secondary_errno;
+
+        size_t file_rec_cntr = 0;
+        size_t file_proc_rec_cntr = 0;
+        size_t file_sent_bytes = 0;
+
+        uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
+        bool db_mem_idx = 0; //currently used data buffer index
+        uint8_t *db = db_mem[db_mem_idx]; //pointer to currently used data buff
+        size_t db_off = 0; //data buffer offset
+        size_t db_rec_cntr = 0; //number of records in current buffer
+
+        MPI_Request request = MPI_REQUEST_NULL;
+        lnf_file_t *file;
+        lnf_rec_t *rec;
+        uint32_t rec_size = 0;
+
+        struct stats stats = {0};
+        struct {
+                int id;
+                size_t size;
+        } fast_fields[LNF_FLD_TERM_];//fields array compressed for faster access
+        size_t fast_fields_cnt = 0;
+
+
+        /* Open flow file. */
+        secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno, "unable to open file \"%s\"",
+                                path);
+                return E_LNF;
+        }
+
+        //TODO: no longer using OMP tasks
+        /* Initialize LNF record. Have to be unique in each OMP task. */
+        secondary_errno = lnf_rec_init(&rec);
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                goto close_file;
+        }
+
+        /* Fill fast fields array and calculate constant record size. */
+        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+                if (stc->shared.fields[i].id == 0) {
+                        continue; //field is not present
+                }
+                fast_fields[fast_fields_cnt].id = i;
+                rec_size += fast_fields[fast_fields_cnt].size =
+                        field_get_size(i);
+                fast_fields_cnt++;
+        }
+
+        /*
+         * Read all records from file. Hot path.
+         * No aggregation -> store record to buffer.
+         * Send buffer, if buffer full, otherwise continue reading.
+         */
+        while ((secondary_errno = lnf_read(file, rec)) == LNF_OK) {
+                file_rec_cntr++;
+
+                /* Apply filter (if there is any). */
+                if (stc->filter && !lnf_filter_match(stc->filter, rec)) {
+                        continue;
+                }
+                file_proc_rec_cntr++;
+
+                /* Is there enough space in the buffer for the next record? */
+                if (db_off + rec_size + sizeof (rec_size) > XCHG_BUFF_SIZE) {
+                        /* Check record limit and break if exceeded. */
+                        if (stc->rec_limit_reached) {
+                                db_rec_cntr = 0;
+                                break; //record limit reached by another thread
+                        }
+
+                        isend_bytes(db, db_off, &request);
+                        file_sent_bytes += db_off;
+
+                        /* Increment shared counter. */
+                        #pragma omp atomic
+                        stc->proc_rec_cntr += db_rec_cntr;
+
+                        /* Clear buffer context variables. */
+                        db_off = 0;
+                        db_rec_cntr = 0;
+                        db_mem_idx = !db_mem_idx; //toggle data buffers
+                        db = db_mem[db_mem_idx];
+
+                        /* Check record limit again and break if exceeded. */
+                        if (stc->shared.rec_limit && stc->proc_rec_cntr >=
+                                        stc->shared.rec_limit) {
+                                stc->rec_limit_reached = true;
+                                break; //record limit reached by this thread
+                        }
+                }
+
+                stats_update(&stats, rec); //increment private stats counters
+
+                *(uint32_t *)(db + db_off) = rec_size;
+                db_off += sizeof (rec_size);
+
+                /* Loop through the fields and fill the data buffer. */
+                for (size_t i = 0; i < fast_fields_cnt; ++i) {
+                        lnf_rec_fget(rec, fast_fields[i].id, db + db_off);
+                        db_off += fast_fields[i].size;
+                }
+
+                db_rec_cntr++;
+        }
+
+        /* Send remaining records if data buffer is not empty. */
+        if (db_rec_cntr != 0) {
+                isend_bytes(db, db_off, &request);
+                file_sent_bytes += db_off;
+
+                #pragma omp atomic
+                stc->proc_rec_cntr += db_rec_cntr; //increment shared counter
+        }
+
+        /* Eventually set record limit reached flag. */
+        if (stc->shared.rec_limit && stc->proc_rec_cntr >=
+                        stc->shared.rec_limit) {
+                stc->rec_limit_reached = true;
+        /* Otherwise check if EOF was reached. */
+        } else if (secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF; //no it wasn't, a problem occured
+        }
+
+        stats_share(&stc->stats, &stats); //atomic increment of shared stats
+
+        lnf_rec_free(rec);
+close_file:
+        lnf_close(file);
+
+        /* Buffers will be invalid after return, wait for send to complete. */
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+
+        print_debug("<task_send_file> thread %d, file %s, read %zu, "
+                        "processed %zu, sent %zu B", omp_get_thread_num(),
+                        path, file_rec_cntr, file_proc_rec_cntr,
+                        file_sent_bytes);
+
+        return primary_errno;
+}
+
+
+static error_code_t task_store_file(struct slave_task_ctx *stc,
                 const char *path)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
+
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
-        lnf_brec1_t data_buff[2][XCHG_BUFF_ELEMS];
-        size_t data_idx = 0;
-        bool buff_idx = 0;
-        MPI_Request request = MPI_REQUEST_NULL;
         lnf_file_t *file;
         lnf_rec_t *rec;
+        struct stats stats = {0};
 
         /* Open flow file. */
         secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
@@ -139,7 +321,11 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                 goto close_file;
         }
 
-        /* Read all records from file. */
+        /*
+         * Read all records from file. Hot path.
+         * Aggreagation -> write record to memory and continue.
+         * Ignore record limit.
+         */
         while ((secondary_errno = lnf_read(file, rec)) == LNF_OK) {
                 file_rec_cntr++;
 
@@ -147,171 +333,45 @@ static error_code_t task_process_file(struct slave_task_ctx *stc,
                 if (stc->filter && !lnf_filter_match(stc->filter, rec)) {
                         continue;
                 }
-                stc->proc_rec_cntr++;
                 file_proc_rec_cntr++;
+                stats_update(&stats, rec); //increment private stats counters
 
-                /*
-                 * Aggreagation -> write record to memory and continue.
-                 * Ignore record limit.
-                 */
-                if (stc->aggr_mem) {
-                        secondary_errno = lnf_mem_write(stc->aggr_mem, rec);
-                        if (secondary_errno != LNF_OK) {
-                                primary_errno = E_LNF;
-                                print_err(primary_errno, secondary_errno,
-                                                "lnf_mem_write()");
-                                goto free_lnf_rec;
-                        }
-
-                        if (stc->stat_mem) {
-                                secondary_errno =
-                                        lnf_mem_write(stc->stat_mem, rec);
-                                if (secondary_errno != LNF_OK) {
-                                        primary_errno = E_LNF;
-                                        print_err(primary_errno,
-                                                  secondary_errno,
-                                                  "lnf_mem_write()");
-                                        goto free_lnf_rec;
-                                }
-                        }
-                } else {
-                /*
-                 * No aggregation -> store record to buffer.
-                 * Send buffer, if buffer full, otherwise continue reading.
-                 */
-                        secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1,
-                                        data_buff[buff_idx] + data_idx++);
-                        assert(secondary_errno == LNF_OK);
-
-                        if (data_idx == XCHG_BUFF_ELEMS) { //buffer full
-                                isend_bytes(data_buff[buff_idx], XCHG_BUFF_SIZE,
-                                                &request);
-                                data_idx = 0;
-                                buff_idx = !buff_idx; //toggle buffers
-                        }
-
-                        if (stc->proc_rec_cntr == stc->ms_shared.rec_limit) {
-                                stc->rec_limit_reached = true;
-                                break; //record limit reached
-                        }
+                secondary_errno = lnf_mem_write(stc->aggr_mem, rec);
+                if (secondary_errno != LNF_OK) {
+                        primary_errno = E_LNF;
+                        print_err(primary_errno, secondary_errno,
+                                        "lnf_mem_write()");
+                        goto free_lnf_rec;
                 }
+
         }
 
         /* Check if we reach end of file. */
-        if (!stc->rec_limit_reached && secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF; //no, we didn't
+        if (secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF; //no, we didn't, a problem occured
         }
 
-        /* Send remaining records (if there are any). */
-        if (data_idx != 0) {
-                isend_bytes(data_buff[buff_idx], data_idx * sizeof(lnf_brec1_t),
-                                &request);
-        }
-
-        print_debug("/%d/ file %s: read %lu, processed %lu",
-                        omp_get_thread_num(), path, file_rec_cntr,
-                        file_proc_rec_cntr);
-        //print_debug("file %s: read %lu, processed %lu", path, file_rec_cntr,
-        //                file_proc_rec_cntr);
+        stats_share(&stc->stats, &stats); //atomic increment of shared stats
 
 free_lnf_rec:
         lnf_rec_free(rec);
 close_file:
         lnf_close(file);
 
+        print_debug("<task_store_file> thread %d, file %s, read %zu, "
+                        "processed %zu", omp_get_thread_num(),
+                        path, file_rec_cntr, file_proc_rec_cntr);
+
         return primary_errno;
 }
 
-
-/* Retrun value have to be freed. */
-static char * task_get_next_file(struct slave_task_ctx *stc)
-{
-        struct dirent *dir_entry;
-        char *ret;
-
-        assert(stc != NULL);
-
-        if (stc->no_more_files) {
-                return NULL; //E_EOF;
-        }
-
-        switch (stc->data_source) {
-        case DATA_SOURCE_FILE: //one file
-                stc->no_more_files = true;
-                return strdup(stc->path_str);
-
-        case DATA_SOURCE_DIR: //whole directory without descending
-                do { //skip all directories
-                        dir_entry = readdir(stc->dir_ctx);
-                } while (dir_entry && dir_entry->d_type == DT_DIR);
-
-                if (dir_entry == NULL) { //didn't find any new file
-                        stc->no_more_files = true;
-                        return NULL; //E_EOF;
-                }
-
-                /* Found new file -> construct path. */
-                ret = malloc((stc->ms_shared.path_str_len +
-                                        strlen(dir_entry->d_name) + 1) *
-                                sizeof (char));
-                strcpy(ret, stc->path_str); //copy dirname
-                strcat(ret, dir_entry->d_name); //append filename
-                return ret;
-
-        case DATA_SOURCE_INTERVAL: //all files coresponding to time interval
-                ret = malloc(PATH_MAX * sizeof (char));
-
-                /* Loop through entire interval, ctx kept in interval_begin. */
-                while (tm_diff(stc->ms_shared.interval_end,
-                                        stc->ms_shared.interval_begin) > 0) {
-                        /* Construct path string from time. */
-                        if (strftime(ret, PATH_MAX, FLOW_FILE_PATH,
-                                                &stc->ms_shared.interval_begin)
-                                        == 0) {
-                                secondary_errno = 0;
-                                print_err(E_PATH, secondary_errno,
-                                                "strftime()");
-                                return NULL; //E_PATH;
-                        }
-                        /* Increment context by rotation interval, normalize. */
-                        stc->ms_shared.interval_begin.tm_sec +=
-                                FLOW_FILE_ROTATION_INTERVAL;
-                        mktime_utc(&stc->ms_shared.interval_begin);
-
-                        if (access(ret, F_OK) == 0) {
-                                return ret;//E_OK; //file exists
-                        }
-
-                        //TODO: master should know about this
-                        print_warn(E_PATH, 0, "skipping non existing file "
-                                        "\"%s\"", ret);
-                }
-
-                free(ret);
-                stc->no_more_files = true;
-                return NULL; //E_EOF; //whole interval read
-
-        default:
-                assert(!"unknown data source");
-        }
-
-        assert(!"task_get_next_file()");
-}
-
-
 static void task_free(struct slave_task_ctx *stc)
 {
-        if (!stc->dir_ctx) {
-                closedir(stc->dir_ctx);
-        }
-        if (!stc->filter) {
+        if (stc->filter) {
                 lnf_filter_free(stc->filter);
         }
-        if (!stc->aggr_mem) {
+        if (stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
-        }
-        if (!stc->stat_mem) {
-                free_stat_mem(stc->stat_mem);
         }
 }
 
@@ -321,7 +381,9 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
         assert(filter != NULL && filter_str != NULL && strlen(filter_str) != 0);
 
         /* Initialize filter. */
+        //TODO: try new filter
         secondary_errno = lnf_filter_init(filter, filter_str);
+        //secondary_errno = lnf_filter_init_v2(filter, filter_str);
         if (secondary_errno != LNF_OK) {
                 print_err(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
@@ -339,27 +401,27 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
         assert(stc != NULL);
 
         /* Receivce task info. */
-        MPI_Bcast(&stc->ms_shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
+        MPI_Bcast(&stc->shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
                         MPI_COMM_WORLD);
 
         /* If have filter epxression, receive filter expression string. */
-        if (stc->ms_shared.filter_str_len > 0) {
-                char filter_str[stc->ms_shared.filter_str_len + 1];
+        if (stc->shared.filter_str_len > 0) {
+                char filter_str[stc->shared.filter_str_len + 1];
 
-                MPI_Bcast(filter_str, stc->ms_shared.filter_str_len, MPI_CHAR,
+                MPI_Bcast(filter_str, stc->shared.filter_str_len, MPI_CHAR,
                                 ROOT_PROC, MPI_COMM_WORLD);
 
-                filter_str[stc->ms_shared.filter_str_len] = '\0'; //termination
+                filter_str[stc->shared.filter_str_len] = '\0'; //termination
                 primary_errno = task_init_filter(&stc->filter, filter_str);
                 //it is OK not to chech primary_errno
         }
 
         /* If have path string, receive path string. */
-        if (stc->ms_shared.path_str_len > 0) {
+        if (stc->shared.path_str_len > 0) {
                 //PATH_MAX length already checked on master side
-                MPI_Bcast(stc->path_str, stc->ms_shared.path_str_len, MPI_CHAR,
+                MPI_Bcast(stc->path_str, stc->shared.path_str_len, MPI_CHAR,
                                 ROOT_PROC, MPI_COMM_WORLD);
-                stc->path_str[stc->ms_shared.path_str_len] = '\0';//termination
+                stc->path_str[stc->shared.path_str_len] = '\0';//termination
         }
 
         return primary_errno;
@@ -372,51 +434,31 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
 
         assert(stc != NULL);
 
-        switch (stc->ms_shared.working_mode) {
+        switch (stc->shared.working_mode) {
         case MODE_LIST:
                 return E_OK;
 
         case MODE_SORT:
-                if (stc->ms_shared.rec_limit == 0) {
+                if (stc->shared.rec_limit == 0) {
                         break; //don't need memory, local sort would be useless
                 }
 
                 /* Sort all records, then send first rec_limit records .*/
-                /* Initialize aggregation memory and set memory parameters. */
                 primary_errno = init_aggr_mem(&stc->aggr_mem,
-                                stc->ms_shared.agg_params,
-                                stc->ms_shared.agg_params_cnt);
+                                stc->shared.fields);
                 if (primary_errno != E_OK) {
                         return primary_errno;
                 }
+                lnf_mem_setopt(stc->aggr_mem, LNF_OPT_LISTMODE, NULL, 0);
 
-                secondary_errno = lnf_mem_setopt(stc->aggr_mem,
-                                LNF_OPT_LISTMODE, NULL, 0);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_setopt()");
-                        goto free_aggr_mem;
-                }
-
-                return E_OK;
+                break;
 
         case MODE_AGGR:
                 /* Initialize aggregation memory and set memory parameters. */
                 primary_errno = init_aggr_mem(&stc->aggr_mem,
-                                stc->ms_shared.agg_params,
-                                stc->ms_shared.agg_params_cnt);
-                if (primary_errno != E_OK) {
-                        return primary_errno;
-                }
+                                stc->shared.fields);
 
-                /* Initialize statistics memory. */
-                primary_errno = init_stat_mem(&stc->stat_mem);
-                if (primary_errno != E_OK) {
-                        goto free_aggr_mem;
-                }
-
-                return E_OK;
+                break;
 
         case MODE_PASS:
                 return E_PASS;
@@ -425,194 +467,112 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
                 assert(!"unknown working mode");
         }
 
-free_aggr_mem:
-        free_aggr_mem(stc->aggr_mem);
-        stc->aggr_mem = NULL;
-
         return primary_errno;
 }
 
 
-static error_code_t task_init_data_source(struct slave_task_ctx *stc)
-{
-        int err;
-        struct stat stat_buff;
-
-        /* Don't have path string - construct file names from time interval. */
-        if (stc->ms_shared.path_str_len == 0) {
-                stc->data_source = DATA_SOURCE_INTERVAL;
-                return E_OK;
-        }
-
-        /* Have path string, don't know if file or direcory yet. */
-        err = stat(stc->path_str, &stat_buff);
-        if (err == -1) { //path doesn't exist, permissions, ...
-                secondary_errno = errno;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
-                                stc->path_str);
-                return E_PATH;
-        }
-
-        if (!S_ISDIR(stat_buff.st_mode)) { //path isn't directory
-                stc->data_source = DATA_SOURCE_FILE;
-                return E_OK;
-        }
-
-        /* Now we know that path points to directory. */
-        if (stc->ms_shared.path_str_len >= (PATH_MAX - NAME_MAX) - 1) {
-                secondary_errno = ENAMETOOLONG;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"",
-                                strerror(secondary_errno), stc->path_str);
-                return E_PATH;
-        }
-
-        stc->data_source = DATA_SOURCE_DIR;
-        stc->dir_ctx = opendir(stc->path_str);
-        if (stc->dir_ctx == NULL) { //cannot access directory
-                secondary_errno = errno;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
-                                stc->path_str);
-                return E_PATH;
-        }
-
-        /* Check/add missing terminating slash. One byte should be available. */
-        if (stc->path_str[stc->ms_shared.path_str_len - 1] != '/') {
-                stc->path_str[stc->ms_shared.path_str_len++] = '/';
-        }
-
-        return E_OK;
-}
-
-
-static error_code_t send_stat(lnf_mem_t *mem)
-{
-        lnf_mem_cursor_t *cursor;
-        int rec_len;
-        char rec_buff[LNF_MAX_RAW_LEN];
-
-        secondary_errno = lnf_mem_first_c(mem, &cursor);
-        if (secondary_errno == LNF_EOF) {
-                return E_EOF; //TODO: handle empty files
-        } else if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_first_c()");
-                return E_LNF;
-        }
-
-        secondary_errno = lnf_mem_read_raw_c(mem, cursor, rec_buff, &rec_len,
-                        LNF_MAX_RAW_LEN);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_read_raw_c()");
-                return E_LNF;
-        }
-
-        MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_STATS,
-                        MPI_COMM_WORLD);
-
-        return E_OK;
-}
-
-
-static error_code_t send_loop(struct slave_task_ctx *stc)
+static error_code_t isend_loop(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
-        int rec_len;
-        lnf_mem_cursor_t *read_cursor;
-        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
 
-        secondary_errno = lnf_mem_first_c(stc->aggr_mem, &read_cursor);
-        if (secondary_errno == LNF_EOF) {
-                goto send_terminator; //no records in memory, no problem
-        } else if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_first_c()");
-                goto send_terminator;
-        }
+        uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
+        bool db_mem_idx = 0; //currently used data buffer index
+        uint8_t *db = db_mem[db_mem_idx]; //pointer to currently used data buff
+        size_t db_off = 0; //data buffer offset
+        size_t db_rec_cntr = 0; //number of records in current buffer
 
-        /* Send all records. */
-        while (true) {
-                secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, read_cursor,
-                                rec_buff, &rec_len, LNF_MAX_RAW_LEN);
+        uint32_t rec_size;
+        size_t byte_cntr = 0;
+        size_t rec_cntr = 0;
+
+        lnf_mem_cursor_t *cursor;
+        MPI_Request request = MPI_REQUEST_NULL;
+
+
+        /* Set cursor to the first record in the memory. */
+        secondary_errno = lnf_mem_first_c(stc->aggr_mem, &cursor);
+
+        /* Loop throught all the records. */
+        while (cursor != NULL) {
+                /* Read if there is enough space. Save space for record size. */
+                secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, cursor,
+                                (char *)db + db_off + sizeof (rec_size),
+                                (int *)&rec_size,
+                                XCHG_BUFF_SIZE - db_off - sizeof (rec_size));
                 assert(secondary_errno != LNF_EOF);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_read_raw_c()");
-                        goto send_terminator;
-                }
 
-                MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
+                /* Was there enough space in the buffer for the record? */
+                if (secondary_errno != LNF_ERR_NOMEM) {
+                        *(uint32_t *)(db + db_off) = rec_size; //write rec size
+                        db_off += sizeof (rec_size) + rec_size; //shift db off
 
-                secondary_errno = lnf_mem_next_c(stc->aggr_mem, &read_cursor);
-                if (secondary_errno == LNF_EOF) {
-                        break; //all records successfully sent
-                } else if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_next_c()");
-                        goto send_terminator;
+                        db_rec_cntr++;
+                        rec_cntr++;
+
+                        /* Shift cursor to next record. */
+                        secondary_errno = lnf_mem_next_c(stc->aggr_mem,
+                                        &cursor);
+                } else {
+                        /* Send buffer. */
+                        isend_bytes(db, db_off, &request);
+                        byte_cntr += db_off;
+
+                        /* Clear buffer context variables. */
+                        db_off = 0;
+                        db_rec_cntr = 0;
+                        db_mem_idx = !db_mem_idx; //toggle data buffers
+                        db = db_mem[db_mem_idx];
                 }
         }
+        if (secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno,
+                                "lnf_mem_next_c() or lnf_mem_first_c()");
+        }
 
-send_terminator:
+
+        /* Send remaining records if data buffer is not empty. */
+        if (db_rec_cntr != 0) {
+                isend_bytes(db, db_off, &request);
+                byte_cntr += db_off;
+        }
+
         /* All sent or error, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
+        /* Buffers will be invalid after return, wait for send to complete. */
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+
+        print_debug("<isend_loop> read %zu, sent %zu B", rec_cntr, byte_cntr);
+
         return primary_errno;
 }
 
 
-static error_code_t fast_topn_send_loop(struct slave_task_ctx *stc)
+static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
-        int rec_len;
-        int sort_key = LNF_SORT_NONE;
-        lnf_mem_cursor_t *read_cursor;
-        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
+
+        uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
+        bool db_mem_idx = 0; //currently used data buffer index
+        uint8_t *db = db_mem[db_mem_idx]; //pointer to currently used data buff
+        size_t db_off = 0; //data buffer offset
+        size_t db_rec_cntr = 0; //number of records in current buffer
+
+        uint32_t rec_size;
+        size_t byte_cntr = 0;
+        size_t rec_cntr = 0;
+
+        lnf_mem_cursor_t *cursor; //cursor to current record
+        lnf_mem_cursor_t *nth_rec_cursor = NULL; //cursor to Nth record
+        MPI_Request request = MPI_REQUEST_NULL;
+
         uint64_t threshold;
         lnf_rec_t *rec;
+        int sort_key = LNF_SORT_NONE;
 
-        /* Send first rec_limit (top-N) records. */
-        for (size_t i = 0; i < stc->ms_shared.rec_limit; ++i) {
-                if (i == 0) {
-                        secondary_errno = lnf_mem_first_c(stc->aggr_mem,
-                                        &read_cursor);
-                } else {
-                        secondary_errno = lnf_mem_next_c(stc->aggr_mem,
-                                        &read_cursor);
-                }
-                if (secondary_errno == LNF_EOF) {
-                        goto send_terminator; //no more records in memory
-                } else if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_first_c or lnf_mem_next_c()");
-                        goto send_terminator;
-                }
 
-                secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, read_cursor,
-                                rec_buff, &rec_len, LNF_MAX_RAW_LEN);
-                assert(secondary_errno != LNF_EOF);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_read_raw_c()");
-                        goto send_terminator;
-                }
-
-                MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
-        }
-
-        /* Find sort key in aggregation parameters. */
-        for (size_t i = 0; i < stc->ms_shared.agg_params_cnt; ++i) {
-                if (stc->ms_shared.agg_params[i].flags & LNF_SORT_FLAGS) {
-                        sort_key = stc->ms_shared.agg_params[i].field;
-                        break;
-                }
-        }
-
-        /* Initialize LNF record. Have to be unique in each OMP task. */
+        /* Initialize LNF record. TODO: use global record */
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
@@ -620,35 +580,86 @@ static error_code_t fast_topn_send_loop(struct slave_task_ctx *stc)
                 goto send_terminator;
         }
 
-        /* Compute threshold from sort key of Nth record. */
-        secondary_errno = lnf_mem_read_c(stc->aggr_mem, read_cursor, rec);
+
+        /* Set cursor to the first record in the memory. */
+        secondary_errno = lnf_mem_first_c(stc->aggr_mem, &cursor);
+
+        /* Loop through the first rec_limit or less records. */
+        while (rec_cntr < stc->shared.rec_limit && cursor != NULL) {
+                /* Read if there is enough space. Save space for record size. */
+                secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, cursor,
+                                (char *)db + db_off + sizeof (rec_size),
+                                (int *)&rec_size,
+                                XCHG_BUFF_SIZE - db_off - sizeof (rec_size));
+                assert(secondary_errno != LNF_EOF);
+
+                /* Was there enough space in the buffer for the record? */
+                if (secondary_errno != LNF_ERR_NOMEM) {
+                        *(uint32_t *)(db + db_off) = rec_size; //write rec size
+                        db_off += sizeof (rec_size) + rec_size; //shift db off
+
+                        db_rec_cntr++;
+                        rec_cntr++;
+
+                        /* Shift cursor to next record. */
+                        nth_rec_cursor = cursor; //save for future usage
+                        secondary_errno = lnf_mem_next_c(stc->aggr_mem,
+                                        &cursor);
+                } else {
+                        /* Send buffer. */
+                        isend_bytes(db, db_off, &request);
+                        byte_cntr += db_off;
+
+                        /* Clear buffer context variables. */
+                        db_off = 0;
+                        db_rec_cntr = 0;
+                        db_mem_idx = !db_mem_idx; //toggle data buffers
+                        db = db_mem[db_mem_idx];
+                }
+        }
+        if (secondary_errno != LNF_OK && secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno,
+                                "lnf_mem_next_c() or lnf_mem_first_c()");
+                goto free_lnf_rec;
+        }
+
+
+        /* Find sort key in the fields. */
+        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+                if (stc->shared.fields[i].flags & LNF_SORT_FLAGS) {
+                        sort_key = stc->shared.fields[i].id;
+                        break;
+                }
+        }
+        assert(sort_key != LNF_SORT_NONE);
+
+        /*
+         * Read Nth record from sorted memory, fetch value of sort key and
+         * compute threshold based on this value and slave count. If there was
+         * less than N records in memory, this is actually not Nth record, but
+         * cursor is NULL by now, so no more records will be read.
+         */
+        //TODO: handle also ascending order
+        secondary_errno = lnf_mem_read_c(stc->aggr_mem, nth_rec_cursor, rec);
         assert(secondary_errno != LNF_EOF);
-        if (secondary_errno == LNF_OK) {
-                secondary_errno = lnf_rec_fget(rec, sort_key, &threshold);
-                assert(secondary_errno == LNF_OK);
-                threshold /= stc->slave_cnt;
-        } else {
+        if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno, "lnf_mem_read_c()");
                 goto free_lnf_rec;
         }
 
-        /* Send records until key value >= threshold (top-K records). */
-        while (true) {
+        secondary_errno = lnf_rec_fget(rec, sort_key, &threshold);
+        assert(secondary_errno == LNF_OK);
+        threshold /= stc->slave_cnt;
+
+
+        /* Send records until we have records and sort key value >= threshold.*/
+        while (cursor != NULL) {
                 uint64_t key_value;
 
-                secondary_errno = lnf_mem_next_c(stc->aggr_mem, &read_cursor);
-                if (secondary_errno == LNF_EOF) {
-                        break; //all records in memory successfully sent
-                } else if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_next_c()");
-                        goto free_lnf_rec;
-                }
-
-                secondary_errno = lnf_mem_read_c(stc->aggr_mem, read_cursor,
-                                rec);
+                /* Read and check value of sort key. */
+                secondary_errno = lnf_mem_read_c(stc->aggr_mem, cursor, rec);
                 assert(secondary_errno != LNF_EOF);
                 if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
@@ -663,25 +674,61 @@ static error_code_t fast_topn_send_loop(struct slave_task_ctx *stc)
                         break; //threshold reached
                 }
 
-                secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, read_cursor,
-                                rec_buff, &rec_len, LNF_MAX_RAW_LEN);
+                /* Read if there is enough space. Save space for record size. */
+                secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, cursor,
+                                (char *)db + db_off + sizeof (rec_size),
+                                (int *)&rec_size,
+                                XCHG_BUFF_SIZE - db_off - sizeof (rec_size));
                 assert(secondary_errno != LNF_EOF);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_mem_read_raw_c()");
-                        goto free_lnf_rec;
-                }
 
-                MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
+                /* Was there enough space in the buffer for the record? */
+                if (secondary_errno != LNF_ERR_NOMEM) {
+                        *(uint32_t *)(db + db_off) = rec_size; //write rec size
+                        db_off += sizeof (rec_size) + rec_size; //shift db off
+
+                        db_rec_cntr++;
+                        rec_cntr++;
+
+                        /* Shift cursor to next record. */
+                        secondary_errno = lnf_mem_next_c(stc->aggr_mem,
+                                        &cursor);
+                } else {
+                        /* Send buffer. */
+                        isend_bytes(db, db_off, &request);
+                        byte_cntr += db_off;
+
+                        /* Clear buffer context variables. */
+                        db_off = 0;
+                        db_rec_cntr = 0;
+                        db_mem_idx = !db_mem_idx; //toggle data buffers
+                        db = db_mem[db_mem_idx];
+                }
         }
+        if (secondary_errno != LNF_OK && secondary_errno != LNF_EOF) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_mem_next_c()");
+                goto free_lnf_rec;
+        }
+
+
+        /* Send remaining records if data buffer is not empty. */
+        if (db_rec_cntr != 0) {
+                isend_bytes(db, db_off, &request);
+                byte_cntr += db_off;
+        }
+
 
 free_lnf_rec:
         lnf_rec_free(rec);
 send_terminator:
         /* Phase 1 done, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
+
+        /* Buffers will be invalid after return, wait for send to complete. */
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+
+        print_debug("<fast_topn_isend_loop> read %zu, sent %zu B", rec_cntr,
+                        byte_cntr);
 
         return primary_errno;
 }
@@ -695,10 +742,11 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
         lnf_mem_cursor_t **lookup_cursors;
         size_t lookup_cursors_idx = 0;
         size_t lookup_cursors_size = LOOKUP_CURSOR_INIT_SIZE;
+        size_t received_cnt = 0;
 
         /* Allocate some lookup cursors. */
         lookup_cursors = malloc(lookup_cursors_size *
-                        sizeof(lnf_mem_cursor_t *));
+                        sizeof (lnf_mem_cursor_t *));
         if (lookup_cursors == NULL) {
                 secondary_errno = 0;
                 print_err(E_MEM, secondary_errno, "malloc()");
@@ -714,6 +762,7 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
 
                 MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC,
                                 MPI_COMM_WORLD);
+                received_cnt++;
 
                 secondary_errno = lnf_mem_lookup_raw_c(stc->aggr_mem, rec_buff,
                                 rec_len, &lookup_cursors[lookup_cursors_idx]);
@@ -769,53 +818,52 @@ free_lookup_cursors:
         /* Phase 3 done, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
+        print_debug("<fast_topn_recv_lookup_send> received %zu, "
+                        "found and sent %zu", received_cnt, lookup_cursors_idx);
         return primary_errno;
 }
 
 
-static error_code_t task_process_mem(struct slave_task_ctx *stc)
+static error_code_t task_postprocess(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
 
-        /* Reasons to disable fast top-N algorithm:
-         * - user request by command line argument
-         * - no record limit (all records would be exchanged anyway)
-         * - sort key isn't statistical fld (flows, packets, bytes, ...)
-         */
-        switch (stc->ms_shared.working_mode) {
+        switch (stc->shared.working_mode) {
         case MODE_LIST:
-                return E_OK; //all records already sent while reading
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                MPI_COMM_WORLD);
+                break; //all records already sent while reading
 
         case MODE_SORT:
-                if (stc->ms_shared.rec_limit == 0) {
-                        return E_OK; //all records already sent while reading
+                if (stc->shared.rec_limit == 0) {
+                        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                        MPI_COMM_WORLD);
+                } else {
+                        primary_errno = isend_loop(stc);
                 }
 
-                return send_loop(stc);
+                break;
 
         case MODE_AGGR:
-                if (stc->ms_shared.use_fast_topn) {
-                        primary_errno = fast_topn_send_loop(stc);
+                if (stc->shared.use_fast_topn) {
+                        primary_errno = fast_topn_isend_loop(stc);
                         if (primary_errno != E_OK) {
                                 return primary_errno;
                         }
 
                         primary_errno = fast_topn_recv_lookup_send(stc);
                 } else {
-                        primary_errno = send_loop(stc);
+                        primary_errno = isend_loop(stc);
                 }
 
-                if (primary_errno != E_OK) {
-                        return primary_errno;
-                }
-
-                return send_stat(stc->stat_mem);
+                break;
 
         default:
                 assert(!"unknown working mode");
         }
 
-        assert(!"task_process_mem()");
+        print_debug("<task_postprocess> done");
+        return primary_errno;
 }
 
 
@@ -823,9 +871,14 @@ error_code_t slave(int world_size)
 {
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
-        memset(&stc, 0, sizeof(stc));
+        f_array_t files;
+
+
+        memset(&stc, 0, sizeof (stc));
+        f_array_init(&files);
 
         stc.slave_cnt = world_size - 1; //all nodes without master
+
 
         /* Wait for reception of task context from master. */
         primary_errno = task_receive_ctx(&stc);
@@ -838,62 +891,68 @@ error_code_t slave(int world_size)
         if (primary_errno != E_OK) {
                 goto finalize_task;
         }
+
         /* Data source specific initialization. */
-        primary_errno = task_init_data_source(&stc);
-        if (primary_errno != E_OK) {
-                goto finalize_task;
+        if (stc.shared.path_str_len == 0) {
+                primary_errno = f_array_fill_from_time(&files,
+                                stc.shared.interval_begin,
+                                stc.shared.interval_end);
+                if (primary_errno != E_OK) {
+                        goto finalize_task;
+                }
+        } else {
+                primary_errno = f_array_fill_from_path(&files, stc.path_str);
+                if (primary_errno != E_OK) {
+                        goto finalize_task;
+                }
         }
 
-        //TODO: return codes, record limit, secondary_errno
-        #pragma omp parallel firstprivate(primary_errno)
+        /* Report number of files to be processed. */
+        MPI_Gather(&files.f_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0,
+                        MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
+
+
+        //TODO: return codes, secondary_errno
+        #pragma omp parallel
         {
-                #pragma omp single
-                {
-                        char *path = task_get_next_file(&stc); //first file
+                /* Parallel loop through all the files. */
+                #pragma omp for schedule(guided) nowait
+                for (size_t i = 0; i < files.f_cnt; ++i) {
+                        const char *path = files.f_items[i].f_name;
 
-                        while (path != NULL) {
-                                #pragma omp task firstprivate(path)
-                                {
-                                        primary_errno =
-                                                task_process_file(&stc, path);
-                                        assert(primary_errno == E_OK);
-                                        free(path);
-                                }
-
-                                path = task_get_next_file(&stc); //next file
+                        if (stc.aggr_mem) {
+                                primary_errno = task_store_file(&stc, path);
+                        } else if (!stc.rec_limit_reached) {
+                                primary_errno = task_send_file(&stc, path);
                         }
-                }
 
+                        /* Report that another file has been processed. */
+                        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
+                                        MPI_COMM_WORLD);
+                } //don't wait for other threads and start merging memory
+
+                /* Merge thread specific hash tables into one. */
                 if (stc.aggr_mem) {
                         lnf_mem_merge_threads(stc.aggr_mem);
                 }
-                if (stc.stat_mem) {
-                        lnf_mem_merge_threads(stc.stat_mem);
-                }
-                /* Check if we read all files. */
-                //if (!stc.rec_limit_reached && primary_errno != E_EOF) {
-                //        //goto finalize_task; //no, we didn't, some problem occured
-                //}
-        } //pragma omp parallel
+        } //impicit barrier
 
         /*
          * In case of aggregation or sorting, records were stored into memory
-         * and we need to process and send them to master. If there was no
-         * aggregation, notify master that everything is done here.
+         * and we need to process and send them to master.
          */
-        if (stc.aggr_mem) {
-                primary_errno = task_process_mem(&stc);
-        } else {
-                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
-        }
+        primary_errno = task_postprocess(&stc);
 
 finalize_task:
+        stats_send(&stc.stats);
+
         if (primary_errno != E_OK) { //always send terminator to master on error
                 MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD);
         }
 
+        f_array_free(&files);
         task_free(&stc);
+
         return primary_errno;
 }

@@ -1,6 +1,6 @@
 /**
  * \file common.c
- * \brief
+ * \brief Implementation of common fdistdump functionality.
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \date 2015
@@ -52,54 +52,35 @@
 #include <stddef.h> //offsetof()
 
 #include <mpi.h>
-#include <arpa/inet.h> //inet_ntop()
 
-#define MAX_MSG_LEN (MPI_MAX_PROCESSOR_NAME + 100)
+#define MAX_PROC_INFO_NAME (MPI_MAX_PROCESSOR_NAME + 100)
 #define TM_YEAR_BASE 1900
 
-/* Global variables. */
-extern MPI_Datatype mpi_struct_agg_param;
-extern MPI_Datatype mpi_struct_shared_task_ctx;
-extern MPI_Datatype mpi_struct_tm;
-extern int secondary_errno;
-
-
-/** \brief Convert libnf address to string.
- *
- * Distinguish IPv4 vs IPv6 address and use inet_ntop() to convert binary
- * representation to string. In case of small buffer, NULL is returned.
- *
- * \param[in] addr Binary address representation.
- * \param[out] buff String address representation.
- * \param[in] buff_len Buffer size.
- * \return String address representation.
+/**
+ * \defgroup glob_var Global variables
+ * @{
  */
-static char* addr_to_str(const lnf_ip_t addr, char *buff, size_t buff_size)
+extern MPI_Datatype mpi_struct_shared_task_ctx;
+extern int secondary_errno;
+/**
+ * @}
+ */ //glob_var
+
+
+/**
+ * \defgroup to_str_func Various elements to string converting functions
+ * @{
+ */
+/** \brief Convert processor name and role to string.
+ *
+ * Return static string containing MPI processor name, role (master or slave)
+ * and MPI rank.
+ *
+ * \return Static string at most MAX_PROC_INFO_NAME long.
+ */
+static char * proc_info_to_str(void)
 {
-        const char *ret;
-
-        if (IN6_IS_ADDR_V4COMPAT(addr.data)) { //IPv4
-                if (buff_size < INET_ADDRSTRLEN) {
-                        return NULL;
-                }
-                ret = inet_ntop(AF_INET, &addr.data[3], buff, buff_size);
-        } else { //IPv6
-                if (buff_size < INET6_ADDRSTRLEN) {
-                        return NULL;
-                }
-                ret = inet_ntop(AF_INET6, &addr, buff, buff_size);
-        }
-
-        assert(ret != NULL);
-
-        return buff;
-}
-
-
-static char * get_processor_info(void)
-{
-        static char msg[MAX_MSG_LEN];
-        size_t msg_offset = 0;
+        static char msg[MAX_PROC_INFO_NAME];
         char proc_name[MPI_MAX_PROCESSOR_NAME];
         int world_rank, world_size, result_len;
 
@@ -107,23 +88,19 @@ static char * get_processor_info(void)
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
         MPI_Get_processor_name(proc_name, &result_len);
 
-        if (world_rank == ROOT_PROC) {
-                msg_offset += snprintf(msg, MAX_FN_LEN, "master, ");
-        } else {
-                msg_offset += snprintf(msg, MAX_FN_LEN, "slave, ");
-        }
-
-        snprintf(msg + msg_offset, MAX_MSG_LEN - msg_offset,
-                        "rank %d/%d with processor name %s", world_rank,
-                        world_size, proc_name);
+        snprintf(msg, MAX_PROC_INFO_NAME, "%d/%d, %s", world_rank, world_size,
+                        proc_name);
 
         return msg;
 }
 
-
+/** \brief Convert error_code_t error code to human-readable string.
+ *
+ * \return Static string at most MAX_STR_LEN long.
+ */
 static char * error_code_to_str(error_code_t prim_errno)
 {
-        static char msg[100];
+        static char msg[MAX_STR_LEN];
 
         switch (prim_errno) {
         case E_OK:
@@ -163,104 +140,25 @@ static char * error_code_to_str(error_code_t prim_errno)
         return msg;
 }
 
-
-error_code_t print_brec(const lnf_brec1_t *brec)
-{
-        char *ret;
-
-        static char srcaddr_str[INET6_ADDRSTRLEN];
-        static char dstaddr_str[INET6_ADDRSTRLEN];
-
-        ret = addr_to_str(brec->srcaddr, srcaddr_str, INET6_ADDRSTRLEN);
-        if (ret == NULL) {
-                print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_INTERNAL;
-        }
-        ret = addr_to_str(brec->dstaddr, dstaddr_str, INET6_ADDRSTRLEN);
-        if (ret == NULL) {
-                print_err(E_INTERNAL, 0, "addr_to_str()");
-                return E_INTERNAL;
-        }
-
-        printf("%lu -> %lu\t", brec->first, brec->last);
-        printf("%15s:%-5hu -> %15s:%-5hu\t", srcaddr_str, brec->srcport,
-                        dstaddr_str, brec->dstport);
-        printf("%lu\t%lu\t%lu\n", brec->pkts, brec->bytes, brec->flows);
-
-        return E_OK;
-}
-
-
-void print_err(error_code_t prim_errno, int sec_errno,
-                const char *format, ...)
-{
-        (void)sec_errno; //TODO
-        va_list arg_list;
-        va_start(arg_list, format);
-
-        fprintf(stderr, "Error on %s caused by %s: ", get_processor_info(),
-                        error_code_to_str(prim_errno));
-        vfprintf(stderr, format, arg_list);
-        fprintf(stderr, "\n");
-
-        va_end(arg_list);
-}
-
-
-void print_warn(error_code_t prim_errno, int sec_errno,
-                const char *format, ...)
-{
-        (void)sec_errno; //TODO
-        va_list arg_list;
-        va_start(arg_list, format);
-
-        fprintf(stderr, "Warning on %s caused by %s: ", get_processor_info(),
-                        error_code_to_str(prim_errno));
-        vfprintf(stderr, format, arg_list);
-        fprintf(stderr, "\n");
-
-        va_end(arg_list);
-}
-
-#ifdef DEBUG
-void print_debug(const char *format, ...)
-{
-        va_list arg_list;
-        va_start(arg_list, format);
-
-        fprintf(stderr, "DEBUG on %s: ", get_processor_info());
-        vfprintf(stderr, format, arg_list);
-        fprintf(stderr, "\n");
-
-        va_end(arg_list);
-}
-#else
-void print_debug(const char *format, ...)
-{
-        (void)format;
-}
-#endif
-
-
 char * working_mode_to_str(working_mode_t working_mode)
 {
-        static char msg[MAX_MSG_LEN];
+        static char msg[MAX_STR_LEN];
 
         switch (working_mode) {
         case MODE_LIST:
-                snprintf(msg, MAX_MSG_LEN, "list records");
+                snprintf(msg, MAX_STR_LEN, "list records");
                 break;
 
         case MODE_SORT:
-                snprintf(msg, MAX_MSG_LEN, "sort records");
+                snprintf(msg, MAX_STR_LEN, "sort records");
                 break;
 
         case MODE_AGGR:
-                snprintf(msg, MAX_MSG_LEN, "aggregate records");
+                snprintf(msg, MAX_STR_LEN, "aggregate records");
                 break;
 
         case MODE_PASS:
-                snprintf(msg, MAX_MSG_LEN, "pass");
+                snprintf(msg, MAX_STR_LEN, "pass");
                 break;
 
         default:
@@ -269,81 +167,132 @@ char * working_mode_to_str(working_mode_t working_mode)
 
         return msg;
 }
+/**
+ * @}
+ */ //to_str_func
 
 
-void create_mpi_struct_agg_param(void)
+/**
+ * \defgroup print_func Error/warning/debug printing functions
+ * @{
+ */
+void print_err(error_code_t prim_errno, int sec_errno,
+                const char *format, ...)
 {
-        int block_lengths[STRUCT_AGG_PARAM_ELEMS] = {1, 1, 1, 1 /*, NEW */};
-        MPI_Aint displacements[STRUCT_AGG_PARAM_ELEMS];
-        MPI_Datatype types[STRUCT_AGG_PARAM_ELEMS] = {MPI_INT, MPI_INT, MPI_INT,
-                MPI_INT /*, NEW */};
+        (void)sec_errno; //TODO
+        va_list arg_list;
+        va_start(arg_list, format);
+        char lnf_error_str[LNF_MAX_STRING];
 
-        displacements[0] = offsetof(struct agg_param, field);
-        displacements[1] = offsetof(struct agg_param, flags);
-        displacements[2] = offsetof(struct agg_param, numbits);
-        displacements[3] = offsetof(struct agg_param, numbits6);
-        /* displacements[NEW] = offsetof(struct agg_param, NEW); */
+        fprintf(stderr, "Error on %s caused by %s: ", proc_info_to_str(),
+                        error_code_to_str(prim_errno));
+        vfprintf(stderr, format, arg_list);
 
-        MPI_Type_create_struct(STRUCT_AGG_PARAM_ELEMS, block_lengths,
-                        displacements, types, &mpi_struct_agg_param);
-        MPI_Type_commit(&mpi_struct_agg_param);
+        if (prim_errno == E_LNF && secondary_errno == LNF_ERR_OTHER_MSG) {
+                lnf_error(lnf_error_str, LNF_MAX_STRING);
+                fprintf(stderr, "\nLNF error string: %s", lnf_error_str);
+        }
+
+        fprintf(stderr, "\n");
+
+        va_end(arg_list);
 }
 
-
-void free_mpi_struct_agg_param(void)
+void print_warn(error_code_t prim_errno, int sec_errno,
+                const char *format, ...)
 {
-        MPI_Type_free(&mpi_struct_agg_param);
+        (void)sec_errno; //TODO
+        va_list arg_list;
+        va_start(arg_list, format);
+
+        fprintf(stderr, "Warning on %s caused by %s: ", proc_info_to_str(),
+                        error_code_to_str(prim_errno));
+        vfprintf(stderr, format, arg_list);
+        fprintf(stderr, "\n");
+
+        va_end(arg_list);
 }
 
-
-void create_mpi_struct_tm(void)
+void print_debug(const char *format, ...)
 {
-        MPI_Type_contiguous(STRUCT_TM_ELEMS, MPI_INT, &mpi_struct_tm);
-        MPI_Type_commit(&mpi_struct_tm);
+#ifdef DEBUG
+        va_list arg_list;
+        va_start(arg_list, format);
+
+        fprintf(stderr, "DEBUG on %s: ", proc_info_to_str());
+        vfprintf(stderr, format, arg_list);
+        fprintf(stderr, "\n");
+
+        va_end(arg_list);
+#else //DEBUG
+        (void)format;
+#endif //DEBUG
 }
+/**
+ * @}
+ */ //print_func
 
 
-void free_mpi_struct_tm(void)
-{
-        MPI_Type_free(&mpi_struct_tm);
-}
-
-
+/**
+ * \defgroup mpi_type_func Functions constructing/destructing MPI data types
+ * @{
+ */
+#define STRUCT_TM_ELEMS 9
 void create_mpi_struct_shared_task_ctx(void)
 {
-        int block_lengths[STRUCT_TASK_INFO_ELEMS] = {1, MAX_AGG_PARAMS, 1, 1, 1,
-                1, 1, 1, 1 /*, NEW */};
-        MPI_Aint displacements[STRUCT_TASK_INFO_ELEMS];
-        MPI_Datatype types[STRUCT_TASK_INFO_ELEMS] = {MPI_INT,
-                mpi_struct_agg_param, MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG,
-                MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG, mpi_struct_tm,
-                mpi_struct_tm, MPI_C_BOOL /*, NEW */};
+        int block_lengths[STRUCT_SHARED_TASK_CTX_ELEMS] = {
+                1, //working_mode
+                (STRUCT_FIELD_INFO_ELEMS * LNF_FLD_TERM_), //fields
+                1, //filter_str_len
+                1, //path_str_len
+                1, //rec_limit
+                STRUCT_TM_ELEMS, //interval_begin
+                STRUCT_TM_ELEMS, //interval_end
+                1, //use_fast_topn
+                /* NEW */
+        };
+        MPI_Aint displacements[STRUCT_SHARED_TASK_CTX_ELEMS] = {
+                offsetof(struct shared_task_ctx, working_mode),
+                offsetof(struct shared_task_ctx, fields),
+                offsetof(struct shared_task_ctx, filter_str_len),
+                offsetof(struct shared_task_ctx, path_str_len),
+                offsetof(struct shared_task_ctx, rec_limit),
+                offsetof(struct shared_task_ctx, interval_begin),
+                offsetof(struct shared_task_ctx, interval_end),
+                offsetof(struct shared_task_ctx, use_fast_topn),
+                /* offsetof(struct shared_task_ctx, NEW), */
+        };
+        MPI_Datatype types[STRUCT_SHARED_TASK_CTX_ELEMS] = {
+                MPI_INT, //working_mode
+                MPI_INT, //fields
+                MPI_UNSIGNED_LONG, //filter_str_len
+                MPI_UNSIGNED_LONG, //path_str_len
+                MPI_UNSIGNED_LONG, //rec_limit
+                MPI_INT, //interval_begin
+                MPI_INT, //interval_end
+                MPI_C_BOOL, //use_fast_topn
+                /* NEW */
+        };
 
-        displacements[0] = offsetof(struct shared_task_ctx, working_mode);
-        displacements[1] = offsetof(struct shared_task_ctx, agg_params);
-        displacements[2] = offsetof(struct shared_task_ctx, agg_params_cnt);
-        displacements[3] = offsetof(struct shared_task_ctx, filter_str_len);
-        displacements[4] = offsetof(struct shared_task_ctx, path_str_len);
-        displacements[5] = offsetof(struct shared_task_ctx, rec_limit);
-        displacements[6] = offsetof(struct shared_task_ctx, interval_begin);
-        displacements[7] = offsetof(struct shared_task_ctx, interval_end);
-        displacements[8] = offsetof(struct shared_task_ctx, use_fast_topn);
-        /* displacements[NEW] = offsetof(struct shared_task_ctx, NEW); */
-
-        MPI_Type_create_struct(STRUCT_TASK_INFO_ELEMS, block_lengths,
+        MPI_Type_create_struct(STRUCT_SHARED_TASK_CTX_ELEMS, block_lengths,
                         displacements, types, &mpi_struct_shared_task_ctx);
         MPI_Type_commit(&mpi_struct_shared_task_ctx);
 }
-
 
 void free_mpi_struct_shared_task_ctx(void)
 {
         MPI_Type_free(&mpi_struct_shared_task_ctx);
 }
+/**
+ * @}
+ */ //mpi_type_func
 
 
-error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
-                size_t ap_cnt)
+/**
+ * \defgroup aggr_mem Functions operating with aggregation memory
+ * @{
+ */
+error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields)
 {
         secondary_errno = lnf_mem_init(mem);
         if (secondary_errno != LNF_OK) {
@@ -351,156 +300,71 @@ error_code_t init_aggr_mem(lnf_mem_t **mem, const struct agg_param *ap,
                 return E_LNF;
         }
 
-        /* Default aggragation fields: first, last, flows, packets, bytes. */
-        secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
-                free_aggr_mem(*mem);
-                return E_LNF;
+        /* Is it possible to apply fast aggregation? */
+        if (fields[LNF_FLD_FIRST].id &&
+                        ((fields[LNF_FLD_FIRST].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_MIN) &&
+                        fields[LNF_FLD_LAST].id &&
+                        ((fields[LNF_FLD_LAST].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_MAX) &&
+                        fields[LNF_FLD_DOCTETS].id &&
+                        ((fields[LNF_FLD_DOCTETS].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_SUM) &&
+                        fields[LNF_FLD_DPKTS].id &&
+                        ((fields[LNF_FLD_DPKTS].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_SUM) &&
+                        fields[LNF_FLD_AGGR_FLOWS].id &&
+                        ((fields[LNF_FLD_AGGR_FLOWS].flags & LNF_AGGR_FLAGS) ==
+                         LNF_AGGR_SUM))
+        {
+                secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
+                if (secondary_errno != LNF_OK) {
+                        print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
+                        free_aggr_mem(*mem);
+                        *mem = NULL;
+                        return E_LNF;
+                }
         }
 
-        for (size_t i = 0; i < ap_cnt; ++i, ++ap) {
-                secondary_errno = lnf_mem_fadd(*mem, ap->field, ap->flags,
-                                ap->numbits, ap->numbits6);
+        /* Loop through the fields. */
+        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+                if (fields[i].id == 0) {
+                        continue; //field is not present
+                }
+
+                if (fields[i].id >= LNF_FLD_CALC_BPS &&
+                                fields[i].id <= LNF_FLD_CALC_BPP) {
+                        continue;
+                }
+
+                secondary_errno = lnf_mem_fadd(*mem, fields[i].id,
+                                fields[i].flags, fields[i].ipv4_bits,
+                                fields[i].ipv6_bits);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
+                        print_err(E_LNF, secondary_errno,
+                                        "lnf_mem_fadd()");
                         free_aggr_mem(*mem);
+                        *mem = NULL;
                         return E_LNF;
                 }
         }
 
         return E_OK;
 }
-
 
 void free_aggr_mem(lnf_mem_t *mem)
 {
         lnf_mem_free(mem);
 }
+/**
+ * @}
+ */ //aggr_mem
 
 
-/* Initialize memory for traffic volume statistics.*/
-error_code_t init_stat_mem(lnf_mem_t **mem)
-{
-        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
-                LNF_FLD_DOCTETS};
-
-        secondary_errno = lnf_mem_init(mem);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
-                return E_LNF;
-        }
-
-        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
-                secondary_errno = lnf_mem_fadd(*mem, stat_params[i],
-                                LNF_AGGR_SUM, 0, 0);
-                if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_mem_fadd()");
-                        free_aggr_mem(*mem);
-                        return E_LNF;
-                }
-        }
-
-        return E_OK;
-}
-
-
-/* Free statistics memory. */
-void free_stat_mem(lnf_mem_t *mem)
-{
-   lnf_mem_free(mem);
-}
-
-
-error_code_t print_aggr_mem(lnf_mem_t *mem, size_t limit)
-{
-        error_code_t primary_errno = E_OK;
-        size_t rec_cntr = 0;
-        lnf_rec_t *rec;
-        lnf_brec1_t brec;
-
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
-                return E_LNF;
-        }
-
-        secondary_errno = lnf_mem_read(mem, rec); //read first
-        while (secondary_errno == LNF_OK) {
-                secondary_errno = lnf_rec_fget(rec, LNF_FLD_BREC1, &brec);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_rec_fget()");
-                        goto free_lnf_rec;
-                }
-
-                print_brec(&brec);
-
-                if (++rec_cntr == limit) {
-                        goto free_lnf_rec;
-                }
-
-                secondary_errno = lnf_mem_read(mem, rec); //read next
-        }
-        if (secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
-        }
-
-free_lnf_rec:
-        lnf_rec_free(rec);
-
-        return primary_errno;
-}
-
-
-error_code_t print_stat_mem(lnf_mem_t *mem)
-{
-        error_code_t primary_errno = E_OK;
-        lnf_rec_t *rec;
-        size_t stat_val;
-        const int stat_params[] = {LNF_FLD_AGGR_FLOWS, LNF_FLD_DPKTS,
-                LNF_FLD_DOCTETS};
-        char fld_name_buff[LNF_INFO_BUFSIZE];
-
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
-                return E_LNF;
-        }
-
-        secondary_errno = lnf_mem_read(mem, rec); //read single record
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_read()");
-                goto free_lnf_rec;
-        }
-
-        printf("statistics: \n");
-        for (size_t i = 0; i < ARRAY_SIZE(stat_params); ++i) {
-                secondary_errno = lnf_rec_fget(rec, stat_params[i], &stat_val);
-                if (secondary_errno != LNF_OK) {
-                        primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
-                                        "lnf_rec_fget()");
-                        goto free_lnf_rec;
-                }
-
-                secondary_errno = lnf_fld_info(stat_params[i],
-                                LNF_FLD_INFO_NAME, fld_name_buff,
-                                LNF_INFO_BUFSIZE);
-
-                printf("\t%lu %s\n", stat_val, fld_name_buff);
-        }
-
-free_lnf_rec:
-        lnf_rec_free(rec);
-
-        return primary_errno;
-}
-
-
+/**
+ * \defgroup time_func Time related functions
+ * @{
+ */
 int tm_diff(const struct tm a, const struct tm b)
 {
         int a4 = (a.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (a.tm_year & 3);
@@ -518,11 +382,10 @@ int tm_diff(const struct tm a, const struct tm b)
                                 (a.tm_min - b.tm_min)) + (a.tm_sec - b.tm_sec));
 }
 
-
 time_t mktime_utc(struct tm *tm)
 {
         time_t ret;
-        static char orig_tz[128];
+        char orig_tz[128];
         char *tz;
 
         /* Save current time zone environment variable. */
@@ -550,3 +413,70 @@ time_t mktime_utc(struct tm *tm)
 
         return ret;
 }
+/**
+ * @}
+ */ //time_func
+
+
+/**
+ * \defgroup lnf_fields_func LNF fields related functions
+ * @{
+ */
+int field_get_type(int field)
+{
+        int type;
+
+        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
+                return -1;
+        }
+
+        lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
+
+        return type;
+}
+
+size_t field_get_size(int field)
+{
+        const int type = field_get_type(field);
+
+        if (type == -1) {
+                return 0;
+        }
+
+        switch (type) {
+        case LNF_UINT8:
+                return sizeof (uint8_t);
+
+        case LNF_UINT16:
+                return sizeof (uint16_t);
+
+        case LNF_UINT32:
+                return sizeof (uint32_t);
+
+        case LNF_UINT64:
+                return sizeof (uint64_t);
+
+        case LNF_DOUBLE:
+                return sizeof (double);
+
+        case LNF_ADDR:
+                return sizeof (lnf_ip_t);
+
+        case LNF_MAC:
+                return sizeof (lnf_mac_t);
+
+        case LNF_BASIC_RECORD1:
+                return sizeof (lnf_brec1_t);
+
+        case LNF_NONE:
+        case LNF_STRING:
+        case LNF_MPLS:
+                assert(!"unimplemented LNF data type");
+
+        default:
+                assert(!"unknown LNF data type");
+        }
+}
+/**
+ * @}
+ */ //lnf_fields_func

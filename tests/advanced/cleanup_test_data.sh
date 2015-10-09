@@ -1,11 +1,9 @@
-#!/usr/bin/env sh
+#!/bin/bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
 #
-# Description: This tests creation of custom MPI structures. It starts testing
-# binary with given count of processes (first parameter or default value). Test
-# result is evaluated according to return code of test binary.
+# Description: Delete created testing file(s).
 #
 #
 #
@@ -43,22 +41,11 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-TEST_DESC="Creation of MPI datatypes"
+# import common setup
+. ./tests_setup.sh
 
+rm -f $G_INPUT_DATA
 
+#if vsechno ok, rm -f ${G_LOG_DIR}/*
 
-if [ -z $1 ]; then
-        proc_cnt=3
-else
-        proc_cnt=$1
-fi
-
-mpirun -np $proc_cnt ./create_mpi_struct
-
-if [ $? -eq 0 ]; then
-        echo "${TEST_DESC} was successful (${proc_cnt} processes)."
-        exit 0
-else
-        echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
-        exit 1
-fi
+exit 0
