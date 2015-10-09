@@ -549,7 +549,7 @@ void progress_bar(progress_bar_t type, size_t slave_cnt)
 
         //TODO: MPI methods are not thread safe
         /* Receive number of files to be processed. */
-        MPI_Gather(MPI_IN_PLACE, 0, NULL, files_slave_sum - 1, 1,
+        MPI_Gather(MPI_IN_PLACE, 0, MPI_UNSIGNED_LONG, files_slave_sum - 1, 1,
                         MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
         for (size_t i = 0; i < slave_cnt; ++i) {
                 files_all_sum += files_slave_sum[i];
