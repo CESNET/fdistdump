@@ -985,7 +985,7 @@ void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
                                 (double)sum_cur / sum_tot * 100);
 
                 for (size_t i = 0; i < cnt; ++i) {
-                        fprintf(out_stream, ",\"%zu\":%.0f", i + 1,
+                        fprintf(out_stream, ",\"sl%zu\":%.0f", i + 1,
                                         (double)cur[i] / tot[i] * 100);
                 }
 
