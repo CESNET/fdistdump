@@ -569,7 +569,8 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
 
         uint64_t threshold;
         lnf_rec_t *rec;
-        int sort_key = LNF_SORT_NONE;
+        int sort_field = LNF_FLD_ZERO_;
+        int sort_direction = LNF_SORT_NONE;
 
 
         /* Initialize LNF record. TODO: use global record */
@@ -625,14 +626,18 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         }
 
 
-        /* Find sort key in the fields. */
+        /* Find sort attributes (key and direction) in the fields array. */
         for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
                 if (stc->shared.fields[i].flags & LNF_SORT_FLAGS) {
-                        sort_key = stc->shared.fields[i].id;
+                        sort_field = stc->shared.fields[i].id;
+                        sort_direction =
+                                stc->shared.fields[i].flags & LNF_SORT_FLAGS;
                         break;
                 }
         }
-        assert(sort_key != LNF_SORT_NONE);
+        assert(sort_field != LNF_FLD_ZERO_);
+        assert(sort_direction == LNF_SORT_ASC ||
+                        sort_direction == LNF_SORT_DESC);
 
         /*
          * Read Nth record from sorted memory, fetch value of sort key and
@@ -640,7 +645,6 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
          * less than N records in memory, this is actually not Nth record, but
          * cursor is NULL by now, so no more records will be read.
          */
-        //TODO: handle also ascending order
         secondary_errno = lnf_mem_read_c(stc->aggr_mem, nth_rec_cursor, rec);
         assert(secondary_errno != LNF_EOF);
         if (secondary_errno != LNF_OK) {
@@ -649,12 +653,20 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                 goto free_lnf_rec;
         }
 
-        secondary_errno = lnf_rec_fget(rec, sort_key, &threshold);
+        secondary_errno = lnf_rec_fget(rec, sort_field, &threshold);
         assert(secondary_errno == LNF_OK);
-        threshold /= stc->slave_cnt;
+        if (sort_direction == LNF_SORT_ASC) {
+                threshold *= stc->slave_cnt;
+        } else if (sort_direction == LNF_SORT_DESC) {
+                threshold /= stc->slave_cnt;
+        }
 
 
-        /* Send records until we have records and sort key value >= threshold.*/
+        /*
+         * Send records until we have records and until:
+         * sort field >= threshold if direction is descending
+         * sort field <= threshold if direction is ascending
+         */
         while (cursor != NULL) {
                 uint64_t key_value;
 
@@ -668,9 +680,11 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                         goto free_lnf_rec;
                 }
 
-                secondary_errno = lnf_rec_fget(rec, sort_key, &key_value);
+                secondary_errno = lnf_rec_fget(rec, sort_field, &key_value);
                 assert(secondary_errno == LNF_OK);
-                if (key_value < threshold) {
+                if ((sort_direction == LNF_SORT_ASC && key_value > threshold) ||
+                                (sort_direction == LNF_SORT_DESC &&
+                                 key_value < threshold)) {
                         break; //threshold reached
                 }
 
