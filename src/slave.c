@@ -618,7 +618,9 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                         db = db_mem[db_mem_idx];
                 }
         }
-        if (secondary_errno != LNF_OK && secondary_errno != LNF_EOF) {
+        if (secondary_errno == LNF_EOF) {
+                goto free_lnf_rec; //no records in memory or all records read
+        } else if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno,
                                 "lnf_mem_next_c() or lnf_mem_first_c()");
@@ -641,9 +643,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
 
         /*
          * Read Nth record from sorted memory, fetch value of sort key and
-         * compute threshold based on this value and slave count. If there was
-         * less than N records in memory, this is actually not Nth record, but
-         * cursor is NULL by now, so no more records will be read.
+         * compute threshold based on this value and slave count.
          */
         secondary_errno = lnf_mem_read_c(stc->aggr_mem, nth_rec_cursor, rec);
         assert(secondary_errno != LNF_EOF);

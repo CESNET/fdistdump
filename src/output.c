@@ -967,7 +967,7 @@ void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
                 sum_cur += cur[i];
                 sum_tot += tot[i];
 
-                assert(cur[i] >= tot[i]);
+                assert(cur[i] <= tot[i]);
                 if (tot[i] == 0) {
                         slave_percentage[i] = 100.0;
                 } else {
@@ -975,7 +975,7 @@ void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
                 }
         }
 
-        assert(sum_cur >= sum_tot);
+        assert(sum_cur <= sum_tot);
         if (sum_tot == 0) {
                 master_percentage = 100.0;
         } else {
