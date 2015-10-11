@@ -930,17 +930,26 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         return E_OK;
 }
 
-void print_stats(const struct stats *stats)
+void print_summary(const struct stats *stats, double duration)
 {
+        int header_len;
+        const double flows_per_sec = stats->flows / duration;
+
+
         if (output_params.summary != OUTPUT_SUMMARY_YES) {
                 return;
         }
 
-        printf("summary: ");
+        putchar('\n');
+        header_len = printf("summary: ");
+        assert(header_len >= 0);
+
         printf("%s flows, ", stat_to_str(&stats->flows));
         printf("%s packets, ", stat_to_str(&stats->pkts));
-        printf("%s bytes", stat_to_str(&stats->bytes));
-        putchar('\n');
+        printf("%s bytes\n", stat_to_str(&stats->bytes));
+
+        printf("%*s%f seconds, %s flows/second\n", header_len, "", duration,
+                        double_stat_to_str(&flows_per_sec));
 }
 
 void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
@@ -950,24 +959,42 @@ void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
         size_t sum_tot = 0;
         FILE *out_stream;
 
+        double master_percentage;
+        double slave_percentage[cnt];
+
 
         for (size_t i = 0; i < cnt; ++i) {
                 sum_cur += cur[i];
                 sum_tot += tot[i];
+
+                assert(cur[i] >= tot[i]);
+                if (tot[i] == 0) {
+                        slave_percentage[i] = 100.0;
+                } else {
+                        slave_percentage[i] = (double)cur[i] / tot[i] * 100.0;
+                }
         }
+
+        assert(sum_cur >= sum_tot);
+        if (sum_tot == 0) {
+                master_percentage = 100.0;
+        } else {
+                master_percentage = (double)sum_cur / sum_tot * 100.0;
+        }
+
 
         if (type == PROGRESS_BAR_BASIC || type == PROGRESS_BAR_EXTENDED) {
                 out_stream = stderr;
 
                 fprintf(out_stream, "[progress] ");
                 fprintf(out_stream, "master: %zu/%zu (%.0f %%)", sum_cur,
-                                sum_tot, (double)sum_cur / sum_tot * 100);
+                                sum_tot, master_percentage);
 
                 if (type == PROGRESS_BAR_EXTENDED) {
                         for (size_t i = 0; i < cnt; ++i) {
                                 fprintf(out_stream, " | %zu: %zu/%zu (%.0f %%)",
                                                 i + 1, cur[i], tot[i],
-                                                (double)cur[i] / tot[i] * 100);
+                                                slave_percentage[i]);
                         }
                 }
 
@@ -981,12 +1008,11 @@ void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
 
                 putc('{', out_stream);
 
-                fprintf(out_stream, "\"master\":%.0f",
-                                (double)sum_cur / sum_tot * 100);
+                fprintf(out_stream, "\"master\":%.0f", master_percentage);
 
                 for (size_t i = 0; i < cnt; ++i) {
                         fprintf(out_stream, ",\"sl%zu\":%.0f", i + 1,
-                                        (double)cur[i] / tot[i] * 100);
+                                        slave_percentage[i]);
                 }
 
                 putc('}', out_stream);

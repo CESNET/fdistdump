@@ -65,7 +65,6 @@ int main(int argc, char **argv)
         int world_rank;
         int world_size;
         int thread_provided; //thread safety provided by MPI
-        double duration;
         struct cmdline_args args = {0};
 
         /*
@@ -117,23 +116,11 @@ int main(int argc, char **argv)
         /* Create MPI data types (global variables). */
         create_mpi_struct_shared_task_ctx();
 
-        /* Start time measurement. */
-        MPI_Barrier(MPI_COMM_WORLD);
-        duration = -MPI_Wtime();
-
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
                 primary_errno = master(world_size, &args);
         } else {
                 primary_errno = slave(world_size);
-        }
-
-        /* End time measurement. */
-        MPI_Barrier(MPI_COMM_WORLD);
-        duration += MPI_Wtime();
-
-        if (world_rank == ROOT_PROC) {
-                print_debug("total duration: %fs", duration);
         }
 
         /* Free MPI data types (global variables). */

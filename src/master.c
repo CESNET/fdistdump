@@ -403,15 +403,11 @@ static void stats_recv(struct stats *s, size_t slave_cnt)
 static error_code_t mode_list_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno;
-        struct stats stats = {0};
+
 
         primary_errno = irecv_loop(mtc->slave_cnt, mtc->shared.rec_limit,
                         print_rec_callback, NULL);
 
-        /* Receive statistics from every slave, print them. */
-        //TODO: stats with record limit are incorrect
-        stats_recv(&stats, mtc->slave_cnt);
-        print_stats(&stats);
 
         return primary_errno;
 }
@@ -421,7 +417,6 @@ static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno = E_OK;
         struct mem_write_callback_data mwcd = {0};
-        struct stats stats = {0};
 
 
         /* Fill fields array. */
@@ -468,17 +463,14 @@ static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
                 }
         }
 
-        /* Receive statistics from every slave, print them. */
-        stats_recv(&stats, mtc->slave_cnt);
-
         /* Print all records in memory. */
         primary_errno = print_mem(mwcd.mem,mtc->shared.rec_limit);
-        print_stats(&stats);
 
 free_lnf_rec:
         lnf_rec_free(mwcd.rec);
 free_aggr_mem:
         free_aggr_mem(mwcd.mem);
+
 
         return primary_errno;
 }
@@ -488,7 +480,7 @@ static error_code_t mode_aggr_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno = E_OK;
         lnf_mem_t *aggr_mem;
-        struct stats stats = {0};
+
 
         /* Initialize aggregation memory and set memory parameters. */
         primary_errno = init_aggr_mem(&aggr_mem, mtc->shared.fields);
@@ -524,15 +516,12 @@ static error_code_t mode_aggr_main(const struct master_task_ctx *mtc)
                 }
         }
 
-        /* Receive statistics from every slave, print them. */
-        stats_recv(&stats, mtc->slave_cnt);
-
         /* Print all records in memory. */
         primary_errno = print_mem(aggr_mem, mtc->shared.rec_limit);
-        print_stats(&stats);
 
 free_aggr_mem:
         free_aggr_mem(aggr_mem);
+
 
         return primary_errno;
 }
@@ -581,7 +570,10 @@ void progress_bar(progress_bar_t type, size_t slave_cnt)
 error_code_t master(int world_size, const struct cmdline_args *args)
 {
         error_code_t primary_errno = E_OK;
-        struct master_task_ctx mtc;
+        struct master_task_ctx mtc; //master task context
+        struct stats stats = {0}; //statistics form slaves
+        double duration = -MPI_Wtime(); //start time measurement
+
 
         memset(&mtc, 0, sizeof (mtc));
 
@@ -637,6 +629,14 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                         }
                 }
         }
+
+        /* Receive statistics from every slave, print them. */
+        //TODO: when using list mode and record limit, stats are incorrect
+        stats_recv(&stats, mtc.slave_cnt);
+        duration += MPI_Wtime(); //end time measurement
+
+        print_summary(&stats, duration);
+
 
         return primary_errno;
 }

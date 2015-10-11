@@ -958,12 +958,12 @@ error_code_t slave(int world_size)
         primary_errno = task_postprocess(&stc);
 
 finalize_task:
-        stats_send(&stc.stats);
-
         if (primary_errno != E_OK) { //always send terminator to master on error
                 MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
                                 MPI_COMM_WORLD);
         }
+
+        stats_send(&stc.stats);
 
         f_array_free(&files);
         task_free(&stc);
