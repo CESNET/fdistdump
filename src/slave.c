@@ -725,16 +725,15 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         }
 
 
+free_lnf_rec:
+        lnf_rec_free(rec);
+send_terminator:
         /* Send remaining records if data buffer is not empty. */
         if (db_rec_cntr != 0) {
                 isend_bytes(db, db_off, &request);
                 byte_cntr += db_off;
         }
 
-
-free_lnf_rec:
-        lnf_rec_free(rec);
-send_terminator:
         /* Phase 1 done, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
