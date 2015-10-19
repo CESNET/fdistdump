@@ -1,6 +1,6 @@
 #initialization
 AC_INIT([fdistdump], [0.1], [], [], [https://github.com/CESNET/fdistdump])
-AM_INIT_AUTOMAKE([foreign -Wall -Werror])
+AM_INIT_AUTOMAKE([foreign -Wall -Werror subdir-objects])
 AC_CONFIG_HEADERS([config.h])
 
 #create Makefiles
