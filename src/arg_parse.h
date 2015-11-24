@@ -100,4 +100,6 @@ struct cmdline_args {
  */
 error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv);
 
+void free_args(struct cmdline_args *args);
+
 #endif //ARG_PARSE_H

@@ -74,8 +74,7 @@ error_code_t f_array_add(f_array_t *fa, const char *f_name, off_t f_size);
 size_t f_array_get_count(const f_array_t *fa);
 off_t f_array_get_size_sum(const f_array_t *fa);
 
-error_code_t f_array_fill_from_time(f_array_t *fa, const struct tm begin,
-                const struct tm end);
-error_code_t f_array_fill_from_path(f_array_t *fa, const char *path);
 
+error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
+                struct tm end);
 #endif

@@ -309,7 +309,7 @@ static error_code_t set_time_interval(struct cmdline_args *args,
         if (!begin_utc) {
                 time_t tmp;
 
-                //let mktime() decide about DST
+                //input time is localtime, let mktime() decide about DST
                 args->interval_begin.tm_isdst = -1;
                 tmp = mktime(&args->interval_begin);
                 gmtime_r(&tmp, &args->interval_begin);
@@ -317,7 +317,7 @@ static error_code_t set_time_interval(struct cmdline_args *args,
         if (!end_utc) {
                 time_t tmp;
 
-                //let mktime() decide about DST
+                //input time is localtime, let mktime() decide about DST
                 args->interval_end.tm_isdst = -1;
                 tmp = mktime(&args->interval_end);
                 gmtime_r(&tmp, &args->interval_end);
@@ -815,20 +815,19 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         error_code_t primary_errno = E_OK;
         int opt;
         int sort_key = LNF_FLD_ZERO_;
-        size_t input_arg_cnt = 0;
+        size_t path_str_len = 0;
         bool have_fields = false; //LNF fields are specified
 
         const char usage_string[] = "Usage: mpirun [ options ] " PACKAGE_NAME
                 " [ <args> ]\n";
         const char help_string[] = "help\n";
-        const char *short_opts = "a:f:l:o:r:s:t:";
+        const char *short_opts = "a:f:l:o:s:t:";
         const struct option long_opts[] = {
                 /* Long and short. */
                 {"aggregation", required_argument, NULL, 'a'},
                 {"filter", required_argument, NULL, 'f'},
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
-                {"read", required_argument, NULL, 'r'},
                 {"statistic", required_argument, NULL, 's'},
                 {"time", required_argument, NULL, 't'},
 
@@ -896,11 +895,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_sort_field(args->fields, optarg);
                         break;
 
-                case 'r': //path to input file or directory
-                        args->path_str = optarg;
-                        input_arg_cnt++;
-                        break;
-
                 case 's': //statistic
                         args->working_mode = MODE_AGGR;
                         primary_errno = set_stat(args, optarg);
@@ -908,7 +902,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 case 't': //time interval
                         primary_errno = set_time_interval(args, optarg);
-                        input_arg_cnt++;
                         break;
 
 
@@ -994,29 +987,35 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         }
 
 
-        /* Non-option arguments are undesirable. */
-        if (optind != argc) {
-                print_err(E_ARG, 0, "unknown non-option argument \"%s\"",
-                                argv[optind]);
-                fprintf(stderr, usage_string);
+        /*
+         * Non-option arguments are paths. Combine them into one comma separated
+         * string for better MPI handling.
+         */
+        if (optind == argc) { //at least one path is mandatory
+                print_err(E_ARG, 0, "missing path");
                 return E_ARG;
         }
 
-        /* Correct data input check. */
-        if (input_arg_cnt == 0) {
-                print_err(E_ARG, 0, "missing data input specifier (-r or -t)");
-                fprintf(stderr, usage_string);
-                return E_ARG;
-        } else if (input_arg_cnt > 1) {
-                print_err(E_ARG, 0, "only one data input specifier allowed");
-                fprintf(stderr, usage_string);
-                return E_ARG;
+        for (int i = optind; i < argc; ++i) { //loop through all non-option args
+                if (strchr(argv[i], 0x1C) != NULL) {
+                        print_err(E_ARG, 0, "file separator character (0x1C) is"
+                                        " forbidden in path string", argv[i]);
+                        return E_ARG;
+                }
+                path_str_len += strlen(argv[i]) + 1; //one more for sep or '\0'
         }
 
-        if (args->path_str && (strlen(args->path_str) >= PATH_MAX)) {
-                print_err(E_ARG, 0, "path string too long (limit is %lu)",
-                                PATH_MAX);
-                return E_ARG;
+        args->path_str = calloc(path_str_len, sizeof (char)); //implicit null
+        if (args->path_str == NULL) {
+                print_err(E_MEM, 0, "calloc()");
+                return E_MEM;
+        }
+
+        for (int i = optind; i < argc; ++i) { //loop through all non-option args
+                strcat(args->path_str, argv[i]); //copy path
+                if (i != argc - 1) { //not the last path, add separator
+                        args->path_str[strlen(args->path_str)] = 0x1C;
+                }
         }
 
 
@@ -1178,6 +1177,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         {
         static char fld_name_buff[LNF_INFO_BUFSIZE];
         int field;
+        char begin[255], end[255];
+        char *path = args->path_str;
+        int c;
 
         printf("------------------------------------------------------\n");
         printf("mode: %s\n", working_mode_to_str(args->working_mode));
@@ -1206,18 +1208,29 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 printf("filter: %s\n", args->filter_str);
         }
 
-        if (args->path_str != NULL) {
-                printf("path: %s\n", args->path_str);
-        } else {
-                char begin[255], end[255];
-
-                strftime(begin, sizeof(begin), "%c", &args->interval_begin);
-                strftime(end, sizeof(end), "%c", &args->interval_end);
-                printf("interval: %s - %s\n", begin, end);
+        printf("paths:\n\t");
+        while ((c = *path++)) {
+                if (c == 0x1C) { //substitute separator with end of line
+                        putchar('\n');
+                        putchar('\t');
+                } else {
+                        putchar(c);
+                }
         }
+        putchar('\n');
+
+        strftime(begin, sizeof(begin), "%c", &args->interval_begin);
+        strftime(end, sizeof(end), "%c", &args->interval_end);
+        printf("interval: %s - %s\n", begin, end);
         printf("------------------------------------------------------\n\n");
         }
 #endif //DEBUG
 
         return E_OK;
+}
+
+
+void free_args(struct cmdline_args *args)
+{
+        free(args->path_str);
 }

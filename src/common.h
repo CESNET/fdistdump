@@ -64,14 +64,9 @@
 
 //TODO: move to configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
-#define FLOW_FILE_BASE_DIR "/data/profiles_data/"
-#define FLOW_FILE_PROFILE "live"
-#define FLOW_FILE_SOURCE "telia"
-#define FLOW_FILE_PATH_FORMAT "%Y/%m/%d/"
+#define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
 #define FLOW_FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"
-#define FLOW_FILE_PATH (FLOW_FILE_BASE_DIR FLOW_FILE_PROFILE "/" \
-                FLOW_FILE_SOURCE "/" FLOW_FILE_PATH_FORMAT \
-                FLOW_FILE_NAME_FORMAT)
+#define FLOW_FILE_FORMAT (FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT)
 
 
 /**

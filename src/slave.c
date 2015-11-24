@@ -92,7 +92,7 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
-        char path_str[PATH_MAX]; //file or directory path string
+        char *path_str; //file/directory/profile(s) path string
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
@@ -373,6 +373,7 @@ static void task_free(struct slave_task_ctx *stc)
         if (stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
         }
+        free(stc->path_str);
 }
 
 
@@ -398,13 +399,21 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
 
+
         assert(stc != NULL);
 
-        /* Receivce task info. */
+        /* Receive task context, path string and optional filter string. */
         MPI_Bcast(&stc->shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
                         MPI_COMM_WORLD);
 
-        /* If have filter epxression, receive filter expression string. */
+        stc->path_str = calloc(stc->shared.path_str_len + 1, sizeof (char));
+        if (stc->path_str == NULL) {
+                print_err(E_MEM, 0, "calloc()");
+                return E_MEM;
+        }
+        MPI_Bcast(stc->path_str, stc->shared.path_str_len, MPI_CHAR, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
         if (stc->shared.filter_str_len > 0) {
                 char filter_str[stc->shared.filter_str_len + 1];
 
@@ -416,13 +425,6 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
                 //it is OK not to chech primary_errno
         }
 
-        /* If have path string, receive path string. */
-        if (stc->shared.path_str_len > 0) {
-                //PATH_MAX length already checked on master side
-                MPI_Bcast(stc->path_str, stc->shared.path_str_len, MPI_CHAR,
-                                ROOT_PROC, MPI_COMM_WORLD);
-                stc->path_str[stc->shared.path_str_len] = '\0';//termination
-        }
 
         return primary_errno;
 }
@@ -906,18 +908,10 @@ error_code_t slave(int world_size)
         }
 
         /* Data source specific initialization. */
-        if (stc.shared.path_str_len == 0) {
-                primary_errno = f_array_fill_from_time(&files,
-                                stc.shared.interval_begin,
-                                stc.shared.interval_end);
-                if (primary_errno != E_OK) {
-                        goto finalize_task;
-                }
-        } else {
-                primary_errno = f_array_fill_from_path(&files, stc.path_str);
-                if (primary_errno != E_OK) {
-                        goto finalize_task;
-                }
+        primary_errno = f_array_fill(&files, stc.path_str,
+                        stc.shared.interval_begin, stc.shared.interval_end);
+        if (primary_errno != E_OK) {
+                goto finalize_task;
         }
 
         /* Report number of files to be processed. */

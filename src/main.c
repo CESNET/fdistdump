@@ -70,8 +70,8 @@ int main(int argc, char **argv)
         /*
          * Initialize MPI and check supported thread level. We need at least
          * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
-         * OpenMPI doc says: "It is only lightly tested and likely does not work
-         * for thread-intensive applications."
+         * Open MPI doc says: "It is only lightly tested and likely does not
+         * work for thread-intensive applications."
          */
         MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
         if (thread_provided != MPI_THREAD_SERIALIZED &&
@@ -88,20 +88,8 @@ int main(int argc, char **argv)
 
         if (world_rank == ROOT_PROC) {
                 primary_errno = arg_parse(&args, argc, argv);
-                switch (primary_errno) {
-                case E_OK:
-                        break;
-
-                case E_PASS: //help or error was printed
+                if (primary_errno != E_OK) {
                         args.working_mode = MODE_PASS;
-                        break;
-
-                case E_ARG:
-                        args.working_mode = MODE_PASS;
-                        break;
-
-                default:
-                        assert(!"unknown error code received");
                 }
         }
 
@@ -110,6 +98,7 @@ int main(int argc, char **argv)
                                 "Did you use mpirun? "
                                 "Try to run program again with --help.\n",
                                 PACKAGE_NAME);
+                MPI_Finalize();
                 return EXIT_FAILURE;
         }
 
@@ -125,6 +114,10 @@ int main(int argc, char **argv)
 
         /* Free MPI data types (global variables). */
         free_mpi_struct_shared_task_ctx();
+
+        /* Free arguments structure. */
+        free_args(&args);
+
 
         MPI_Finalize();
         if (primary_errno == E_OK || primary_errno == E_PASS) {

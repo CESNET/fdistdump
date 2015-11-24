@@ -93,10 +93,11 @@ static void construct_master_task_ctx(struct master_task_ctx *mtc,
         memcpy(mtc->shared.fields, args->fields,
                         MEMBER_SIZE(struct master_task_ctx, shared.fields));
 
-        mtc->shared.filter_str_len =
-                (args->filter_str == NULL) ? 0 : strlen(args->filter_str);
         mtc->shared.path_str_len =
                 (args->path_str == NULL) ? 0 : strlen(args->path_str);
+
+        mtc->shared.filter_str_len =
+                (args->filter_str == NULL) ? 0 : strlen(args->filter_str);
 
         mtc->shared.rec_limit = args->rec_limit;
 
@@ -582,17 +583,16 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         output_setup(mtc.output_params, mtc.shared.fields);
 
 
-        /* Broadcast task context, optional filter string and path string. */
+        /* Broadcast task context, path string and optional filter string. */
         MPI_Bcast(&mtc.shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
+        MPI_Bcast(args->path_str, mtc.shared.path_str_len, MPI_CHAR, ROOT_PROC,
                         MPI_COMM_WORLD);
 
         if (mtc.shared.filter_str_len > 0) {
                 MPI_Bcast(args->filter_str, mtc.shared.filter_str_len,
                                 MPI_CHAR, ROOT_PROC, MPI_COMM_WORLD);
-        }
-        if (mtc.shared.path_str_len > 0) {
-                MPI_Bcast(args->path_str, mtc.shared.path_str_len, MPI_CHAR,
-                                ROOT_PROC, MPI_COMM_WORLD);
         }
 
 
@@ -609,23 +609,23 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                 {
                         /* Send, receive, process. */
                         switch (mtc.shared.working_mode) {
-                                case MODE_PASS:
-                                        //only termination message will be
-                                        //received from each slave
-                                case MODE_LIST:
-                                        primary_errno = mode_list_main(&mtc);
-                                        break;
+                        case MODE_PASS:
+                                //only termination message will be received from
+                                //each slave
+                        case MODE_LIST:
+                                primary_errno = mode_list_main(&mtc);
+                                break;
 
-                                case MODE_SORT:
-                                        primary_errno = mode_sort_main(&mtc);
-                                        break;
+                        case MODE_SORT:
+                                primary_errno = mode_sort_main(&mtc);
+                                break;
 
-                                case MODE_AGGR:
-                                        primary_errno = mode_aggr_main(&mtc);
-                                        break;
+                        case MODE_AGGR:
+                                primary_errno = mode_aggr_main(&mtc);
+                                break;
 
-                                default:
-                                        assert(!"unknown working mode");
+                        default:
+                                assert(!"unknown working mode");
                         }
                 }
         }
