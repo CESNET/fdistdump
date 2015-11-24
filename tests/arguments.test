@@ -55,10 +55,10 @@ else
 fi
 
 
-test_args[0]="-a srcip,dstip,srcport,dstport,proto -l 100 -o flows -r test.nffile -f "
+test_args[0]="-a srcip,dstip,srcport,dstport,proto -l 100 -o flows test.nffile -f "
 filter[0]="src port 80 and proto TCP"
 
-test_args[1]="-i 2000-01-31 -s srcip/bpp"
+test_args[1]="-t 2000-01-31 -s srcip/bpp test.nffile"
 filter[1]=""
 
 #test_args[2]=""
@@ -68,19 +68,15 @@ for i in ${!test_args[@]}; do
 
         if [ -z "${filter[$i]}" ]; then
                 mpirun -np $proc_cnt ./arguments ${test_args[$i]}
-                args="${test_args[$i]}"
         else
                 mpirun -np $proc_cnt ./arguments ${test_args[$i]} "${filter[$i]}"
-                args="${test_args[$i]} \"${filter[$i]}\""
         fi
 
 
         if [ $? -eq 0 ]; then
                 echo "${TEST_DESC} was successful (${proc_cnt} processes)."
-                echo "     test-args: ${args}"
         else
                 echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
-                echo "     test-args: ${args}"
                 exit 1
         fi
 done

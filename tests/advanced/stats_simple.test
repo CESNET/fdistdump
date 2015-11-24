@@ -62,8 +62,8 @@ STAT_FIELD="proto"
 SORT_FIELD="flows"
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -s $STAT_FIELD \
-        --output-format=csv --fields=first,last,bytes,pkts"
+FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -s $STAT_FIELD --output-format=csv \
+        --fields=first,last,bytes,pkts $G_INPUT_DATA"
 eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
