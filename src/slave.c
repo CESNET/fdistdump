@@ -909,7 +909,7 @@ error_code_t slave(int world_size)
 
         /* Data source specific initialization. */
         primary_errno = f_array_fill(&files, stc.path_str,
-                        stc.shared.interval_begin, stc.shared.interval_end);
+                        stc.shared.time_begin, stc.shared.time_end);
         if (primary_errno != E_OK) {
                 goto finalize_task;
         }

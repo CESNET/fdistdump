@@ -246,24 +246,23 @@ next_token:
 }
 
 
-/** \brief Parse and store time interval string.
+/** \brief Parse and store time range string.
  *
- * Function tries to parse time interval string, fills interval_begin and
- * interval_end with appropriate values on success. Beginning and ending dates
+ * Function tries to parse time range string, fills time_begin and
+ * time_end with appropriate values on success. Beginning and ending dates
  * (and times) are  separated with INTERVAL_DELIM, if ending date is not
  * specified, current time is used.
- * If interval string is successfully parsed, E_OK is returned. On error,
- * content of interval_begin and interval_end is undefined and E_ARG is
+ * If range string is successfully parsed, E_OK is returned. On error,
+ * content of time_begin and time_end is undefined and E_ARG is
  * returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
- * \param[in] interval_str Aggregation string, usually gathered from command
+ * \param[in] range_str Aggregation string, usually gathered from command
  *                        line.
  * \return Error code. E_OK or E_ARG.
  */
-static error_code_t set_time_interval(struct cmdline_args *args,
-                char *interval_str)
+static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
 {
         error_code_t primary_errno = E_OK;
         char *begin_str;
@@ -273,34 +272,34 @@ static error_code_t set_time_interval(struct cmdline_args *args,
         bool begin_utc = false;
         bool end_utc = false;
 
-        assert(args != NULL && interval_str != NULL);
+        assert(args != NULL && range_str != NULL);
 
-        /* Split time interval string. */
-        begin_str = strtok_r(interval_str, INTERVAL_DELIM, &saveptr);
+        /* Split time range string. */
+        begin_str = strtok_r(range_str, INTERVAL_DELIM, &saveptr);
         if (begin_str == NULL) {
-                print_err(E_ARG, 0, "invalid interval string \"%s\"\n",
-                                interval_str);
+                print_err(E_ARG, 0, "invalid time range string \"%s\"\n",
+                                range_str);
                 return E_ARG;
         }
         end_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr); //NULL is valid
         trailing_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr);
         if (trailing_str != NULL) {
-                print_err(E_ARG, 0, "interval trailing string \"%s\"\n",
+                print_err(E_ARG, 0, "time range trailing string \"%s\"\n",
                                 trailing_str);
                 return E_ARG;
         }
 
         /* Convert time strings to tm structure. */
-        primary_errno = str_to_tm(begin_str, &begin_utc, &args->interval_begin);
+        primary_errno = str_to_tm(begin_str, &begin_utc, &args->time_begin);
         if (primary_errno != E_OK) {
                 return E_ARG;
         }
         if (end_str == NULL) { //NULL means until now
                 const time_t now = time(NULL);
-                localtime_r(&now, &args->interval_end);
+                localtime_r(&now, &args->time_end);
         } else {
                 primary_errno = str_to_tm(end_str, &end_utc,
-                                &args->interval_end);
+                                &args->time_end);
                 if (primary_errno != E_OK) {
                         return E_ARG;
                 }
@@ -310,35 +309,35 @@ static error_code_t set_time_interval(struct cmdline_args *args,
                 time_t tmp;
 
                 //input time is localtime, let mktime() decide about DST
-                args->interval_begin.tm_isdst = -1;
-                tmp = mktime(&args->interval_begin);
-                gmtime_r(&tmp, &args->interval_begin);
+                args->time_begin.tm_isdst = -1;
+                tmp = mktime(&args->time_begin);
+                gmtime_r(&tmp, &args->time_begin);
         }
         if (!end_utc) {
                 time_t tmp;
 
                 //input time is localtime, let mktime() decide about DST
-                args->interval_end.tm_isdst = -1;
-                tmp = mktime(&args->interval_end);
-                gmtime_r(&tmp, &args->interval_end);
+                args->time_end.tm_isdst = -1;
+                tmp = mktime(&args->time_end);
+                gmtime_r(&tmp, &args->time_end);
         }
 
-        /* Check interval sanity. */
-        if (tm_diff(args->interval_end, args->interval_begin) <= 0) {
+        /* Check time range sanity. */
+        if (tm_diff(args->time_end, args->time_begin) <= 0) {
                 char begin[255], end[255];
 
-                strftime(begin, sizeof(begin), "%c", &args->interval_begin);
-                strftime(end, sizeof(end), "%c", &args->interval_end);
+                strftime(begin, sizeof(begin), "%c", &args->time_begin);
+                strftime(end, sizeof(end), "%c", &args->time_end);
 
-                print_err(E_ARG, 0, "zero or negative interval duration");
-                print_err(E_ARG, 0, "interval: %s - %s", begin, end);
+                print_err(E_ARG, 0, "zero or negative time range duration");
+                print_err(E_ARG, 0, "time range: %s - %s", begin, end);
 
                 return E_ARG;
         }
 
         /* Align beginning time to closest greater rotation interval. */
-        while (mktime_utc(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL){
-                args->interval_begin.tm_sec++;;
+        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_begin.tm_sec++;;
         }
 
         return E_OK;
@@ -829,7 +828,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
                 {"statistic", required_argument, NULL, 's'},
-                {"time", required_argument, NULL, 't'},
+                {"time-range", required_argument, NULL, 't'},
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
@@ -883,7 +882,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_filter(args, optarg);
                         break;
 
-                case 'l': //limit
+                case 'l': //record limit
                         primary_errno = set_limit(args, optarg);
                         break;
 
@@ -895,13 +894,13 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_sort_field(args->fields, optarg);
                         break;
 
-                case 's': //statistic
+                case 's': //statistic shortcut
                         args->working_mode = MODE_AGGR;
                         primary_errno = set_stat(args, optarg);
                         break;
 
-                case 't': //time interval
-                        primary_errno = set_time_interval(args, optarg);
+                case 't': //time range
+                        primary_errno = set_time_range(args, optarg);
                         break;
 
 
@@ -1219,9 +1218,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         }
         putchar('\n');
 
-        strftime(begin, sizeof(begin), "%c", &args->interval_begin);
-        strftime(end, sizeof(end), "%c", &args->interval_end);
-        printf("interval: %s - %s\n", begin, end);
+        strftime(begin, sizeof(begin), "%c", &args->time_begin);
+        strftime(end, sizeof(end), "%c", &args->time_end);
+        printf("time range: %s - %s\n", begin, end);
         printf("------------------------------------------------------\n\n");
         }
 #endif //DEBUG

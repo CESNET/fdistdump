@@ -246,8 +246,8 @@ void create_mpi_struct_shared_task_ctx(void)
                 1, //filter_str_len
                 1, //path_str_len
                 1, //rec_limit
-                STRUCT_TM_ELEMS, //interval_begin
-                STRUCT_TM_ELEMS, //interval_end
+                STRUCT_TM_ELEMS, //time_begin
+                STRUCT_TM_ELEMS, //time_end
                 1, //use_fast_topn
                 /* NEW */
         };
@@ -257,8 +257,8 @@ void create_mpi_struct_shared_task_ctx(void)
                 offsetof(struct shared_task_ctx, filter_str_len),
                 offsetof(struct shared_task_ctx, path_str_len),
                 offsetof(struct shared_task_ctx, rec_limit),
-                offsetof(struct shared_task_ctx, interval_begin),
-                offsetof(struct shared_task_ctx, interval_end),
+                offsetof(struct shared_task_ctx, time_begin),
+                offsetof(struct shared_task_ctx, time_end),
                 offsetof(struct shared_task_ctx, use_fast_topn),
                 /* offsetof(struct shared_task_ctx, NEW), */
         };
@@ -268,8 +268,8 @@ void create_mpi_struct_shared_task_ctx(void)
                 MPI_UNSIGNED_LONG, //filter_str_len
                 MPI_UNSIGNED_LONG, //path_str_len
                 MPI_UNSIGNED_LONG, //rec_limit
-                MPI_INT, //interval_begin
-                MPI_INT, //interval_end
+                MPI_INT, //time_begin
+                MPI_INT, //time_end
                 MPI_C_BOOL, //use_fast_topn
                 /* NEW */
         };

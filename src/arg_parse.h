@@ -74,8 +74,8 @@ struct cmdline_args {
 
         size_t rec_limit; //read/aggregate/topN record limit
 
-        struct tm interval_begin; //begin of time interval
-        struct tm interval_end; //end of time interval
+        struct tm time_begin; //beginning of the time range
+        struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
 

@@ -161,7 +161,7 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, const char *path,
         new_path[offset] = '/';
         offset++;
 
-        /* Loop through the entire interval. */
+        /* Loop through the entire time range. */
         while (tm_diff(end, ctx) > 0) {
                 /* Construct path string from time. */
                 if (strftime(new_path + offset, PATH_MAX - offset,
@@ -252,7 +252,7 @@ error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
         error_code_t primary_errno = E_OK;
 
         struct stat stat_buff;
-        const bool have_time_interval = tm_diff(end, begin) > 0;
+        const bool have_time_range = tm_diff(end, begin) > 0;
 
         char *token;
         char *saveptr;
@@ -270,7 +270,7 @@ error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
                         continue;
                 }
 
-                if (have_time_interval && S_ISDIR(stat_buff.st_mode)) {
+                if (have_time_range && S_ISDIR(stat_buff.st_mode)) {
                         primary_errno = f_array_fill_from_time(fa, token, begin,
                                         end);
                 } else {

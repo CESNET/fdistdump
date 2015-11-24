@@ -101,8 +101,8 @@ static void construct_master_task_ctx(struct master_task_ctx *mtc,
 
         mtc->shared.rec_limit = args->rec_limit;
 
-        mtc->shared.interval_begin = args->interval_begin;
-        mtc->shared.interval_end = args->interval_end;
+        mtc->shared.time_begin = args->time_begin;
+        mtc->shared.time_end = args->time_end;
 
         mtc->shared.use_fast_topn = args->use_fast_topn;
 
