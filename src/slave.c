@@ -77,13 +77,6 @@ extern MPI_Datatype mpi_struct_shared_task_ctx;
 extern int secondary_errno;
 
 
-typedef enum {
-        DATA_SOURCE_FILE,
-        DATA_SOURCE_DIR,
-        DATA_SOURCE_INTERVAL,
-} data_source_t;
-
-
 /* Thread shared. */
 struct slave_task_ctx {
         /* Master and slave shared task context. Received from master. */

@@ -65,10 +65,10 @@ typedef enum {
 } output_ts_conv_t;
 
 typedef enum {
-        OUTPUT_STAT_CONV_UNSET,
-        OUTPUT_STAT_CONV_NONE,
-        OUTPUT_STAT_CONV_METRIC_PREFIX,
-        OUTPUT_STAT_CONV_BINARY_PREFIX,
+        OUTPUT_VOLUME_CONV_UNSET,
+        OUTPUT_VOLUME_CONV_NONE,
+        OUTPUT_VOLUME_CONV_METRIC_PREFIX,
+        OUTPUT_VOLUME_CONV_BINARY_PREFIX,
 } output_stat_conv_t;
 
 typedef enum {
@@ -109,7 +109,7 @@ struct output_params {
         char *ts_conv_str;
         bool ts_localtime; //output timestamp in localtime instead of UTC
 
-        output_stat_conv_t stat_conv;
+        output_stat_conv_t volume_conv;
         output_tcp_flags_conv_t tcp_flags_conv;
         output_ip_addr_conv_t ip_addr_conv;
         output_ip_proto_conv_t ip_proto_conv;

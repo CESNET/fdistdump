@@ -53,7 +53,7 @@
 
 
 #define STAT_DELIM "/" //statistic/order
-#define INTERVAL_DELIM "#" //begin#end
+#define TIME_RANGE_DELIM "#" //begin#end
 #define SORT_DELIM "#" //flows#asc
 #define TIME_DELIM " \t\n\v\f\r" //whitespace
 

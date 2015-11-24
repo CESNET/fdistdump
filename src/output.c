@@ -303,85 +303,85 @@ static const char * timestamp_to_str(const uint64_t *ts)
         return global_str;
 }
 
-static const char * double_stat_to_str(const double *stat)
+static const char * double_volume_to_str(const double *volume)
 {
-        double stat_conv = *stat;
+        double volume_conv = *volume;
         size_t unit_table_idx = 0;
         const char **unit_table;
 
-        switch (output_params.stat_conv) {
-        case OUTPUT_STAT_CONV_NONE:
+        switch (output_params.volume_conv) {
+        case OUTPUT_VOLUME_CONV_NONE:
                 break;
 
-        case OUTPUT_STAT_CONV_METRIC_PREFIX:
+        case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
                 unit_table = decimal_unit_table;
-                while (stat_conv > 1000.0 && unit_table_idx + 1 <
+                while (volume_conv > 1000.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(decimal_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1000.0;
+                        volume_conv /= 1000.0;
                 }
                 break;
 
-        case OUTPUT_STAT_CONV_BINARY_PREFIX:
+        case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
                 unit_table = binary_unit_table;
-                while (stat_conv > 1024.0 && unit_table_idx + 1 <
+                while (volume_conv > 1024.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(binary_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1024.0;
+                        volume_conv /= 1024.0;
                 }
                 break;
 
         default:
-                assert(!"unknown statistics conversion");
+                assert(!"unknown volume conversion");
         }
 
         if (unit_table_idx == 0) { //small number or no conversion
-                snprintf(global_str, sizeof (global_str), "%.1f", stat_conv);
+                snprintf(global_str, sizeof (global_str), "%.1f", volume_conv);
         } else { //converted unit plus unit string from unit table
-                snprintf(global_str, sizeof (global_str), "%.1f %s", stat_conv,
-                                unit_table[unit_table_idx]);
+                snprintf(global_str, sizeof (global_str), "%.1f %s",
+                                volume_conv, unit_table[unit_table_idx]);
         }
 
         return global_str;
 }
 
-static const char * stat_to_str(const uint64_t *stat)
+static const char * volume_to_str(const uint64_t *volume)
 {
-        double stat_conv = *stat;
+        double volume_conv = *volume;
         size_t unit_table_idx = 0;
         const char **unit_table;
 
-        switch (output_params.stat_conv) {
-        case OUTPUT_STAT_CONV_NONE:
+        switch (output_params.volume_conv) {
+        case OUTPUT_VOLUME_CONV_NONE:
                 break;
 
-        case OUTPUT_STAT_CONV_METRIC_PREFIX:
+        case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
                 unit_table = decimal_unit_table;
-                while (stat_conv > 1000.0 && unit_table_idx + 1 <
+                while (volume_conv > 1000.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(decimal_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1000.0;
+                        volume_conv /= 1000.0;
                 }
                 break;
 
-        case OUTPUT_STAT_CONV_BINARY_PREFIX:
+        case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
                 unit_table = binary_unit_table;
-                while (stat_conv > 1024.0 && unit_table_idx + 1 <
+                while (volume_conv > 1024.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(binary_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1024.0;
+                        volume_conv /= 1024.0;
                 }
                 break;
 
         default:
-                assert(!"unknown statistics conversion");
+                assert(!"unknown volume conversion");
         }
 
         if (unit_table_idx == 0) { //small number or no conversion
-                snprintf(global_str, sizeof (global_str), "%" PRIu64, *stat);
+                snprintf(global_str, sizeof (global_str), "%" PRIu64, *volume);
         } else { //converted unit plus unit string from unit table
-                snprintf(global_str, sizeof (global_str), "%.1f %s", stat_conv,
-                                unit_table[unit_table_idx]);
+                snprintf(global_str, sizeof (global_str), "%.1f %s",
+                                volume_conv, unit_table[unit_table_idx]);
         }
 
         return global_str;
@@ -661,11 +661,11 @@ field_to_str_t field_to_str_func_table[] = {
         [LNF_FLD_RECEIVED] = (field_to_str_t)timestamp_to_str,
 
         /* Statistical fields. */
-        [LNF_FLD_DOCTETS] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_DPKTS] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_OUT_BYTES] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_OUT_PKTS] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_AGGR_FLOWS] = (field_to_str_t)stat_to_str,
+        [LNF_FLD_DOCTETS] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_DPKTS] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_OUT_BYTES] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_OUT_PKTS] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_AGGR_FLOWS] = (field_to_str_t)volume_to_str,
 
         /* TCP flags. */
         [LNF_FLD_TCP_FLAGS] = (field_to_str_t)tcp_flags_to_str,
@@ -675,10 +675,10 @@ field_to_str_t field_to_str_func_table[] = {
 
         /* Computed: duration. */
         [LNF_FLD_CALC_DURATION] = (field_to_str_t)duration_to_str,
-        /* Computed: statistics. */
-        [LNF_FLD_CALC_BPS] = (field_to_str_t)double_stat_to_str,
-        [LNF_FLD_CALC_PPS] = (field_to_str_t)double_stat_to_str,
-        [LNF_FLD_CALC_BPP] = (field_to_str_t)double_stat_to_str,
+        /* Computed: volumetric. */
+        [LNF_FLD_CALC_BPS] = (field_to_str_t)double_volume_to_str,
+        [LNF_FLD_CALC_PPS] = (field_to_str_t)double_volume_to_str,
+        [LNF_FLD_CALC_BPP] = (field_to_str_t)double_volume_to_str,
 
         [LNF_FLD_TERM_] = NULL,
 };
@@ -944,12 +944,12 @@ void print_summary(const struct stats *stats, double duration)
         header_len = printf("summary: ");
         assert(header_len >= 0);
 
-        printf("%s flows, ", stat_to_str(&stats->flows));
-        printf("%s packets, ", stat_to_str(&stats->pkts));
-        printf("%s bytes\n", stat_to_str(&stats->bytes));
+        printf("%s flows, ", volume_to_str(&stats->flows));
+        printf("%s packets, ", volume_to_str(&stats->pkts));
+        printf("%s bytes\n", volume_to_str(&stats->bytes));
 
         printf("%*s%f seconds, %s flows/second\n", header_len, "", duration,
-                        double_stat_to_str(&flows_per_sec));
+                        double_volume_to_str(&flows_per_sec));
 }
 
 void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,

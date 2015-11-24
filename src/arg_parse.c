@@ -68,7 +68,7 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_FORMAT, //output (print) format
         OPT_OUTPUT_TS_CONV, //output timestamp conversion
         OPT_OUTPUT_TS_LOCALTIME, //output timestamp in localtime
-        OPT_OUTPUT_STAT_CONV, //output statistics conversion
+        OPT_OUTPUT_VOLUME_CONV, //output volumetric field conversion
         OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
@@ -250,7 +250,7 @@ next_token:
  *
  * Function tries to parse time range string, fills time_begin and
  * time_end with appropriate values on success. Beginning and ending dates
- * (and times) are  separated with INTERVAL_DELIM, if ending date is not
+ * (and times) are  separated with TIME_RANGE_DELIM, if ending date is not
  * specified, current time is used.
  * If range string is successfully parsed, E_OK is returned. On error,
  * content of time_begin and time_end is undefined and E_ARG is
@@ -275,14 +275,14 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
         assert(args != NULL && range_str != NULL);
 
         /* Split time range string. */
-        begin_str = strtok_r(range_str, INTERVAL_DELIM, &saveptr);
+        begin_str = strtok_r(range_str, TIME_RANGE_DELIM, &saveptr);
         if (begin_str == NULL) {
                 print_err(E_ARG, 0, "invalid time range string \"%s\"\n",
                                 range_str);
                 return E_ARG;
         }
-        end_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr); //NULL is valid
-        trailing_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr);
+        end_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr); //NULL is valid
+        trailing_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr);
         if (trailing_str != NULL) {
                 print_err(E_ARG, 0, "time range trailing string \"%s\"\n",
                                 trailing_str);
@@ -687,18 +687,18 @@ static error_code_t set_output_ts_conv(struct output_params *op,
         return E_OK;
 }
 
-static error_code_t set_output_stat_conv(struct output_params *op,
-                char *stat_conv_str)
+static error_code_t set_output_volume_conv(struct output_params *op,
+                char *volume_conv_str)
 {
-        if (strcmp(stat_conv_str, "none") == 0) {
-                op->stat_conv= OUTPUT_STAT_CONV_NONE;
-        } else if (strcmp(stat_conv_str, "metric-prefix") == 0) {
-                op->stat_conv = OUTPUT_STAT_CONV_METRIC_PREFIX;
-        } else if (strcmp(stat_conv_str, "binary-prefix") == 0) {
-                op->stat_conv = OUTPUT_STAT_CONV_BINARY_PREFIX;
+        if (strcmp(volume_conv_str, "none") == 0) {
+                op->volume_conv= OUTPUT_VOLUME_CONV_NONE;
+        } else if (strcmp(volume_conv_str, "metric-prefix") == 0) {
+                op->volume_conv = OUTPUT_VOLUME_CONV_METRIC_PREFIX;
+        } else if (strcmp(volume_conv_str, "binary-prefix") == 0) {
+                op->volume_conv = OUTPUT_VOLUME_CONV_BINARY_PREFIX;
         } else {
-                print_err(E_ARG, 0, "unknown output statistics conversion "
-                                "string \"%s\"", stat_conv_str);
+                print_err(E_ARG, 0, "unknown output volume conversion "
+                                "string \"%s\"", volume_conv_str);
                 return E_ARG;
         }
 
@@ -837,8 +837,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
                 {"output-ts-localtime", no_argument, NULL,
                         OPT_OUTPUT_TS_LOCALTIME},
-                {"output-stat-conv", required_argument, NULL,
-                        OPT_OUTPUT_STAT_CONV},
+                {"output-volume-conv", required_argument, NULL,
+                        OPT_OUTPUT_VOLUME_CONV},
                 {"output-tcpflags-conv", required_argument, NULL,
                         OPT_OUTPUT_TCP_FLAGS_CONV},
                 {"output-addr-conv", required_argument, NULL,
@@ -923,8 +923,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         args->output_params.ts_localtime = true;
                         break;
 
-                case OPT_OUTPUT_STAT_CONV:
-                        primary_errno = set_output_stat_conv(
+                case OPT_OUTPUT_VOLUME_CONV:
+                        primary_errno = set_output_volume_conv(
                                         &args->output_params, optarg);
                         break;
 
@@ -1096,9 +1096,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         args->output_params.ts_conv_str = "%F %T";
                 }
 
-                if (args->output_params.stat_conv == OUTPUT_STAT_CONV_UNSET) {
-                        args->output_params.stat_conv =
-                                OUTPUT_STAT_CONV_METRIC_PREFIX;
+                if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
+                        args->output_params.volume_conv =
+                                OUTPUT_VOLUME_CONV_METRIC_PREFIX;
                 }
 
                 if (args->output_params.tcp_flags_conv ==
@@ -1135,8 +1135,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         args->output_params.ts_conv = OUTPUT_TS_CONV_NONE;
                 }
 
-                if (args->output_params.stat_conv == OUTPUT_STAT_CONV_UNSET) {
-                        args->output_params.stat_conv = OUTPUT_STAT_CONV_NONE;
+                if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
+                        args->output_params.volume_conv = OUTPUT_VOLUME_CONV_NONE;
                 }
 
                 if (args->output_params.tcp_flags_conv ==
