@@ -73,7 +73,8 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
         OPT_OUTPUT_DURATION_CONV, //output IP protocol conversion
-        OPT_OUTPUT_SUMMARY, //print summary?
+        OPT_SUMMARY, //print summary
+        OPT_NO_SUMMARY, //don't print summary
 
         OPT_FIELDS, //specification of listed fields
         OPT_PROGRESS_BAR, //specification of listed fields
@@ -105,18 +106,6 @@ static const char *const utc_strings[] = {
         "UT",
         "UTC",
 };
-
-
-static int str_yes_or_no(const char *str)
-{
-        if (strcmp(str, "y") == 0 || strcmp(str, "yes") == 0) {
-                return 1;
-        } else if (strcmp(str, "n") == 0 || strcmp(str, "no") == 0) {
-                return 0;
-        } else {
-                return -1;
-        }
-}
 
 
 /** \brief Convert string into tm structure.
@@ -769,25 +758,6 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         return E_OK;
 }
 
-static error_code_t set_output_summary(struct output_params *op,
-                char *summary_str)
-{
-        switch (str_yes_or_no(summary_str)) {
-        case 0: //no
-                op->summary = OUTPUT_SUMMARY_NO;
-                break;
-        case 1: //yes
-                op->summary = OUTPUT_SUMMARY_YES;
-                break;
-        default: //other
-                print_err(E_ARG, 0, "unknown output summary string" "\"%s\"",
-                                summary_str);
-                return E_ARG;
-        }
-
-        return E_OK;
-}
-
 static error_code_t set_progress_bar(progress_bar_t *progress_bar,
                 const char *progress_bar_str)
 {
@@ -847,8 +817,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         OPT_OUTPUT_IP_PROTO_CONV},
                 {"output-duration-conv", required_argument, NULL,
                         OPT_OUTPUT_DURATION_CONV},
-                {"output-summary", required_argument, NULL, OPT_OUTPUT_SUMMARY},
 
+                {"summary", no_argument, NULL, OPT_SUMMARY},
+                {"no-summary", no_argument, NULL, OPT_NO_SUMMARY},
                 {"fields", required_argument, NULL, OPT_FIELDS},
                 {"progress-bar", required_argument, NULL, OPT_PROGRESS_BAR},
 
@@ -948,11 +919,14 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                         &args->output_params, optarg);
                         break;
 
-                case OPT_OUTPUT_SUMMARY:
-                        primary_errno = set_output_summary(&args->output_params,
-                                        optarg);
+
+                case OPT_SUMMARY:
+                        args->output_params.summary = OUTPUT_SUMMARY_YES;
                         break;
 
+                case OPT_NO_SUMMARY:
+                        args->output_params.summary = OUTPUT_SUMMARY_NO;
+                        break;
 
                 case OPT_FIELDS:
                         primary_errno = add_fields_from_str(args->fields,
