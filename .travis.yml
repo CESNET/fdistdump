@@ -38,7 +38,7 @@ script:
 
 #after_success:
 after_failure:
-        - ./print_logs.sh
+        - ./tests/print_logs.sh
 
 #after_script:
 
