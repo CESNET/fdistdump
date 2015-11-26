@@ -60,7 +60,65 @@
 
 
 /* Global variables. */
+static const char *usage_string =
+"Usage: mpirun [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
+"       [-l limit] [-o field[#direction]] [-s statistic] [-t begin[#end]]\n"
+"       path ...";
+
+static const char *help_string =
+"MPI_options\n"
+"      See your MPI job launcher documentation, e.g. mpirun(1).\n"
+"General options\n"
+"     -a field[,...], --aggregation=field[,...]\n"
+"            Aggregated flow records together by any number of fields.\n"
+"     -f filter, --filter=filter\n"
+"            Process only filter matching records.\n"
+"     -l limit, --limit=limit\n"
+"            Limit the number of records to print.\n"
+"     -o field[#direction], --order=field[#direction]\n"
+"            Set record sort order.\n"
+"     -s statistic, --statistic=statistic\n"
+"            Shortcut for aggregation (-a), sort (-o) and record limit (-l).\n"
+"     -t begin[#end], --time-range=begin[#end]\n"
+"            Process only flow files from begin to end time range.\n"
+"\n"
+"Controlling output\n"
+"     --output-format=format\n"
+"            Set output (print) format.\n"
+"     --output-ts-conv=timestamp_conversion\n"
+"            Set timestamp output conversion format.\n"
+"     --output-ts-localtime\n"
+"            Convert  timestamps  to  local  time.\n"
+"     --output-volume-conv=volume_conversion\n"
+"            Set volume output conversion format.\n"
+"     --output-tcpflags-conv=TCP_flags_conversion\n"
+"            Set TCP flags output conversion format.\n"
+"     --output-addr-conv=IP_address_conversion\n"
+"            Set IP address output conversion format.\n"
+"     --output-proto-conv=IP_protocol_conversion\n"
+"            Set  IP  protocol  output  conversion  format.\n"
+"     --output-duration-conv=duration_conversion\n"
+"            Set duration conversion format.\n"
+"     --summary\n"
+"     --no-summary\n"
+"            Print/don't  print  summary at the end of the query.\n"
+"     --fields=field[,...]\n"
+"            Set the list of printed fields.\n"
+"     --progress-bar=progress_bar_type\n"
+"            Set progress bar type.\n"
+"\n"
+"Other options\n"
+"     --no-fast-topn\n"
+"            Disable fast top-N algorithm.\n"
+"\n"
+"Getting help\n"
+"     --help Print a help message and exit.\n"
+"     --version\n"
+"            Display version information and exit.\n";
+
+
 extern int secondary_errno;
+
 
 enum { //command line options, have to start above ASCII
         OPT_NO_FAST_TOPN = 256, //disable fast top-N algorithm
@@ -787,9 +845,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         size_t path_str_len = 0;
         bool have_fields = false; //LNF fields are specified
 
-        const char usage_string[] = "Usage: mpirun [ options ] " PACKAGE_NAME
-                " [ <args> ]\n";
-        const char help_string[] = "help\n";
         const char *short_opts = "a:f:l:o:s:t:";
         const struct option long_opts[] = {
                 /* Long and short. */
@@ -941,7 +996,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
 
                 case OPT_HELP: //help
-                        printf(usage_string);
+                        printf("%s\n\n", usage_string);
                         printf("%s", help_string);
                         return E_PASS;
 
