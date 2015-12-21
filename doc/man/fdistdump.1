@@ -1,0 +1,749 @@
+.\" Man page for fdistdump
+.\" Author: Jan Wrona, <wrona@cesnet.cz>
+.TH FDISTDUMP 1 "2015-10-16" "0.1" "fdistdump manual"
+.\" NAME section ---------------------------------------------------------------
+.SH NAME
+fdistdump \- a tool to query IP flow files using single or distributed system
+.\" SYNOPSIS section -----------------------------------------------------------
+.SH SYNOPSIS
+.B mpirun
+.RI [ MPI_options ]
+.B fdistdump
+.RB [ -a
+.IR field [,...]]
+.RB [ -f
+.IR filter ]
+.RB [ -l
+.IR limit ]
+.RB [ -o
+.IR field [# direction ]]
+.RB [ -s
+.IR statistic ]
+.RB [ -t
+.IR begin [# end ]]
+.IR path \ ...
+.\" DESCRIPTION section --------------------------------------------------------
+.SH DESCRIPTION
+.B fdistdump
+is a fast, scalable and distributed tool to query Internet Protocol flow record files.
+The master/slave communication model allows it to run jobs on unlimited number of nodes, including a single local node.
+Message Passing Interface (MPI) is used as an underlying communication protocol.
+Among other features,
+.B fdistdump
+allows you to list, sort and aggregate records with the possibility to apply powerful record
+.IR filter .
+.PP
+Each
+.I path
+argument given to
+.B fdistdump
+is either a filename or a directory.
+All
+.IR path s
+will be processed by all the slave processes and therefore should be accessible from every node, where the slave process is invoked.
+Otherwise, warning message will be printed to
+.B stderr
+by affected process and inaccessible
+.I path
+will be ignored.
+In case
+.I path
+is a filename, it will be processed directly.
+In case it is a directory, all the files in that directory will be processed, recursively for all the subdirectories.
+.\" OPTIONS section ------------------------------------------------------------
+.SH OPTIONS
+Non argument options that are duplicated on the command line are not harmful.
+.\" TODO: Following is not true for fields.
+.\" For options that require an argument, each duplication will override the previous argument value.
+.\" MPI_options subsection ---------------------
+.SS MPI_options
+.B fdistdump
+is a MPI application and is necessary to launch it using one of
+.BR mpirun ,\  mpiexec ,\  orterun
+or however your MPI implementation calls the job launcher.
+Here, only basic
+.I MPI_options
+are mentioned, for complete list see
+.BR mpirun (1).
+.TP
+.BI -np \ #
+To run
+.B fdistdump
+on a
+.BR "single local node" ,
+you can use this option, where
+.I #
+specifies the number of processes to launch.
+The first process will always be in the role of master, remaining processes will be the slaves.
+It is mandatory to have exactly one master and at least one slave process, therefore
+.I #
+have to be at least 2, otherwise job won't start.
+Following command will run two
+.B fdistdump
+processes on a local node, one master and one slave.
+Without any additional
+.B fdistdump
+options, all records in
+.I path
+will be printed to stdout:
+.PP
+.nf
+.RS
+$ mpirun -np 2 fdistdump \fIpath\fR
+.RE
+.fi
+.TP
+.BI --host \ host\fR[,...]
+To run
+.B fdistdump
+on a
+.BR "multiple nodes (hosts)" ,
+you have to specify the nodes of the cluster.
+By this option you can specify those nodes from the command-line by a comma separated list.
+Following command will run three
+.B fdistdump
+processes.
+Master on node1, one slave on node2 and another slave on node3.
+Without any additional
+.B fdistdump
+options, all records in
+.I path
+on nodes node2 and node3 (where slave processes are running) will be printed to stdout:
+.PP
+.nf
+.RS
+$ mpirun --host node1,node2,node3 fdistdump \fIpath\fR
+.RE
+.fi
+.TP
+.BI --hostfile \ hostfile
+This option has semantics equivalent to the
+.B --host
+option, except nodes are specified in the file.
+Format of the
+.I hostfile
+is not standardized and is slightly different for each MPI implementation.
+Following command shows typical usage:
+.PP
+.nf
+.RS
+$ mpirun --hostfile hostfile.txt fdistdump \fIpath\fR
+.RE
+.fi
+.TP
+.B --preload-binary
+Not only the
+.IR path ,
+but also the MPI application executable has to be accessible from every node, where MPI process is invoked.
+Open\ MPI has a handy feature for executable distribution, enabled by
+.B --preload-binary
+option.
+MPI launcher will copy the specified executable to remote machines prior to starting remote processes.
+Following command will run four
+.B fdistdump
+processes. Both master and slave on node1, one slave on node2 and another slave on node3. It shows situation, where 
+.B fdistdump
+executable is present only on local node (which is node1) and
+.B --preload-binary
+option is used to distribute the binary on all three nodes.
+Without any additional
+.B fdistdump
+options, all records in
+.I path
+on all three nodes will be printed to stdout:
+.PP
+.nf
+.RS
+$ mpirun --host node1,node1,node2,node3 --preload-binary /usr/bin/fdistdump \fIpath\fR
+.RE
+.fi
+.\" General options subsection ---------------------
+.SS General options
+.TP
+.\" TODO: address prefixes, field overwriting
+.BI -a \ field\fR[,...],\ \fB--aggregation= \fIfield\fR[,...]
+Aggregate flow records together by any number of
+.IR field s.
+Option argument is comma separated list of
+.IR field s,
+at least one
+.I field
+is mandatory.
+Set of supported
+.IR field s
+depends on your version of
+.B libnf
+library.
+.B libnf
+comes with
+.B libnf-info
+executable, which prints list of implemented fields and their meaning.
+.TP
+.BI -f \ filter\fR,\  --filter= filter
+Process only
+.I filter
+matching records.
+A
+.I filter
+can be specified as a text string, the syntax and semantics of the string are as described by
+.BR nfdump (1) .
+A
+.I filter
+string is compiled by
+.BR libnf ,
+which currently uses
+.B nfdump
+filtering engine by default. This will change in future versions and
+.B libnf
+will use its own filtering engine.
+.TP
+.BI -l \ limit\fR,\  --limit= limit
+Limit the number of records to print. Option argument is a natural number, special value 0 disables the limit.
+
+Keep in mind that with enabled aggregation, this doesn't reduce the number of processed records.
+During the aggregation, all filter matching records have to be processed for the sake of result correctness.
+On the other hand, without aggregation, this may vastly reduce the number of processed records and the query running time.
+.TP
+.BI -o \ field\fR[#\fIdirection\fR],\  --order= field\fR[#\fIdirection\fR]
+Set record sort order.
+Sort key is specified by
+.IR field .
+Sort
+.I direction
+is either
+.BR asc \ or \ desc
+string, which are abbreviations for ascending and descending direction, respectively.
+.TP
+.BI -s \ statistic\fR,\  --statistic= statistic
+Shortcut for aggregation (\fB-a\fR), sort (\fB-o\fR) and record limit (\fB-l\fR). Option argument string
+.I statistic
+is composed of \fB-a\fR argument, optional slash followed by \fB-o\fR argument.
+Formally written
+.IR statistic \ is\  aggregation_field [,...]/[ sort_field [# sort_direction ]].
+
+If
+.I sort_field
+is not present,
+.B flows
+is default sort key.
+Default record limit is
+.B 10
+and may by changed by an explicit
+.B -l
+option.
+.TP
+.BI -t \ begin\fR[#\fIend\fR],\  --time-range= begin\fR[#\fIend\fR]
+Process only flow files from
+.I begin
+to
+.I end
+time range.
+Affects only directory
+.IR path s.
+If
+.I end
+is not provided, current time is assumed as range end.
+
+This option is only useful when paths to your flow files contain some information about stored flows timestamps.
+Flow file usually contains flow records received during some time window, e.g., 5 minute period.
+If
+.I path
+to your flow files carry information about the beginning of this period, you can use this option to easily create queries, where only flow files from
+.I begin
+to
+.I end
+will be processed.
+
+Currently, following directory hierarchy is required:
+.IR profile_name / YYYY / MM / DD / hh /nfcapd. YYYYMMDDhhmm .
+For example for profile
+.B live
+and flows received at 2015-21-10 from 7:25 to 7:30, path will be
+.BR live/2015/10/21/10/nfcapd.20151020725 .
+
+.IR begin \ and \ end
+should contain one or more space separated time specifiers.
+Time specifier is date, time, special value or UTC flag.
+Supported date formats are ISO (YYYY-MM-DD), European (DD.MM.YYYY) and American (MM/DD/YYYY), time format is only one (hh:mm). 
+Special value is either the name of the day of the week or the month name, both according to the current locale, in abbreviated form or the full name.
+UTC flag is either
+.BR U \ or\  UTC
+string (case-insensitive). If present, all the time specifiers are assumed to be in UTC instead of local time.
+
+If no date is given, today is assumed if the given hour is lesser than the current hour and yesterday is assumed if it is more.
+If no time is given, midnight is assumed.
+If only the weekday is given, today is assumed if the given day is less or equal to the current day and last week if it is more.
+If only the month is given, the current year is assumed if the given month is less or equal to the current month and last year if it is more and no year is given.
+.\" Controlling output subsection ---------------------
+.SS Controlling output
+.TP
+.BI --output-format= format
+Set output (print) format.
+.I format
+is either
+.BR pretty \ or \ csv .
+.B pretty
+will create nice, human readable output, with fields formatted into columns.
+It is the default option.
+Data conversions are all set to the most human readable form (timestamps converted into broken-down time strings, TCP flags converted into string, ...). On the other hand, 
+.B csv
+will create machine readable output suitable for post-processing.
+It is a standard comma separated values format, where all data conversions are set to the most machine readable form (timestamps printed as integers, TCP flags printed as a integers, ...).
+.TP
+.BI --output-ts-conv= timestamp_conversion
+Set timestamp output conversion format.
+.I timestamp_conversion
+is either
+.B none
+or custom format string.
+
+With
+.B none
+conversion, raw timestamp integer is printed.
+Timestamp is composed from Unix time (number of seconds that have elapsed since 1.1.1970 UTC) enhanced with milliseconds (seconds are multiplied by 1000 and milliseconds are added).
+For example 1445405280123 means 21.10.2015 7:28, 123 ms.
+
+Custom format string is simply passed as format string to the
+.BR strftime ()
+function.
+Default string for pretty print is
+.RB ' "%F %T" '.
+Dot and milliseconds are always appended.
+.TP
+.BI --output-ts-localtime
+Convert timestamps to local time.
+Timestamps stored in flow records are in UTC.
+This option will convert them to the user's specified timezone (by
+.BR localtime ()
+function) before output conversion is performed.
+.TP
+.BI --output-volume-conv= volume_conversion
+Set volume output conversion format.
+Volume fields are
+.BR bytes ,\  pkts ,\  outbytes ,\  outpkts ,\  flows ,\  bsp ,\  pps \ and\  bpp .
+This conversion is also applied to the summary.
+
+.I volume_conversion
+is one of
+.BR none ,\  metric-prefix \ or\  binary-prefix .
+.B none
+conversion will print raw integer or double.
+Following will prepend standard unit prefix to indicate multiples of the unit.
+The prefixes of the metric system such as kilo and mega, represent multiplication by powers of ten.
+In information technology it is common to use binary prefixes such as kibi and mebi, which are based on powers of two.
+For example 150000 will be converted to 150.0 k using
+.B metric-prefix
+and to 146.4 Ki using
+.BR binary-prefix .
+.TP
+.BI --output-tcpflags-conv= TCP_flags_conversion
+Set TCP flags output conversion format.
+.I TCP_flags_conversion
+is either
+.BR none \ or\  str .
+TCP flags are composed of 8 bits: CWR, ECE, URG, ACK, PSH, RST, SYN and FIN.
+
+Using
+.B none
+conversion, raw integer is printed.
+Using
+.B str
+conversion, flags are converted into human readable string composing of 8 characters.
+Each character represents one bit, order is preserved (CWR is first, FIN is last).
+If bit is set, character is set to the first letter of bit's name.
+If bit is unset, character is set to the dot symbol.
+For example C.UA..SF means that CWR, URG, ACK, SYN and FIN bits are set, others are unset.
+.TP
+.BI --output-addr-conv= IP_address_conversion
+Set IP address output conversion format.
+.I IP_address_conversion
+is either
+.BR none \ or\  str .
+IP address is either IPv4 or IPv6 address.
+
+With
+.B none
+conversion, IP address is converted to UINT[0]:UINT[1]:UINT[2]:UINT[3].
+If IPv4 is present, first three UINTs are zero.
+With
+.B str
+conversion,
+.BR inet_ntop ()
+function is used to convert binary representation to string.
+.TP
+.BI --output-proto-conv= IP_protocol_conversion
+Set IP protocol output conversion format.
+IP protocol is one octet long field in the IP header which defines the protocol used in the data portion of the IP datagram (usually TCP or UDP).
+The Internet Assigned Numbers Authority maintains a list of IP protocol numbers.
+
+.I IP_protocol_conversion
+is either
+.BR none \ or\  str .
+Using
+.B none
+conversion will print raw integer. Using
+.B str
+conversion will print IP protocol name, as defined by IANA.
+.TP
+.BI --output-duration-conv= duration_conversion
+Set
+.B duration
+conversion format.
+.B duration
+is field calculated by
+.BR end \ -\  start .
+.I duration_conversion
+is either
+.BR none \ or\  str .
+Using
+.BR none ,
+raw integer is printed. Using
+.BR str ,
+duration is converted into HH:MM:SS.MS string.
+.TP
+.PD 0
+.BI --summary
+.TP
+.PD
+.BI --no-summary
+Print/don't print summary at the end of the query.
+By default, after the query is finished, query summary is printed.
+It contains number of processed flows, sum of data packets and a sum of data bytes in all the processed flow records.
+It also contains query duration (without MPI initialization) and number of flows processed per second.
+Summary has the following format:
+
+summary: F flows, P packets, B k bytes
+         T seconds, F/T flows/second
+.TP
+.BI --fields= field \fR[,...]
+Set the list of printed fields. Format of the argument is the same as for
+.B -a
+option.
+Without enabled aggregation, default fields are
+.BR first ,\  pkts ,\  bytes ,\  srcip ,\  dstip ,\  srcport ,\  dstport \ and\  proto ,
+with aggregation enabled, default fields are
+.BR duration ,\  flows ,\  pkts ,\  bytes ,\  bps ,\  pps \ and\  bpp
+plus aggregation keys.
+
+Without aggregation, you can add every valid field.
+Just keep in mind, that the more fields are present, the more data have to processed and transferred from slaves to master.
+With
+.B nfdump
+file format, it isn't possible to determine if the field is present in the flow record or not.
+If the desired field isn't present, it will be printed as zero (or what the specified output conversion creates from zero).
+
+With aggregation, this can be a little tricky. You can add only some fields without actually making the field aggregation key.
+Those fields are
+.BR first ,\  last ,\  received ,\  bytes ,\  pkts ,\  outbytes ,\  outpkts ,\  flows ,\  tcpflags ,\  eventtime ,\  duration ,\  bps ,\  pps \ and\  bpp .
+If any other
+.I field
+is present in the list, it will be used as aggregation key.
+.TP
+.BI --progress-bar= progress_bar_type
+Set progress bar type. Progress is calculated with resolution of one file.
+This may be inaccurate if records are unevenly spread among files.
+
+.I progress_bar_type
+is one of
+.BR none ,\  basic ,\  extended \ or\  file.
+.B none
+will disable progress bar,
+.B basic
+will show only total progress (enabled by default),
+.B extended
+will also show per slave progress.
+Parameter
+.B file
+will continually rewrite file
+.B progress.json
+with current total and per slave progress.
+.\" Other options subsection ---------------------
+.SS Other options
+.TP
+.B --no-fast-topn
+Disable fast top-N algorithm.
+.B fdistdump
+uses this algorithm for statistic (or top-N) queries.
+This option shouldn't influence results in any way, it is just an optimization.
+It should reduce amount of data transferred between master and slave(s).
+There are three conditions that have to be met to make this algorithm work:
+
+1. it is not disabled by this option
+
+2. record limit is enabled
+.RB ( -l )
+
+3. sort key
+.RB ( -o )
+is one of traffic volume fields
+.RB ( bytes ,\  pkts ,\  outbytes ,\  outpkts \ and\  flows ).
+.\" Getting help subsection ---------------------
+.SS Getting help
+.TP
+.B --help
+Print a help message and exit.
+.TP
+.B --version
+Display version information and exit.
+.\" EXIT STATUS section --------------------------------------------------------
+.SH EXIT STATUS
+Exit status value depends on your MPI job launcher
+.RB ( mpirun ,\  mpiexec ,\  orterun ,\ ...),
+but it usually returns 0 if all processes return 0.
+For behavior in situations, where one or more processes return non-zero value, see job launcher documentation.
+
+.B fdistdump
+processes return 0 on success, 1 on error.
+.\" ENVIRONMENT section --------------------------------------------------------
+.SH ENVIRONMENT
+TZ environment variable is set to empty string for a short amount of time for internal reasons.
+It is restored to its original value afterwards.
+.\" FILES section --------------------------------------------------------------
+.\".SH FILES There are no configuration files yet.
+.\" NOTES section --------------------------------------------------------------
+.SH NOTES
+With disabled sorting and more than one input flow file (doesn't matter if local or distributed), output record order is undefined.
+This is because of a race condition during concurrent file processing.
+It also isn't guaranteed that with record limit
+.RB ( -l ),
+first records will be printed from first
+.IR path .
+It probably won't.
+If you need defined record order, use sorting
+.RB ( -o ).
+
+Nfdump filtering engine, which we are using for now, isn't thread safe.
+Therefore, query with filter may be slower than without one.
+.\" BUGS section --------------------------------------------------------------
+.SH BUGS
+Summary counters for queries without aggregation and with record limit will be incorrect in most cases.
+Summary is calculated for all the processed records on all the slaves, but only some of these records are printed out by master (because of the record limit).
+.\" EXAMPLE section ------------------------------------------------------------
+.SH EXAMPLE
+.\" List records subsection ---------------------
+.SS List records
+Launch two
+.B fdistdump
+processes on local node, one master and one slave.
+Slave process will read both specified flow files concurrently and print all records in both files.
+.nf
+\&  \fB$ mpirun -np 2 fdistdump /netflow/flow_file1 /netflow/flow_file2\fR
+\&  first                       bytes     pkts     srcport     dstport     srcip              dstip             proto
+\&  2015-01-19 22:59:17.387     841       5        57942       80          192.245.102.46     54.210.89.244     TCP
+\&  2015-01-19 22:59:27.094     41        1        61746       5631        48.91.65.181       78.132.4.32       TCP
+\&  2015-01-19 22:59:27.675     104       2        55865       13242       100.4.71.246       192.245.161.140   TCP
+\&  <output omitted>
+
+\&  summary: 20 flows, 54 packets, 5.9 k bytes
+\&           0.009140 seconds, 2.2 k flows/second
+.fi
+
+Launch two
+.B fdistdump
+processes, one master and one slave.
+Slave process will recursively read all files within specified directory.
+With enabled record limit, only 100 records will be printed.
+As you can see, summary shows 129000 processed records, but query contained limit to 100 records.
+This is not incorrect, see BUGS section for more information about summary in this type of queries.
+.nf
+\&  \fB$ mpirun -np 2 fdistdump -l 100 flow_dir/\fR
+\&  first                       bytes      pkts     srcport     dstport     srcip              dstip            proto
+\&  2015-01-20 07:08:58.186     27.1 k     29       28974       1115        172.173.129.10     99.28.15.205     TCP
+\&  2015-01-20 07:09:22.010     346        2        51413       23705       20.107.222.24      172.173.14.68    UDP
+\&  2015-01-20 07:08:58.058     54.3 k     58       14627       1115        172.173.129.10     99.28.15.205     TCP
+\&  <output omitted>
+
+\&  summary: 129.0 k flows, 3.2 M packets, 3.3 G bytes
+\&           0.037444 seconds, 3.4 M flows/second
+.fi
+
+Launch three
+.B fdistdump
+processes, master on node1 and slaves on node2 and node3.
+Each slave process will read specified file and directory (recursively).
+Filter is specified, so only records matching the filter will be processed.
+.B --fields
+option arguments specify to print only IP addresses and ports.
+.nf
+\&  \fB$ mpirun --host node1,node2,node3 fdistdump -f "net 147.229.0.0/16" --fields=srcip,dstip,srcport,dstport flow_dir/ flow_file\fR
+\&  srcport     dstport     srcip            dstip
+\&  80          50646       147.229.65.183   166.202.83.16
+\&  44543       23          147.229.222.104  166.206.150.135
+\&  22          60034       172.20.250.182   147.229.79.171
+\&  <output omitted>
+
+\&  summary: 2.9 k flows, 52.1 k packets, 20.7 M bytes
+\&           0.072878 seconds, 39.7 k flows/second
+.fi
+
+Launch job according to hostfile hf.txt.
+Despite the record limit, each slave has to process all the records in all files inside specified directory.
+This is because record sorting is enabled.
+Sort key is
+.BR bytes ,
+which has implicit descending sort direction.
+Record limit is 5, therefore 5 records with largest
+.B bytes
+values are printed.
+.nf
+\&  \fB$ mpirun --hostfile hf.txt fdistdump -o bytes -l 5 --no-summary flow_dir/\fR
+\&  first                       bytes       pkts        srcport     dstport     srcip               dstip               proto
+\&  2015-01-20 07:10:02.020     161.7 M     118.3 k     27032       27032       54.98.60.154        192.245.92.125      UDP
+\&  2015-01-20 21:40:02.639     111.5 M     78.5 k      80          29835       172.21.3.117        203.136.78.254      TCP
+\&  2015-01-20 17:48:50.191     103.6 M     69.1 k      60594       50554       172.173.118.99      192.121.195.133     TCP
+\&  2015-01-20 14:06:58.177     41.4 M      32.5 k      0           0           195.166.35.230      166.206.177.218     IPv6
+\&  2015-01-19 23:30:02.336     40.9 M      27.3 k      80          4425        172.21.3.117        156.194.181.105     TCP
+.fi
+.\" Aggregation subsection ---------------------
+.SS Aggregation
+Following query will process all the records in all the files within specified directory.
+Records with the same aggregation key
+.RB ( srcport
+in this example) are aggregated (merged) together.
+Output record order is undefined.
+.nf
+\&  \fB$ mpirun -np 2 fdistdump -a srcport flow_dir/\fR
+\&  first                       last                        bytes       pkts       flows     srcport     duration         bps         pps       bpp
+\&  2015-01-19 22:59:22.597     2015-01-19 23:59:15.862     2.9 M       47.3 k     544       62125       00:59:53.265     6.4 k       13.2      60.0
+\&  2015-01-19 22:54:34.369     2015-01-19 23:59:57.297     2.0 G       6.1 M      2.2 M     0           01:05:22.928     4.1 M       1.6 k     325.0
+\&  2015-01-19 22:59:16.469     2015-01-19 23:59:13.363     881.3 k     4.8 k      954       50232       00:59:56.894     2.0 k       1.3       181.0
+\&  <output omitted>
+
+\&  summary: 76.0 M flows, 971.2 M packets, 745.3 G bytes
+\&           0.997696 seconds, 76.2 M flows/second
+.fi
+
+
+Launch three
+.B fdistdump
+processes, one master and two slaves, all on local node.
+This configuration doesn't make much sense, because both slaves will process the same files.
+Shell pathnames globbing in this case has exactly same effect as path specified in previous example.
+Records are aggregated according to two keys, source IP address and protocol.
+Result is sorted by number of flows (direction is explicitly specified as descending) and only first 10 records are printed.
+.nf
+\&  \fB$ mpirun -np 3 fdistdump -a srcip,proto -o flows#desc -l 10 --fields=first,bytes,pkts,flows flow_dir/*\fR
+\&  first                       bytes       pkts        flows       srcip               proto
+\&  2015-01-19 22:59:21.976     233.8 M     5.7 M       5.7 M       42.9.199.188        TCP  
+\&  2015-01-19 22:59:22.836     66.3 M      1.6 M       1.6 M       108.131.134.164     TCP  
+\&  2015-01-19 22:58:26.705     364.5 M     3.5 M       1.3 M       192.245.161.141     TCP  
+\&  2015-01-19 22:58:28.770     224.1 M     3.0 M       1.2 M       192.245.161.140     TCP  
+\&  2015-01-19 22:59:21.542     44.3 M      1.1 M       1.1 M       44.49.159.132       TCP  
+\&  2015-01-19 22:59:21.405     78.6 M      1.1 M       1.1 M       172.21.3.102        UDP  
+\&  2015-01-19 22:59:21.592     73.7 M      953.1 k     953.1 k     192.245.180.181     UDP  
+\&  2015-01-19 22:59:21.391     34.9 M      872.8 k     866.5 k     44.49.159.133       TCP  
+\&  2015-01-19 22:58:34.898     58.0 M      1.0 M       839.0 k     44.49.159.135       TCP  
+\&  2015-01-19 22:58:53.195     454.4 M     3.2 M       804.2 k     192.245.229.227     TCP  
+
+\&  summary: 152.1 M flows, 1.9 G packets, 1.5 T bytes
+\&           3.273358 seconds, 46.5 M flows/second
+.fi
+
+Following query will produce same results as the previous one, because
+.B -s
+switch is only a shortcut.
+.nf
+\&  \fB$ mpirun -np 3 fdistdump -s srcip,proto/flows#desc flow_dir/*\fR
+\&  <output omitted>
+.fi
+
+Statistic with filter is very popular query type.
+.nf
+\&  \fB$ mpirun --hostfile hf.txt fdistdump -s srcip -f "srcport 53 and proto UDP" flow_dir/*\fR
+\&  <output omitted>
+.fi
+
+.\" Time range subsection ---------------------
+.SS Time range
+Only flow files corresponding to specified time range will be processed.
+However, \fIpath\fR directories have to contain specific directory hierarchy.
+
+Time range is from 2015-01-19 10:00 to 12:00 in local time of the Czech Republic.
+It's during daylight saving time, CEST time zone, UTC+2.
+Record timestamps are in UTC as you can see on \fBfirst\fR and \fBlast\fR values.
+Aggregation key is \fBbytes\fR field, records with same bytes value are merged together.
+.nf
+\&  \fB$ mpirun --hostfile hf.txt fdistdump -l 3 -s bytes -t "2015-01-19 10:00#2015-01-19 12:00" profile_dir/\fR
+\&  first                       last                        bytes     pkts       flows      duration         bps     pps       bpp
+\&  2015-01-20 08:58:54.770     2015-01-20 10:59:50.970     92        58.3 M     57.8 M     02:00:56.200     0.1     8.0 k     0.0
+\&  2015-01-20 08:58:48.334     2015-01-20 10:59:50.829     184       57.8 M     28.9 M     02:01:02.495     0.2     8.0 k     0.0
+\&  2015-01-20 08:59:23.615     2015-01-20 10:59:50.989     40        24.3 M     24.3 M     02:00:27.374     0.0     3.4 k     0.0
+
+\&  summary: 262.9 M flows, 1.8 G packets, 1.1 T bytes
+\&           1.419171 seconds, 185.3 M flows/second
+.fi
+
+Following time range will process files from last Monday midnight until now.
+.nf
+\&  \fB$ mpirun --hostfile hf.txt fdistdump -t monday profile_dir/\fR
+\&  <output omitted>
+.fi
+
+Time specifiers are in local time by default, but conversion to UTC is performed internally.
+That may cause some problems.
+In the following example, no files were processed, because specified time range is from the beginning of the daylight saving time in the Czech Republic.
+Time is shifted from 02:00 to 03:00, therefore duration of this time range is zero.
+.nf
+\&  \fB$ mpirun --hostfile hf.txt fdistdump -s srcport --fields=duration \\
+\&    -t "2015-03-29 02:00#2015-03-29 03:00" profile_dir/\fR
+\&  first                       last                        flows       srcport     duration
+
+\&  summary: 0 flows, 0 packets, 0 bytes
+\&           0.011489 seconds, 0.0 flows/second
+.fi
+
+This can be solved by an \fBUTC\fR flag, which says that your time specifier is already in UTC.
+.nf
+\&  \fB$ mpirun --hostfile hf.txt fdistdump -s srcport --fields=duration \\
+\&    -t "2015-03-29 01:00 UTC#2015-03-29 02:00 UTC" profile_dir/\fR
+\&  first                       last                        flows       srcport     duration
+\&  2015-01-20 00:59:11.186     2015-01-20 01:59:49.446     3.9 M       9200        01:00:38.260
+\&  2015-01-20 00:55:05.673     2015-01-20 01:59:47.905     3.1 M       3389        01:04:42.232
+\&  2015-01-20 00:57:37.130     2015-01-20 02:00:01.362     2.6 M       53          01:02:24.232
+\&  <output omitted>
+
+\&  summary: 68.6 M flows, 617.9 M packets, 476.6 G bytes
+\&           0.610311 seconds, 112.4 M flows/second
+.fi
+.\" Miscellaneous subsection ---------------------
+.SS Miscellaneous
+Usage of CSV output format.
+.nf
+\&  \fB$ mpirun -np 2 fdistdump -o first --output-format=csv flow_file\fR
+\&  first,bytes,pkts,srcport,dstport,srcip,dstip,proto
+\&  1421708354242,180,3,41657,23,0:0:0:1896806481,0:0:0:2887049676,6
+\&  1421708357387,841,5,57942,80,0:0:0:3237307950,0:0:0:919755252,6
+\&  <output omitted>
+.fi
+
+TCP flags field with default conversion to human readable string.
+.nf
+\&  \fB$ mpirun -np 2 fdistdump -s srcport,dstport --fields=tcpflags --filter="proto TCP" flow_file\fR
+\&  flows       srcport     dstport     tcpflags
+\&  20.3 M      6000        9064        .....RS.
+\&  13.5 M      6000        22          ...APRSF
+\&  6.8 M       6000        1433        ...APRSF
+\&  <output omitted>
+\&  summary: 1.5 G flows, 18.5 G packets, 14.7 T bytes
+\&           92.378761 seconds, 16.1 M flows/second
+.fi
+
+TCP flags and volumetric fields without conversion.
+.nf
+\&  \fB$ mpirun -np 2 fdistdump -s srcport,dstport --fields=tcpflags --filter="proto TCP" \\
+\&    --output-tcpflags-conv=none --output-volume-conv=none flow_file\fR
+\&  flows        srcport     dstport     tcpflags
+\&  20339177     6000        9064        6
+\&  13469252     6000        22          31
+\&  6822069      6000        1433        31
+\&  <output omitted>
+\&  summary: 1490407622 flows, 18488114618 packets, 14734410728124 bytes
+\&           89.289585 seconds, 16691841.7 flows/second
+.fi
+.\" SEE ALSO section -----------------------------------------------------------
+.SH SEE ALSO
+.BR inet_ntop (3)
+.BR mpirun (1),
+.BR nfdump (1),
+.BR mpi (3)
+.BR strftime (3)
