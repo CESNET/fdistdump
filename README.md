@@ -42,7 +42,7 @@ Several tests are included in the tests directory. Test run will query the same
 data using both fdistdump and nfdump, results should match. Therefore, nfdump
 is required to be installed to run tests.
 ``` sh
-./configure --enable-advanced-tests
+./configure --enable-basic-tests --enable-advanced-tests
 make
 make check
 ```

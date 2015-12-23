@@ -2,7 +2,7 @@ language: c
 
 compiler:
         - gcc
-        #- clang #on travis environment clang doesn't support OpenMP
+        #- clang #older clang doesn't support OpenMP
 
 env:
         global:
@@ -28,7 +28,7 @@ before_install:
 
 install:
         - autoreconf -i
-        - ./configure
+        - ./configure --enable-basic-tests
         - make
 
 #before_script:
