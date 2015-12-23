@@ -9,13 +9,11 @@ fi
 
 case $1 in
         mpich)
-                #default MPICH version in Ubuntu 12.10 LTS (1) doesn't comply
-                #MPI 2.2, we need at least MPICH 2
-                sudo apt-get install -q mpich2 libmpich2-dev;;
+                #install MPICH3 (default version in Ubuntu 14.04)
+                sudo apt-get install -q mpich libmpich-dev;;
         openmpi)
-                #default OMPI version in Ubuntu 12.10 LTS (1.4) doesn't comply
-                #MPI 2.2, we need at least OMPI 1.5
-                sudo apt-get install -q openmpi1.5-bin libopenmpi1.5-dev;;
+                #install Open MPI 1.6 (default version in Ubuntu 14.04)
+                sudo apt-get install -q openmpi-bin libopenmpi-dev;;
         *)
                 echo "Error: unknown MPI implementation:" $1;
                 exit 1;;

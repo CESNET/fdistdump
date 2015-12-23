@@ -1,8 +1,12 @@
+#use the Trusty beta build environment
+sudo: required
+dist: trusty
+
 language: c
 
 compiler:
         - gcc
-        #- clang #older clang doesn't support OpenMP
+        #- clang #clang < 3.7 doesn't fully support OpenMP
 
 env:
         global:
@@ -17,7 +21,6 @@ env:
 
 before_install:
         - sudo apt-get update -q
-        - sudo apt-get install -q autoconf-archive
         - ./travis_install_mpi.sh $MPI
         - ./install_dependencies.sh
 
