@@ -10,10 +10,10 @@ fi
 case $1 in
         mpich)
                 #install MPICH3 (default version in Ubuntu 14.04)
-                sudo apt-get install -q mpich libmpich-dev;;
+                sudo apt-get -qq install mpich libmpich-dev;;
         openmpi)
                 #install Open MPI 1.6 (default version in Ubuntu 14.04)
-                sudo apt-get install -q openmpi-bin libopenmpi-dev;;
+                sudo apt-get -qq install openmpi-bin libopenmpi-dev;;
         *)
                 echo "Error: unknown MPI implementation:" $1;
                 exit 1;;

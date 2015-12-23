@@ -20,7 +20,7 @@ env:
 
 
 before_install:
-        - sudo apt-get update -q
+        - sudo apt-get -qq update
         - ./travis_install_mpi.sh $MPI
         - ./install_dependencies.sh
 
