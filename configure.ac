@@ -1,7 +1,7 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-#AC_PREREQ([2.69]) #travis CI issue
+AC_PREREQ([2.68])
 AC_INIT([fdistdump], [0.1], [wrona@cesnet.cz], [],
         [https://github.com/CESNET/fdistdump])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror subdir-objects])
