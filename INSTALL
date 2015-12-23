@@ -1,0 +1,11 @@
+Prerequisities:
+  -libnf
+  -MPI
+
+Installation:
+  autoreconf -i #only if installing from Git
+  ./configure
+  make
+  make install #root privileges may be needed
+
+For more information see README.md and man 1 fdistdump.

@@ -39,6 +39,7 @@ install:
 
 script:
         - make check
+        - make distcheck
 
 #after_success:
 after_failure:

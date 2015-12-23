@@ -16,7 +16,7 @@ operating systems are not tested.
 Passing Interface. fdistdump requires implementation supporting standard MPI-2.0
 or newer (Open MPI, MPICH2, MPICH3, MVAPICH2, Intel® MPI Library, ...).
 
-## Building
+## Building and installing
 fdistdump is built with GNU build system (Autotools). You can obtain source
 code either from a git repository or from a package.
 
