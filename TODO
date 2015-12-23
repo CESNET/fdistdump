@@ -1,0 +1,23 @@
+Features:
+        -try and test new libnf versions (> 1.16), check and reflect changes
+        -optimization for ascending sort, there is possibility to vastly reduce
+         number of read/transfered records. If the key value of first records
+         is X and the key value of Nth record is also X, it is unnecessary to
+         read further records. Similar optimization is possible for descending
+         sort.
+
+Bugfixes:
+        -fix coverity bugs
+        -use dynamic allocation for the slave transmit buffers. On some
+         architectures, where stack size limit is low, current static memory
+         allocation may cause big trouble.
+
+Tests:
+        -add tests for reading multiple input files at once to test
+         multithreading
+        -add tests for reading single/multiple very large files to test
+         buffer switching
+        -add tests for reading nonexistent/invalid/empty files in all modes.
+         There is possibility of deadlock.
+
+Others:
