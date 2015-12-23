@@ -53,7 +53,7 @@ else
         proc_cnt=$1
 fi
 
-mpirun -np $proc_cnt ./create_mpi_struct
+mpirun -np $proc_cnt ./test_create_mpi_struct
 
 if [ $? -eq 0 ]; then
         echo "${TEST_DESC} was successful (${proc_cnt} processes)."

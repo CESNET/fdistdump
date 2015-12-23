@@ -55,7 +55,7 @@ else
 fi
 
 ARGS=(-a srcip,dstip,srcport,dstport,proto -f "src port 80 and proto TCP" -l 100 -o flows test.nffile)
-mpirun -np $proc_cnt ./mem_setup "${ARGS[@]}"
+mpirun -np $proc_cnt ./test_mem_setup "${ARGS[@]}"
 
 if [ $? -eq 0 ]; then
         echo "${TEST_DESC} was successful (${proc_cnt} processes)."

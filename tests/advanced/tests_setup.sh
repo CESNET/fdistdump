@@ -42,26 +42,19 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
-#if [ ! -z "$FDD_ADV_TESTS_MISSING" ]; then
-#      echo "Common setup: Error: Mandatory programs for advanced test are not installed ($FDD_ADV_TESTS_MISSING)."
-#      return 77
-#fi
-
 LOC_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-# data source file in nfdump format for fdd/nfd queries
+#data source file in nfdump format for fdd/nfd queries
 G_INPUT_DATA="${LOC_DIR}/test_data.nfcap"
 
-# output files with results from queries (fdd/nfd)
+#output files with results from queries (fdd/nfd)
 G_FDD_RESULTS="${LOC_DIR}/fdd.results"
 G_NFD_RESULTS="${LOC_DIR}/nfd.results"
 
-# location of FDistDump binary
-G_FDIST_DUMP=${LOC_DIR}/../../src/fdistdump
+#location of FDistDump binary
+G_FDIST_DUMP=fdistdump
 
-# query types
+#query types
 G_QTYPE_LISTFLOWS=1
 G_QTYPE_AGGREG=2
 G_QTYPE_STATS=3
-
-return 0

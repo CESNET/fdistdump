@@ -60,7 +60,7 @@ TEST_DESC="Creation of testing data"
 
 
 
-${ADV_TESTS_HOME}/create_test_data $G_INPUT_DATA
+./test_create_test_data $G_INPUT_DATA
 
 ret_code=$?
 if [ $ret_code -eq 0 ]; then

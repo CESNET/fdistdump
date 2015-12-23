@@ -67,9 +67,9 @@ filter[1]=""
 for i in ${!test_args[@]}; do
 
         if [ -z "${filter[$i]}" ]; then
-                mpirun -np $proc_cnt ./arguments ${test_args[$i]}
+                mpirun -np $proc_cnt ./test_arguments ${test_args[$i]}
         else
-                mpirun -np $proc_cnt ./arguments ${test_args[$i]} "${filter[$i]}"
+                mpirun -np $proc_cnt ./test_arguments ${test_args[$i]} "${filter[$i]}"
         fi
 
 

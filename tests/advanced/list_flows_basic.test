@@ -98,5 +98,3 @@ else
         echo "     nfd-cmd: ${NFD_CMD}"
         exit 1
 fi
-
-exit 0

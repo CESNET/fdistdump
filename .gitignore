@@ -24,9 +24,8 @@ Makefile
 *.swo
 
 #tests
-/tests/*
-!/tests/*.c
-!/tests/*.test
+*.log
+*.trs
 
 #object files
 *.o

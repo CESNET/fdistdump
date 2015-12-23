@@ -41,11 +41,9 @@
 # otherwise) arising in any way out of the use of this software, even
 # if advised of the possibility of such damage.
 
+ADV_TESTS_HOME=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+
 # import common setup
-. ./tests_setup.sh
+. ${ADV_TESTS_HOME}/tests_setup.sh
 
 rm -f $G_INPUT_DATA
-
-#if vsechno ok, rm -f ${G_LOG_DIR}/*
-
-exit 0
