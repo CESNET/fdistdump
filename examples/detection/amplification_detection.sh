@@ -178,14 +178,15 @@ else
     __r2=$?
 fi
 
-if [[ "$__r1" != "0" ]]; then
+_is_num_re='^[0-9]+$'
+if [[ "$__r1" != "0" ]] || ! [[ $__START_TIME =~ $_is_num_re ]]; then
     echo "Error: Wrong 1st argument."
     echo
     print_usage
     exit 1
 fi
 
-if [[ "$__r2" != "0" ]]; then
+if [[ "$__r2" != "0" ]] || ! [[ $__END_TIME =~ $_is_num_re ]]; then
     echo "Error: Wrong 2nd argument."
     echo
     print_usage
