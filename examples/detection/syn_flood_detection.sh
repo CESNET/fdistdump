@@ -233,7 +233,7 @@ while (("$__diff" > 0)); do
             echo "ACK packet count: $_ack_packets" >>"$__DETECTION_LOG" 2>&1
             echo "Traffic Sample:" >>"$__DETECTION_LOG" 2>&1
             _output_filter="proto TCP && ${attckr}"
-            _cmd="mpirun --hostfile ~/hostfile_one.txt --preload-binary ~/fdistdump/src/fdistdump --fields=first,last,duration,srcip,dstip,bytes,pkts,flows,tcpflags --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
+            _cmd="mpirun --hostfile $__HOSTFILE --preload-binary ~/fdistdump/src/fdistdump --fields=first,last,duration,srcip,dstip,bytes,pkts,flows,tcpflags --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
             echo "" >>"$__DETECTION_LOG" 2>&1
             echo "$_cmd" >>"$__DETECTION_LOG" 2>&1
             echo "" >>"$__DETECTION_LOG" 2>&1

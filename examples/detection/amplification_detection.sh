@@ -325,7 +325,7 @@ while (("$__diff" > 0)); do
                 fi
             done
             _output_filter="${_output_filter} )"
-            _cmd="mpirun --hostfile ~/hostfile_one.txt --preload-binary ~/fdistdump/src/fdistdump --output-volume-conv=none --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
+            _cmd="mpirun --hostfile $__HOSTFILE --preload-binary ~/fdistdump/src/fdistdump --output-volume-conv=none --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
             echo "" >>"$__DETECTION_LOG" 2>&1
             echo "$_cmd" >>"$__DETECTION_LOG" 2>&1
             echo "" >>"$__DETECTION_LOG" 2>&1
