@@ -75,3 +75,5 @@ EXTRA_DIST=README.md LICENSE
 ##test scripts
 EXTRA_DIST+=$(BASIC_TESTS) $(ADVANCED_TESTS)
 EXTRA_DIST+=tests/advanced/tests_setup.sh tests/advanced/diff_results.sh
+##examples
+EXTRA_DIST+=examples
