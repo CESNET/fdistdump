@@ -142,7 +142,9 @@ else
         result_is_sorted=0
 fi
 
-AWK_LIST_NFD2FDD='{
+AWK_LIST_NFD2FDD='
+BEGIN { OFMT = "%.0f"; OFS = ","}
+{
         first_sec = $2
         first_msec = $3
         last_sec = $4
@@ -159,10 +161,12 @@ AWK_LIST_NFD2FDD='{
         first = first_sec * 1000 + first_msec
         last = last_sec * 1000 + last_msec
 
-        print first","last","bytes","pkts","srcport","dstport","tcpflags","srcip","dstip","proto
+        print first, last, bytes, pkts, srcport, dstport, tcpflags, srcip, dstip, proto
 }'
 
-AWK_AGGR_NFD2FDD='{
+AWK_AGGR_NFD2FDD='
+BEGIN { OFMT = "%.0f"; OFS = ","}
+{
         first_sec = $2
         first_msec = $3
         last_sec = $4
@@ -173,7 +177,7 @@ AWK_AGGR_NFD2FDD='{
         first = first_sec * 1000 + first_msec
         last = last_sec * 1000 + last_msec
 
-        print first","last","bytes","pkts","F_SPEC
+        print first, last, bytes, pkts, F_SPEC
 }'
 
 if [[ $query_type -eq $G_QTYPE_LISTFLOWS ]]; then
