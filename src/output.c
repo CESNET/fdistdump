@@ -292,7 +292,7 @@ static const char * timestamp_to_str(const uint64_t *ts)
 
                 off = strftime(global_str, sizeof (global_str),
                                 output_params.ts_conv_str, timeconv(&sec));
-                snprintf(global_str + off, sizeof (global_str) - off, ".%.3lu",
+                snprintf(global_str + off, sizeof (global_str) - off, ".%.3" PRIu64,
                                 msec);
                 break;
 
