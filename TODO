@@ -20,4 +20,8 @@ Tests:
         -add tests for reading nonexistent/invalid/empty files in all modes.
          There is possibility of deadlock.
 
+Documentation:
+        -add info about path preprocessor
+
 Others:
+        -create and use more MPI tags

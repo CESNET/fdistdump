@@ -474,7 +474,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                 uint8_t *rec_ptr; //pointer to record in data buffer
                 uint8_t *msg_end; //record boundary
 
-                /* Wait for message from any slave. */
+                /* Wait for data or status report from any slave. */
                 MPI_Waitany(slave_cnt + 1, requests, &slave_idx, &status);
 
                 if (slave_idx == MPI_UNDEFINED) { //no active slaves anymore

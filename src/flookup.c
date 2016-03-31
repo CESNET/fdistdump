@@ -53,9 +53,13 @@
 #include <stddef.h> //size_t
 #include <limits.h> //PATH_MAX
 #include <assert.h>
+#include <ctype.h> //isdigit()
+#include <unistd.h> //gethostname()
 
 #include <dirent.h>
 #include <sys/stat.h>
+
+#include <mpi.h>
 
 
 #define F_ARRAY_INIT_SIZE 50
@@ -146,26 +150,22 @@ off_t f_array_get_size_sum(const f_array_t *fa)
 }
 
 
-static error_code_t f_array_fill_from_time(f_array_t *fa, const char *path,
+static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
                 struct tm begin, struct tm end)
 {
         error_code_t primary_errno = E_OK;
-        char new_path[PATH_MAX];
         size_t offset = strlen(path);
         struct tm ctx = begin;
         struct stat stat_buff;
 
 
-        assert(offset + 2 <= PATH_MAX);
-        strcpy(new_path, path);
-        new_path[offset] = '/';
-        offset++;
+        strcat(path, "/");
 
         /* Loop through the entire time range. */
         while (tm_diff(end, ctx) > 0) {
                 /* Construct path string from time. */
-                if (strftime(new_path + offset, PATH_MAX - offset,
-                                        FLOW_FILE_FORMAT, &ctx) == 0) {
+                if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
+                                        &ctx) == 0) {
                         return E_PATH;
                 }
 
@@ -174,13 +174,12 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, const char *path,
                 mktime_utc(&ctx);
 
                 /* Check file existence. */
-                if (stat(new_path, &stat_buff) != 0) {
+                if (stat(path, &stat_buff) != 0) {
                         secondary_errno = errno;
                         print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                        strerror(errno), new_path);
+                                        strerror(errno), path);
                 } else {
-                        primary_errno = f_array_add(fa, new_path,
-                                        stat_buff.st_size);
+                        primary_errno = f_array_add(fa, path, stat_buff.st_size);
                         if (primary_errno != E_OK) {
                                 return primary_errno;
                         }
@@ -191,14 +190,13 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, const char *path,
         return E_OK;
 }
 
-static error_code_t f_array_fill_from_path(f_array_t *fa, char *path)
+static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
 {
         error_code_t primary_errno = E_OK;
 
         DIR *dir;
         struct dirent *entry;
 
-        char new_path[PATH_MAX];
         struct stat stat_buff;
 
 
@@ -225,6 +223,8 @@ static error_code_t f_array_fill_from_path(f_array_t *fa, char *path)
 
         /* Get all filenames, dot starting filenames are ignored. */
         while ((entry = readdir(dir)) != NULL) {
+                char new_path[PATH_MAX];
+
                 if (entry->d_name[0] == '.') {
                         continue;
                 }
@@ -246,6 +246,71 @@ static error_code_t f_array_fill_from_path(f_array_t *fa, char *path)
         return primary_errno;
 }
 
+
+bool path_preprocessor(const char *original, char new[PATH_MAX])
+{
+        char tmp[PATH_MAX];
+        char *last_path = tmp;
+        char *perc_sign;
+
+
+        strcpy(tmp, original); //copy all except initial escape sequence
+
+        /* Path starts by %DIGIT. */
+        if (tmp[0] == '%' && isdigit(tmp[1])) {
+                last_path = tmp + 2;
+                int world_rank;
+
+                while (isdigit(*last_path) && last_path++); //skip all digits
+                if (*last_path++ != ':') { //check for terminating colon
+                        print_warn(E_PATH, 0, "invalid escape sequence, "
+                                        "skipping \"%s\"", original);
+                        return false;
+                }
+
+                MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+                if (world_rank != atoi(tmp + 1)) {
+                        return false; //this path is not for me (different rank)
+                }
+        }
+
+        /* last_path now contains all except initial escape sequence. */
+        perc_sign = strchr(last_path, '%'); //find first percent sign
+        while (perc_sign != NULL) {
+                *perc_sign = '\0';
+                strcat(new, last_path); //copy original path till percent sign
+
+                perc_sign++; //move pointer to escaped character
+                switch (*perc_sign) {
+                case 'h':
+                        errno = 0;
+                        gethostname(new + strlen(new), PATH_MAX - strlen(new));
+                        if (errno != 0) {
+                                errno = ENAMETOOLONG;
+                                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                                strerror(errno), original);
+                                return false;
+                        }
+                        break;
+                default:
+                        print_warn(E_PATH, 0, "unknown escape sequence, "
+                                        "skipping \"%s\"", original);
+                        return false;
+                }
+
+                last_path = perc_sign + 1; //ptr to next regular character
+                perc_sign = strchr(last_path, '%');
+        }
+
+        strcat(new, last_path); //copy rest of the original path
+        print_debug("<path_preprocessor> original path: %s\tnew path: %s",
+                        original, new);
+
+
+        return true;
+}
+
+
 error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
                 struct tm end)
 {
@@ -262,19 +327,25 @@ error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
                         token != NULL;
                         token = strtok_r(NULL, "\x1C", &saveptr)) //next
         {
+                char path[PATH_MAX] = { 0 };
+
+                if (!path_preprocessor(token, path)) {
+                        continue;
+                }
+
                 /* Detect file type. */
-                if (stat(token, &stat_buff) != 0) {
+                if (stat(path, &stat_buff) != 0) {
                         secondary_errno = errno;
                         print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                        strerror(errno), token);
+                                        strerror(errno), path);
                         continue;
                 }
 
                 if (have_time_range && S_ISDIR(stat_buff.st_mode)) {
-                        primary_errno = f_array_fill_from_time(fa, token, begin,
+                        primary_errno = f_array_fill_from_time(fa, path, begin,
                                         end);
                 } else {
-                        primary_errno = f_array_fill_from_path(fa, token);
+                        primary_errno = f_array_fill_from_path(fa, path);
                 }
 
                 if (primary_errno != E_OK) {
