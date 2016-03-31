@@ -125,8 +125,4 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit);
 /* Print task summart. */
 void print_summary(const struct stats *stats, double duration);
 
-/* Print current progress. */
-void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
-                progress_bar_t type);
-
 #endif //OUTPUT_H

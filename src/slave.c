@@ -93,7 +93,7 @@ struct slave_task_ctx {
 };
 
 
-static void isend_bytes(void *data, size_t data_size, MPI_Request *req)
+static void wait_isend_cs(void *data, size_t data_size, MPI_Request *req)
 {
         /* Lack of MPI_THREAD_MULTIPLE threading level implies this CS. */
         #pragma omp critical (mpi)
@@ -215,7 +215,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
                                 break; //record limit reached by another thread
                         }
 
-                        isend_bytes(db, db_off, &request);
+                        wait_isend_cs(db, db_off, &request);
                         file_sent_bytes += db_off;
 
                         /* Increment shared counter. */
@@ -252,7 +252,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
 
         /* Send remaining records if data buffer is not empty. */
         if (db_rec_cntr != 0) {
-                isend_bytes(db, db_off, &request);
+                wait_isend_cs(db, db_off, &request);
                 file_sent_bytes += db_off;
 
                 #pragma omp atomic
@@ -275,12 +275,16 @@ close_file:
         lnf_close(file);
 
         /* Buffers will be invalid after return, wait for send to complete. */
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
+        #pragma omp critical (mpi)
+        {
+                MPI_Wait(&request, MPI_STATUS_IGNORE);
+        }
 
         print_debug("<task_send_file> thread %d, file %s, read %zu, "
                         "processed %zu, sent %zu B", omp_get_thread_num(),
                         path, file_rec_cntr, file_proc_rec_cntr,
                         file_sent_bytes);
+
 
         return primary_errno;
 }
@@ -509,7 +513,9 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
                                         &cursor);
                 } else {
                         /* Send buffer. */
-                        isend_bytes(db, db_off, &request);
+                        MPI_Wait(&request, MPI_STATUS_IGNORE);
+                        MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                        MPI_COMM_WORLD, &request);
                         byte_cntr += db_off;
 
                         /* Clear buffer context variables. */
@@ -528,12 +534,11 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
 
         /* Send remaining records if data buffer is not empty. */
         if (db_rec_cntr != 0) {
-                isend_bytes(db, db_off, &request);
+                MPI_Wait(&request, MPI_STATUS_IGNORE);
+                MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                MPI_COMM_WORLD, &request);
                 byte_cntr += db_off;
         }
-
-        /* All sent or error, notify master by empty DATA message. */
-        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
         /* Buffers will be invalid after return, wait for send to complete. */
         MPI_Wait(&request, MPI_STATUS_IGNORE);
@@ -603,7 +608,9 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                                         &cursor);
                 } else {
                         /* Send buffer. */
-                        isend_bytes(db, db_off, &request);
+                        MPI_Wait(&request, MPI_STATUS_IGNORE);
+                        MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                        MPI_COMM_WORLD, &request);
                         byte_cntr += db_off;
 
                         /* Clear buffer context variables. */
@@ -614,7 +621,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                 }
         }
         if (secondary_errno == LNF_EOF) {
-                goto free_lnf_rec; //no records in memory or all records read
+                goto send_remaining; //no records in memory or all records read
         } else if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno,
@@ -703,7 +710,9 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                                         &cursor);
                 } else {
                         /* Send buffer. */
-                        isend_bytes(db, db_off, &request);
+                        MPI_Wait(&request, MPI_STATUS_IGNORE);
+                        MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                        MPI_COMM_WORLD, &request);
                         byte_cntr += db_off;
 
                         /* Clear buffer context variables. */
@@ -720,15 +729,19 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         }
 
 
-free_lnf_rec:
-        lnf_rec_free(rec);
-send_terminator:
+send_remaining:
         /* Send remaining records if data buffer is not empty. */
         if (db_rec_cntr != 0) {
-                isend_bytes(db, db_off, &request);
+                MPI_Wait(&request, MPI_STATUS_IGNORE);
+                MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
+                                MPI_COMM_WORLD, &request);
                 byte_cntr += db_off;
         }
 
+free_lnf_rec:
+        lnf_rec_free(rec);
+
+send_terminator:
         /* Phase 1 done, notify master by empty DATA message. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
@@ -823,9 +836,6 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
 free_lookup_cursors:
         free(lookup_cursors);
 
-        /* Phase 3 done, notify master by empty DATA message. */
-        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
-
         print_debug("<fast_topn_recv_lookup_send> received %zu, "
                         "found and sent %zu", received_cnt, lookup_cursors_idx);
         return primary_errno;
@@ -838,17 +848,12 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
 
         switch (stc->shared.working_mode) {
         case MODE_LIST:
-                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
                 break; //all records already sent while reading
 
         case MODE_SORT:
-                if (stc->shared.rec_limit == 0) {
-                        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                        MPI_COMM_WORLD);
-                } else {
+                if (stc->shared.rec_limit != 0) {
                         primary_errno = isend_loop(stc);
-                }
+                } //else all records already sent while reading
 
                 break;
 
@@ -872,6 +877,26 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
 
         print_debug("<task_postprocess> done");
         return primary_errno;
+}
+
+
+void progress_report_init(size_t files_cnt)
+{
+        MPI_Gather(&files_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0, MPI_UNSIGNED_LONG,
+                        ROOT_PROC, MPI_COMM_WORLD);
+}
+
+void progress_report_next(void)
+{
+        MPI_Request request = MPI_REQUEST_NULL;
+
+
+        #pragma omp critical (mpi)
+        {
+                MPI_Isend(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
+                                MPI_COMM_WORLD, &request);
+                MPI_Request_free(&request);
+        }
 }
 
 
@@ -908,8 +933,7 @@ error_code_t slave(int world_size)
         }
 
         /* Report number of files to be processed. */
-        MPI_Gather(&files.f_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0,
-                        MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
+        progress_report_init(files.f_cnt);
 
 
         //TODO: return codes, secondary_errno
@@ -927,8 +951,7 @@ error_code_t slave(int world_size)
                         }
 
                         /* Report that another file has been processed. */
-                        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
-                                        MPI_COMM_WORLD);
+                        progress_report_next();
                 } //don't wait for other threads and start merging memory
 
                 /* Merge thread specific hash tables into one. */
@@ -944,10 +967,8 @@ error_code_t slave(int world_size)
         primary_errno = task_postprocess(&stc);
 
 finalize_task:
-        if (primary_errno != E_OK) { //always send terminator to master on error
-                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD);
-        }
+        /* Send terminator to master even on error. */
+        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
         stats_send(&stc.stats);
 

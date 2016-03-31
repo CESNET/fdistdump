@@ -80,6 +80,15 @@ struct mem_write_callback_data {
         size_t fields_cnt; //number of fields present in fields array
 };
 
+static struct progress_bar_ctx {
+        progress_bar_t type;
+        size_t slave_cnt;
+        size_t *files_slave_cur; //slave_cnt size
+        size_t *files_slave_sum; //slave_cnt size
+        size_t files_cur;
+        size_t files_sum;
+} progress_bar_ctx;
+
 
 typedef error_code_t(*recv_callback_t)(uint8_t *data, size_t data_len,
                 void *user);
@@ -165,6 +174,136 @@ static error_code_t print_rec_callback(uint8_t *data, size_t data_len,
         print_rec(data);
 
         return E_OK;
+}
+
+
+/* Progress bar print. */
+void progress_bar_print(void)
+{
+        struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
+        FILE *out_stream;
+        double master_percentage;
+        double slave_percentage[pbc->slave_cnt];
+
+
+        for (size_t i = 0; i < pbc->slave_cnt; ++i) {
+                assert(pbc->files_slave_cur[i] <= pbc->files_slave_sum[i]);
+                if (pbc->files_slave_sum[i] == 0) {
+                        slave_percentage[i] = 100.0;
+                } else {
+                        slave_percentage[i] = (double)pbc->files_slave_cur[i] /
+                                pbc->files_slave_sum[i] * 100.0;
+                }
+        }
+
+        assert(pbc->files_cur <= pbc->files_sum);
+        if (pbc->files_sum == 0) {
+                master_percentage = 100.0;
+        } else {
+                master_percentage = (double)pbc->files_cur /
+                        pbc->files_sum * 100.0;
+        }
+
+        if (pbc->type == PROGRESS_BAR_BASIC ||
+                        pbc->type == PROGRESS_BAR_EXTENDED) {
+                out_stream = stderr;
+
+                fprintf(out_stream, "[reading files] ");
+                fprintf(out_stream, "master: %zu/%zu (%.0f %%)", pbc->files_cur,
+                                pbc->files_sum, master_percentage);
+
+                if (pbc->type == PROGRESS_BAR_EXTENDED) {
+                        for (size_t i = 0; i < pbc->slave_cnt; ++i) {
+                                fprintf(out_stream, " | %zu: %zu/%zu (%.0f %%)",
+                                                i + 1, pbc->files_slave_cur[i],
+                                                pbc->files_slave_sum[i],
+                                                slave_percentage[i]);
+                        }
+                }
+
+                if (master_percentage == 100.0) {
+                        fprintf(out_stream, " DONE\n");
+                } else {
+                        putc('\r', out_stream);
+                }
+                fflush(out_stream);
+        }
+
+        if (pbc->type == PROGRESS_BAR_FILE) {
+                out_stream = fopen("progress.json", "w");
+                assert(out_stream != NULL);
+
+                putc('{', out_stream);
+
+                fprintf(out_stream, "\"master\":%.0f", master_percentage);
+
+                for (size_t i = 0; i < pbc->slave_cnt; ++i) {
+                        fprintf(out_stream, ",\"sl%zu\":%.0f", i + 1,
+                                        slave_percentage[i]);
+                }
+
+                putc('}', out_stream);
+                putc('\n', out_stream);
+
+                fclose(out_stream);
+        }
+}
+
+/* Initialize - gather file count from each slave. */
+error_code_t progress_bar_init(progress_bar_t type, size_t slave_cnt)
+{
+        struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
+
+
+        /* Allocate memory to keep context. */
+        pbc->files_slave_cur = calloc(slave_cnt, sizeof (size_t));
+        pbc->files_slave_sum = calloc(slave_cnt, sizeof (size_t));
+        if (pbc->files_slave_cur == NULL || pbc->files_slave_sum == NULL) {
+                secondary_errno = 0;
+                print_err(E_MEM, secondary_errno, "malloc()");
+                return E_MEM;
+        }
+
+        pbc->type = type; //store progress bar type
+        pbc->slave_cnt = slave_cnt; //store progress bar type
+
+        /* Receive number of files to be processed. */
+        MPI_Gather(MPI_IN_PLACE, 0, MPI_UNSIGNED_LONG, pbc->files_slave_sum - 1,
+                        1, MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
+
+        for (size_t i = 0; i < slave_cnt; ++i) {
+                pbc->files_sum += pbc->files_slave_sum[i];
+        }
+
+        /* Initial progress bar print. */
+        if (pbc->type != PROGRESS_BAR_NONE) {
+                progress_bar_print();
+        }
+
+
+        return E_OK;
+}
+
+bool progress_bar_refresh(int source)
+{
+        struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
+
+        pbc->files_slave_cur[source - 1]++;
+        pbc->files_cur++;
+
+        if (pbc->type != PROGRESS_BAR_NONE) {
+                progress_bar_print();
+        }
+
+        return pbc->files_cur == pbc->files_sum;
+}
+
+void progress_bar_finish(void)
+{
+        struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
+
+        free(pbc->files_slave_cur);
+        free(pbc->files_slave_sum);
 }
 
 
@@ -267,7 +406,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
         uint8_t *db[slave_cnt][2]; //pointers to db_mem
         bool db_idx[slave_cnt]; //index to currently used data_buff
 
-        MPI_Request requests[slave_cnt];
+        MPI_Request requests[slave_cnt + 1]; //plus one for progress
         MPI_Status status;
 
         size_t rec_cntr = 0; //processed records
@@ -320,6 +459,14 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                                 MPI_COMM_WORLD, &requests[i]);
         }
 
+        /* Start first nonblocking progress report receive from any slave. */
+        if (progress_bar_ctx.files_sum > 0) {
+                MPI_Irecv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
+                                MPI_COMM_WORLD, &requests[slave_cnt]);
+        } else {
+                requests[slave_cnt] = MPI_REQUEST_NULL;
+        }
+
         /* Data receiving loop. */
         while (true) {
                 int msg_size;
@@ -328,10 +475,25 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                 uint8_t *msg_end; //record boundary
 
                 /* Wait for message from any slave. */
-                MPI_Waitany(slave_cnt, requests, &slave_idx, &status);
+                MPI_Waitany(slave_cnt + 1, requests, &slave_idx, &status);
+
                 if (slave_idx == MPI_UNDEFINED) { //no active slaves anymore
                         break;
                 }
+
+                if (status.MPI_TAG == TAG_PROGRESS) {
+                        bool finished = progress_bar_refresh(status.MPI_SOURCE);
+
+                        if (!finished) { //expext next progress report
+                                MPI_Irecv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE,
+                                                TAG_PROGRESS, MPI_COMM_WORLD,
+                                                &requests[slave_cnt]);
+                        }
+
+                        continue;
+                }
+
+                assert(status.MPI_TAG == TAG_DATA);
 
                 /* Determine actual size of received message. */
                 MPI_Get_count(&status, MPI_BYTE, &msg_size);
@@ -528,46 +690,6 @@ free_aggr_mem:
 }
 
 
-void progress_bar(progress_bar_t type, size_t slave_cnt)
-{
-        size_t files_slave_cur[slave_cnt];
-        size_t files_slave_sum[slave_cnt];
-        size_t files_all_sum = 0;
-
-        MPI_Status status;
-
-
-        //TODO: MPI methods are not thread safe
-        /* Receive number of files to be processed. */
-        MPI_Gather(MPI_IN_PLACE, 0, MPI_UNSIGNED_LONG, files_slave_sum - 1, 1,
-                        MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
-        for (size_t i = 0; i < slave_cnt; ++i) {
-                files_all_sum += files_slave_sum[i];
-                files_slave_cur[i] = 0;
-        }
-
-
-        if (type != PROGRESS_BAR_NONE) {
-                print_progress_bar(files_slave_cur, files_slave_sum, slave_cnt,
-                                type);
-        }
-
-        for (size_t i = 0; i < files_all_sum; ++i) {
-                /* Receive processed file report. */
-                MPI_Recv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
-                                MPI_COMM_WORLD, &status);
-                files_slave_cur[status.MPI_SOURCE - 1]++;
-
-                if (type == PROGRESS_BAR_NONE) {
-                        break;
-                }
-
-                print_progress_bar(files_slave_cur, files_slave_sum, slave_cnt,
-                                type);
-        }
-}
-
-
 error_code_t master(int world_size, const struct cmdline_args *args)
 {
         error_code_t primary_errno = E_OK;
@@ -596,40 +718,42 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         }
 
 
-        #pragma omp parallel sections num_threads(2)
-        {
-                #pragma omp section
-                {
-                        if (mtc.shared.working_mode != MODE_PASS) {
-                                progress_bar(args->progress_bar, mtc.slave_cnt);
-                        }
-                }
-
-                #pragma omp section
-                {
-                        /* Send, receive, process. */
-                        switch (mtc.shared.working_mode) {
-                        case MODE_PASS:
-                                //only termination message will be received from
-                                //each slave
-                        case MODE_LIST:
-                                primary_errno = mode_list_main(&mtc);
-                                break;
-
-                        case MODE_SORT:
-                                primary_errno = mode_sort_main(&mtc);
-                                break;
-
-                        case MODE_AGGR:
-                                primary_errno = mode_aggr_main(&mtc);
-                                break;
-
-                        default:
-                                assert(!"unknown working mode");
-                        }
+        if (mtc.shared.working_mode != MODE_PASS) {
+                primary_errno = progress_bar_init(args->progress_bar,
+                                mtc.slave_cnt);
+                if (primary_errno != E_OK) {
+                        goto finalize;
                 }
         }
 
+
+        /* Send, receive, process. */
+        switch (mtc.shared.working_mode) {
+        case MODE_PASS:
+                //only termination message will be received from
+                //each slave
+        case MODE_LIST:
+                primary_errno = mode_list_main(&mtc);
+                break;
+
+        case MODE_SORT:
+                primary_errno = mode_sort_main(&mtc);
+                break;
+
+        case MODE_AGGR:
+                primary_errno = mode_aggr_main(&mtc);
+                break;
+
+        default:
+                assert(!"unknown working mode");
+        }
+
+
+        if (mtc.shared.working_mode != MODE_PASS) {
+                progress_bar_finish();
+        }
+
+finalize:
         /* Receive statistics from every slave, print them. */
         //TODO: when using list mode and record limit, stats are incorrect
         stats_recv(&stats, mtc.slave_cnt);
