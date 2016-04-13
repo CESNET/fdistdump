@@ -27,6 +27,12 @@ CFLAGS="$CFLAGS $OPENMP_CFLAGS" #add to compile flags
 CPPFLAGS="$CPPFLAGS $OPENMP_CFLAGS" #add to preprocessor flags
 
 
+# Test for particular system features
+##arrange for 64-bit file offsets, known as large-file support
+##needed for GlusterFS on 32bit systems
+AC_SYS_LARGEFILE
+
+
 # Checks for libraries.
 ##libnf
 AC_SEARCH_LIBS([lnf_open], [nf], [], [AC_MSG_ERROR([unable to find the libnf \
