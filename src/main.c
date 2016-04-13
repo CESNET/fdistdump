@@ -42,11 +42,10 @@
  *
  */
 
+#include "common.h"
 #include "master.h"
 #include "slave.h"
-#include "common.h"
 #include "arg_parse.h"
-#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

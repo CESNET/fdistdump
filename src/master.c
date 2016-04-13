@@ -43,8 +43,8 @@
  *
  */
 
-#include "master.h"
 #include "common.h"
+#include "master.h"
 #include "output.h"
 
 #include <string.h> //strlen()

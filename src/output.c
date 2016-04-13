@@ -42,6 +42,7 @@
  *
  */
 
+#include "common.h"
 #include "output.h"
 
 #include <stdio.h>

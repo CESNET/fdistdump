@@ -43,7 +43,6 @@
  *
  */
 
-#include "config.h"
 #include "common.h"
 #include "flookup.h"
 

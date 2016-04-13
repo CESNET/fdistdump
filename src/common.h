@@ -46,6 +46,8 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include "config.h"
+
 #include <stddef.h> //size_t
 #include <time.h> //struct tm
 #include <stdbool.h>

@@ -43,6 +43,7 @@
  *
  */
 
+#include "common.h"
 #include "slave.h"
 #include "flookup.h"
 

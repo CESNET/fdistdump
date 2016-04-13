@@ -44,8 +44,8 @@
 
 #define _XOPEN_SOURCE //strptime()
 
+#include "common.h"
 #include "arg_parse.h"
-#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
