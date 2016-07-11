@@ -6,7 +6,7 @@
 fdistdump \- a tool to query IP flow files using single or distributed system
 .\" SYNOPSIS section -----------------------------------------------------------
 .SH SYNOPSIS
-.B mpirun
+.B mpiexec
 .RI [ MPI_options ]
 .B fdistdump
 .RB [ -a
@@ -59,14 +59,13 @@ Non argument options that are duplicated on the command line are not harmful.
 .SS MPI_options
 .B fdistdump
 is a MPI application and is necessary to launch it using one of
-.BR mpirun ,\  mpiexec ,\  orterun
-or however your MPI implementation calls the job launcher.
+.BR mpiexec ,\  mpirun ,\  orterun
+or however your MPI implementation calls the process manager.
 Here, only basic
 .I MPI_options
-are mentioned, for complete list see
-.BR mpirun (1).
+are mentioned, for complete list see your process manager documentation.
 .TP
-.BI -np \ #
+.BI -n \ #
 To run
 .B fdistdump
 on a
@@ -89,11 +88,11 @@ will be printed to stdout:
 .PP
 .nf
 .RS
-$ mpirun -np 2 fdistdump \fIpath\fR
+$ mpiexec -n 2 fdistdump \fIpath\fR
 .RE
 .fi
 .TP
-.BI --host \ host\fR[,...]
+.BI -host \ host\fR[,...]
 To run
 .B fdistdump
 on a
@@ -112,49 +111,7 @@ on nodes node2 and node3 (where slave processes are running) will be printed to 
 .PP
 .nf
 .RS
-$ mpirun --host node1,node2,node3 fdistdump \fIpath\fR
-.RE
-.fi
-.TP
-.BI --hostfile \ hostfile
-This option has semantics equivalent to the
-.B --host
-option, except nodes are specified in the file.
-Format of the
-.I hostfile
-is not standardized and is slightly different for each MPI implementation.
-Following command shows typical usage:
-.PP
-.nf
-.RS
-$ mpirun --hostfile hostfile.txt fdistdump \fIpath\fR
-.RE
-.fi
-.TP
-.B --preload-binary
-Not only the
-.IR path ,
-but also the MPI application executable has to be accessible from every node, where MPI process is invoked.
-Open\ MPI has a handy feature for executable distribution, enabled by
-.B --preload-binary
-option.
-MPI launcher will copy the specified executable to remote machines prior to starting remote processes.
-Following command will run four
-.B fdistdump
-processes. Both master and slave on node1, one slave on node2 and another slave on node3. It shows situation, where 
-.B fdistdump
-executable is present only on local node (which is node1) and
-.B --preload-binary
-option is used to distribute the binary on all three nodes.
-Without any additional
-.B fdistdump
-options, all records in
-.I path
-on all three nodes will be printed to stdout:
-.PP
-.nf
-.RS
-$ mpirun --host node1,node1,node2,node3 --preload-binary /usr/bin/fdistdump \fIpath\fR
+$ mpiexec -host node1,node2,node3 fdistdump \fIpath\fR
 .RE
 .fi
 .\" General options subsection ---------------------
@@ -487,10 +444,10 @@ Print a help message and exit.
 Display version information and exit.
 .\" EXIT STATUS section --------------------------------------------------------
 .SH EXIT STATUS
-Exit status value depends on your MPI job launcher
-.RB ( mpirun ,\  mpiexec ,\  orterun ,\ ...),
+Exit status value depends on your MPI process manager
+.RB ( mpiexec ,\  mpirun ,\  orterun ,\ ...),
 but it usually returns 0 if all processes return 0.
-For behavior in situations, where one or more processes return non-zero value, see job launcher documentation.
+For behavior in situations, where one or more processes return non-zero value, see you process manager documentation.
 
 .B fdistdump
 processes return 0 on success, 1 on error.
@@ -527,7 +484,7 @@ Launch two
 processes on local node, one master and one slave.
 Slave process will read both specified flow files concurrently and print all records in both files.
 .nf
-\&  \fB$ mpirun -np 2 fdistdump /netflow/flow_file1 /netflow/flow_file2\fR
+\&  \fB$ mpiexec -n 2 fdistdump /netflow/flow_file1 /netflow/flow_file2\fR
 \&  first                       bytes     pkts     srcport     dstport     srcip              dstip             proto
 \&  2015-01-19 22:59:17.387     841       5        57942       80          192.245.102.46     54.210.89.244     TCP
 \&  2015-01-19 22:59:27.094     41        1        61746       5631        48.91.65.181       78.132.4.32       TCP
@@ -546,7 +503,7 @@ With enabled record limit, only 100 records will be printed.
 As you can see, summary shows 129000 processed records, but query contained limit to 100 records.
 This is not incorrect, see BUGS section for more information about summary in this type of queries.
 .nf
-\&  \fB$ mpirun -np 2 fdistdump -l 100 flow_dir/\fR
+\&  \fB$ mpiexec -n 2 fdistdump -l 100 flow_dir/\fR
 \&  first                       bytes      pkts     srcport     dstport     srcip              dstip            proto
 \&  2015-01-20 07:08:58.186     27.1 k     29       28974       1115        172.173.129.10     99.28.15.205     TCP
 \&  2015-01-20 07:09:22.010     346        2        51413       23705       20.107.222.24      172.173.14.68    UDP
@@ -565,7 +522,7 @@ Filter is specified, so only records matching the filter will be processed.
 .B --fields
 option arguments specify to print only IP addresses and ports.
 .nf
-\&  \fB$ mpirun --host node1,node2,node3 fdistdump -f "net 147.229.0.0/16" --fields=srcip,dstip,srcport,dstport flow_dir/ flow_file\fR
+\&  \fB$ mpiexec -host node1,node2,node3 fdistdump -f "net 147.229.0.0/16" --fields=srcip,dstip,srcport,dstport flow_dir/ flow_file\fR
 \&  srcport     dstport     srcip            dstip
 \&  80          50646       147.229.65.183   166.202.83.16
 \&  44543       23          147.229.222.104  166.206.150.135
@@ -586,7 +543,7 @@ Record limit is 5, therefore 5 records with largest
 .B bytes
 values are printed.
 .nf
-\&  \fB$ mpirun --hostfile hf.txt fdistdump -o bytes -l 5 --no-summary flow_dir/\fR
+\&  \fB$ mpiexec --hostfile hf.txt fdistdump -o bytes -l 5 --no-summary flow_dir/\fR
 \&  first                       bytes       pkts        srcport     dstport     srcip               dstip               proto
 \&  2015-01-20 07:10:02.020     161.7 M     118.3 k     27032       27032       54.98.60.154        192.245.92.125      UDP
 \&  2015-01-20 21:40:02.639     111.5 M     78.5 k      80          29835       172.21.3.117        203.136.78.254      TCP
@@ -602,7 +559,7 @@ Records with the same aggregation key
 in this example) are aggregated (merged) together.
 Output record order is undefined.
 .nf
-\&  \fB$ mpirun -np 2 fdistdump -a srcport flow_dir/\fR
+\&  \fB$ mpiexec -n 2 fdistdump -a srcport flow_dir/\fR
 \&  first                       last                        bytes       pkts       flows     srcport     duration         bps         pps       bpp
 \&  2015-01-19 22:59:22.597     2015-01-19 23:59:15.862     2.9 M       47.3 k     544       62125       00:59:53.265     6.4 k       13.2      60.0
 \&  2015-01-19 22:54:34.369     2015-01-19 23:59:57.297     2.0 G       6.1 M      2.2 M     0           01:05:22.928     4.1 M       1.6 k     325.0
@@ -622,7 +579,7 @@ Shell pathnames globbing in this case has exactly same effect as path specified 
 Records are aggregated according to two keys, source IP address and protocol.
 Result is sorted by number of flows (direction is explicitly specified as descending) and only first 10 records are printed.
 .nf
-\&  \fB$ mpirun -np 3 fdistdump -a srcip,proto -o flows#desc -l 10 --fields=first,bytes,pkts,flows flow_dir/*\fR
+\&  \fB$ mpiexec -n 3 fdistdump -a srcip,proto -o flows#desc -l 10 --fields=first,bytes,pkts,flows flow_dir/*\fR
 \&  first                       bytes       pkts        flows       srcip               proto
 \&  2015-01-19 22:59:21.976     233.8 M     5.7 M       5.7 M       42.9.199.188        TCP  
 \&  2015-01-19 22:59:22.836     66.3 M      1.6 M       1.6 M       108.131.134.164     TCP  
@@ -643,13 +600,13 @@ Following query will produce same results as the previous one, because
 .B -s
 switch is only a shortcut.
 .nf
-\&  \fB$ mpirun -np 3 fdistdump -s srcip,proto/flows#desc flow_dir/*\fR
+\&  \fB$ mpiexec -n 3 fdistdump -s srcip,proto/flows#desc flow_dir/*\fR
 \&  <output omitted>
 .fi
 
 Statistic with filter is very popular query type.
 .nf
-\&  \fB$ mpirun --hostfile hf.txt fdistdump -s srcip -f "srcport 53 and proto UDP" flow_dir/*\fR
+\&  \fB$ mpiexec --hostfile hf.txt fdistdump -s srcip -f "srcport 53 and proto UDP" flow_dir/*\fR
 \&  <output omitted>
 .fi
 
@@ -663,7 +620,7 @@ It's during daylight saving time, CEST time zone, UTC+2.
 Record timestamps are in UTC as you can see on \fBfirst\fR and \fBlast\fR values.
 Aggregation key is \fBbytes\fR field, records with same bytes value are merged together.
 .nf
-\&  \fB$ mpirun --hostfile hf.txt fdistdump -l 3 -s bytes -t "2015-01-19 10:00#2015-01-19 12:00" profile_dir/\fR
+\&  \fB$ mpiexec --hostfile hf.txt fdistdump -l 3 -s bytes -t "2015-01-19 10:00#2015-01-19 12:00" profile_dir/\fR
 \&  first                       last                        bytes     pkts       flows      duration         bps     pps       bpp
 \&  2015-01-20 08:58:54.770     2015-01-20 10:59:50.970     92        58.3 M     57.8 M     02:00:56.200     0.1     8.0 k     0.0
 \&  2015-01-20 08:58:48.334     2015-01-20 10:59:50.829     184       57.8 M     28.9 M     02:01:02.495     0.2     8.0 k     0.0
@@ -675,7 +632,7 @@ Aggregation key is \fBbytes\fR field, records with same bytes value are merged t
 
 Following time range will process files from last Monday midnight until now.
 .nf
-\&  \fB$ mpirun --hostfile hf.txt fdistdump -t monday profile_dir/\fR
+\&  \fB$ mpiexec --hostfile hf.txt fdistdump -t monday profile_dir/\fR
 \&  <output omitted>
 .fi
 
@@ -684,7 +641,7 @@ That may cause some problems.
 In the following example, no files were processed, because specified time range is from the beginning of the daylight saving time in the Czech Republic.
 Time is shifted from 02:00 to 03:00, therefore duration of this time range is zero.
 .nf
-\&  \fB$ mpirun --hostfile hf.txt fdistdump -s srcport --fields=duration \\
+\&  \fB$ mpiexec --hostfile hf.txt fdistdump -s srcport --fields=duration \\
 \&    -t "2015-03-29 02:00#2015-03-29 03:00" profile_dir/\fR
 \&  first                       last                        flows       srcport     duration
 
@@ -694,7 +651,7 @@ Time is shifted from 02:00 to 03:00, therefore duration of this time range is ze
 
 This can be solved by an \fBUTC\fR flag, which says that your time specifier is already in UTC.
 .nf
-\&  \fB$ mpirun --hostfile hf.txt fdistdump -s srcport --fields=duration \\
+\&  \fB$ mpiexec --hostfile hf.txt fdistdump -s srcport --fields=duration \\
 \&    -t "2015-03-29 01:00 UTC#2015-03-29 02:00 UTC" profile_dir/\fR
 \&  first                       last                        flows       srcport     duration
 \&  2015-01-20 00:59:11.186     2015-01-20 01:59:49.446     3.9 M       9200        01:00:38.260
@@ -709,7 +666,7 @@ This can be solved by an \fBUTC\fR flag, which says that your time specifier is 
 .SS Miscellaneous
 Usage of CSV output format.
 .nf
-\&  \fB$ mpirun -np 2 fdistdump -o first --output-format=csv flow_file\fR
+\&  \fB$ mpiexec -n 2 fdistdump -o first --output-format=csv flow_file\fR
 \&  first,bytes,pkts,srcport,dstport,srcip,dstip,proto
 \&  1421708354242,180,3,41657,23,0:0:0:1896806481,0:0:0:2887049676,6
 \&  1421708357387,841,5,57942,80,0:0:0:3237307950,0:0:0:919755252,6
@@ -718,7 +675,7 @@ Usage of CSV output format.
 
 TCP flags field with default conversion to human readable string.
 .nf
-\&  \fB$ mpirun -np 2 fdistdump -s srcport,dstport --fields=tcpflags --filter="proto TCP" flow_file\fR
+\&  \fB$ mpiexec -n 2 fdistdump -s srcport,dstport --fields=tcpflags --filter="proto TCP" flow_file\fR
 \&  flows       srcport     dstport     tcpflags
 \&  20.3 M      6000        9064        .....RS.
 \&  13.5 M      6000        22          ...APRSF
@@ -730,7 +687,7 @@ TCP flags field with default conversion to human readable string.
 
 TCP flags and volumetric fields without conversion.
 .nf
-\&  \fB$ mpirun -np 2 fdistdump -s srcport,dstport --fields=tcpflags --filter="proto TCP" \\
+\&  \fB$ mpiexec -n 2 fdistdump -s srcport,dstport --fields=tcpflags --filter="proto TCP" \\
 \&    --output-tcpflags-conv=none --output-volume-conv=none flow_file\fR
 \&  flows        srcport     dstport     tcpflags
 \&  20339177     6000        9064        6
@@ -743,6 +700,7 @@ TCP flags and volumetric fields without conversion.
 .\" SEE ALSO section -----------------------------------------------------------
 .SH SEE ALSO
 .BR inet_ntop (3)
+.BR mpiexec (1),
 .BR mpirun (1),
 .BR nfdump (1),
 .BR mpi (3)

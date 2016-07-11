@@ -60,7 +60,7 @@ FILTER="\"port 23\""
 
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -l 50 -f $FILTER --output-format=csv \
+FDD_CMD="mpiexec -np 2 $G_FDIST_DUMP -l 50 -f $FILTER --output-format=csv \
         --fields=first,last,bytes,pkts,srcport,dstport,tcpflags,srcip,dstip,proto \
         $G_INPUT_DATA"
 eval "$FDD_CMD" > "$G_FDD_RESULTS"

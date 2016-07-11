@@ -94,7 +94,7 @@ int main(int argc, char **argv)
 
         if (world_size <= 1) {
                 printf("%s requires at least 2 copies of the program to run. "
-                                "Did you use mpirun? "
+                                "Did you use MPI process manager, e.g. mpiexec(1)? "
                                 "Try to run program again with --help.\n",
                                 PACKAGE_NAME);
                 MPI_Finalize();

@@ -61,7 +61,7 @@ TEST_DESC="Simple aggregation query"
 AGG_FIELD="srcip"
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -a $AGG_FIELD --output-format=csv \
+FDD_CMD="mpiexec -np 2 $G_FDIST_DUMP -a $AGG_FIELD --output-format=csv \
         --fields=first,last,bytes,pkts $G_INPUT_DATA"
 eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?

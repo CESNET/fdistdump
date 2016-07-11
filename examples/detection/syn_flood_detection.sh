@@ -184,7 +184,7 @@ while (("$__diff" > 0)); do
 
     # Prepare FDistDump query command
     __OUTPUT_FORMAT="--fields=bytes,pkts,flows --output-format=csv --output-addr-conv=str --progress-bar=none"
-    cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l $__TOP_N_SIZE -o flows -f \"proto TCP\" -t \"$__TIME_SELECTOR\" $__DATA"
+    cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l $__TOP_N_SIZE -o flows -f \"proto TCP\" -t \"$__TIME_SELECTOR\" $__DATA"
 
     unset __POT_ATTACKERS
     while read -r line; do
@@ -205,7 +205,7 @@ while (("$__diff" > 0)); do
     for attckr in "${__POT_ATTACKERS[@]}"; do
         # Prepare FDistDump query command for SYN packet count
         __OUTPUT_FORMAT="--fields=bytes,pkts,flows --output-format=csv --output-addr-conv=str --progress-bar=none"
-        cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l 2 -o pkts -f \"proto TCP && (flags S && not flags AF) && ${attckr}\" -t \"$__TIME_SELECTOR\" $__DATA"
+        cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l 2 -o pkts -f \"proto TCP && (flags S && not flags AF) && ${attckr}\" -t \"$__TIME_SELECTOR\" $__DATA"
 
         # Get SYN packet count
         _syn_packets=$(eval $cmd | awk -F "," 'NR==2 {print int($2);exit}')
@@ -214,7 +214,7 @@ while (("$__diff" > 0)); do
         fi
 
         # Prepare FDistDump query command for SYN+ACK packet count
-        cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l 2 -o pkts -f \"proto TCP && (flags SA && not flags F) && ${attckr}\" -t \"$__TIME_SELECTOR\" $__DATA"
+        cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l 2 -o pkts -f \"proto TCP && (flags SA && not flags F) && ${attckr}\" -t \"$__TIME_SELECTOR\" $__DATA"
 
         # Get SYN+ACK packet count
         _ack_packets=$(eval $cmd | awk -F "," 'NR==2 {print int($2);exit}')
@@ -233,7 +233,7 @@ while (("$__diff" > 0)); do
             echo "ACK packet count: $_ack_packets" >>"$__DETECTION_LOG" 2>&1
             echo "Traffic Sample:" >>"$__DETECTION_LOG" 2>&1
             _output_filter="proto TCP && ${attckr}"
-            _cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN --fields=first,last,duration,srcip,dstip,bytes,pkts,flows,tcpflags --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
+            _cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN --fields=first,last,duration,srcip,dstip,bytes,pkts,flows,tcpflags --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
             echo "" >>"$__DETECTION_LOG" 2>&1
             echo "$_cmd" >>"$__DETECTION_LOG" 2>&1
             echo "" >>"$__DETECTION_LOG" 2>&1

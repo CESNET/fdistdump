@@ -61,13 +61,13 @@
 
 /* Global variables. */
 static const char *usage_string =
-"Usage: mpirun [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
+"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
 "       [-l limit] [-o field[#direction]] [-s statistic] [-t begin[#end]]\n"
 "       path ...";
 
 static const char *help_string =
 "MPI_options\n"
-"      See your MPI job launcher documentation, e.g. mpirun(1).\n"
+"      See your MPI process manager documentation, e.g. mpiexec(1).\n"
 "General options\n"
 "     -a field[,...], --aggregation=field[,...]\n"
 "            Aggregated flow records together by any number of fields.\n"

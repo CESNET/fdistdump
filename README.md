@@ -49,8 +49,8 @@ make check
 
 ## Running
 fdistdump is an MPI application and is necessary to launch it using one of
-mpirun, mpiexec, orterun or however your MPI implementation calls the job
-launcher. Before running fdistdump, please make sure that your machine (or
+mpiexec, mpirun, orterun or however your MPI implementation calls the process
+manager. Before running fdistdump, please make sure that your machine (or
 cluster) is configured correctly and ready to launch applications using MPI.
 
 ### Prepare MPI
@@ -58,19 +58,19 @@ This can be tested for example by starting program *hostname* using MPI
 launcher. Following should launch two instances of *hostname* on the local
 node, therefore local node's DNS name should be printed twice:
 ``` sh
-mpirun -np 2 hostname
+mpiexec -n 2 hostname
 ```
 
 Following should launch *hostname* on every specified node. Therefore DNS name
 of every specified node should be printed to your local console:
 ``` sh
-mpirun --host node1,node2,... hostname
+mpiexec -host node1,node2,... hostname
 ```
 
 If there was a problem running these commands, there is probably a problem with
 configuration of your cluster (network settings, firewall rules, MPI
 configuration, ...). For more information about running MPI jobs see
-documentation for your job launcher, e.g. man mpirun.
+documentation for your process manager, e.g. man mpiexec.
 
 ### Run your first query
 MPI allows you to to specify how many processes will be launched on each node.
@@ -86,7 +86,7 @@ The second one, the slave, is there to do all the hard work. It will read and
 process all the flow files and send the results back to the master. Following
 example command will print statistic about the source ports in flow_file:
 ``` sh
-mpirun -np 2 fdistdump -s srcport flow_file
+mpiexec -n 2 fdistdump -s srcport flow_file
 ```
 
 To run fdistdump on **multiple nodes**, you should launch one process on each
@@ -97,7 +97,7 @@ process. Following example command will launch dedicated master on *m_node* and
 slaves on *sl1_node* and *sl2_node*. Both slaves will read flow_file and send
 results back to master:
 ``` sh
-mpirun --host m_node,sl1_node,sl2_node fdistdump -s srcport flow_file
+mpiexec -host m_node,sl1_node,sl2_node fdistdump -s srcport flow_file
 ```
 
 ## Documentation

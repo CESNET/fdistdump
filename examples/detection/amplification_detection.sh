@@ -124,7 +124,7 @@ is_attacker() {
     __OUTPUT_FORMAT="--fields=bytes --output-format=csv --progress-bar=none"
     __FILTER="src ip $1 && dst ip $2 && port $__PORT_OF_SERVICE"
     _REC_CNT=500
-    cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -l $_REC_CNT -f \"$__FILTER\" -t \"$3\" $__DATA"
+    cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -l $_REC_CNT -f \"$__FILTER\" -t \"$3\" $__DATA"
 
     _old_msg_size=-1
     _msg_size_changes=0
@@ -258,7 +258,7 @@ while (("$__diff" > 0)); do
     #__DET_FILTER="src port $__PORT_OF_SERVICE && bytes > $__MIN_BYTES && packets < $__MAX_PACKETS"
 
     # Prepare FDistDump query command
-    cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s dstip -l $__TOP_N_SIZE -o flows -f \"$__DET_FILTER\" -t \"$__TIME_SELECTOR\" $__DATA"
+    cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s dstip -l $__TOP_N_SIZE -o flows -f \"$__DET_FILTER\" -t \"$__TIME_SELECTOR\" $__DATA"
 
     # Associative array for storing "per-victim volume of attack traffic"
     declare -A __POT_VICTIMS
@@ -282,7 +282,7 @@ while (("$__diff" > 0)); do
     for ip in "${!__POT_VICTIMS[@]}"; do
         # Prepare FDistDump query command
         __OUTPUT_FORMAT="--fields=bytes,pkts,bpp,bps,duration --output-format=csv --output-addr-conv=str --progress-bar=none"
-        cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l $__TOP_N_SIZE -o pkts -f \"$__DET_FILTER && ip ${ip}\" -t \"$__TIME_SELECTOR\" $__DATA"
+        cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN $__OUTPUT_FORMAT -s srcip,dstip -l $__TOP_N_SIZE -o pkts -f \"$__DET_FILTER && ip ${ip}\" -t \"$__TIME_SELECTOR\" $__DATA"
 
         _attackers=()
         while read -r line; do
@@ -325,7 +325,7 @@ while (("$__diff" > 0)); do
                 fi
             done
             _output_filter="${_output_filter} )"
-            _cmd="mpirun --hostfile $__HOSTFILE --preload-binary $__FDD_BIN --output-volume-conv=none --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
+            _cmd="mpiexec --hostfile $__HOSTFILE --preload-binary $__FDD_BIN --output-volume-conv=none --progress-bar=none -l 100 -f \"$_output_filter\" -t \"$__TIME_SELECTOR\" $__DATA"
             echo "" >>"$__DETECTION_LOG" 2>&1
             echo "$_cmd" >>"$__DETECTION_LOG" 2>&1
             echo "" >>"$__DETECTION_LOG" 2>&1

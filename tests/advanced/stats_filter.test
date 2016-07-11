@@ -63,7 +63,7 @@ SORT_FIELD="flows"
 FILTER="\"proto UDP and port >100\""
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -s $STAT_FIELD -f $FILTER \
+FDD_CMD="mpiexec -np 2 $G_FDIST_DUMP -s $STAT_FIELD -f $FILTER \
         --output-format=csv --fields=first,last,bytes,pkts $G_INPUT_DATA"
 eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?

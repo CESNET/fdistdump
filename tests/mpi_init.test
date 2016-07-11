@@ -54,7 +54,7 @@ else
         proc_cnt=$1
 fi
 
-mpirun -np $proc_cnt ./test_mpi_init -c $proc_cnt
+mpiexec -np $proc_cnt ./test_mpi_init -c $proc_cnt
 
 if [ $? -eq 0 ]; then
         echo "${TEST_DESC} was successful (${proc_cnt} processes)."

@@ -70,7 +70,7 @@ tEnd="1433222666000"
 tStart_pretty="2015-06-02 05:15:11.0"
 tEnd_pretty="2015-06-02 05:24:26.0"
 
-mpirun -np $proc_cnt ./test_mem_store_print -c ${recCnt} -s ${srcIP} \
+mpiexec -np $proc_cnt ./test_mem_store_print -c ${recCnt} -s ${srcIP} \
         -S ${srcPort} -d ${dstIP} -D ${dstPort} -P ${proto} -f ${flows} \
         -p ${pkts} -b ${bytes} -t "${tStart}" -T "${tEnd}" > tmp_res
 
