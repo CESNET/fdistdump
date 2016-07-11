@@ -64,9 +64,9 @@ AC_TYPE_UINT8_T
 
 
 # Checks for library functions.
-AC_FUNC_MALLOC
+#AC_FUNC_MALLOC  #rpl_malloc problem
+#AC_FUNC_REALLOC #rpl_malloc problem
 AC_FUNC_MKTIME
-AC_FUNC_REALLOC
 AC_CHECK_FUNCS([localtime_r memset setenv strchr strdup strerror strtol \
                 strtoull tzset])
 
