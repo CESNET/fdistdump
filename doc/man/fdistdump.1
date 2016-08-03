@@ -21,6 +21,8 @@ fdistdump \- a tool to query IP flow files using single or distributed system
 .IR statistic ]
 .RB [ -t
 .IR begin [# end ]]
+.RB [ -T
+.IR time ]
 .IR path \ ...
 .\" DESCRIPTION section --------------------------------------------------------
 .SH DESCRIPTION
@@ -241,6 +243,11 @@ Beginning time is aligned to the beginning of the rotation interval, ending time
 \&          ^     ^                              ^           ^
 \&        begin  end                           begin        end
 .fi
+.TP
+.BI -T \ time\fR,\  --time-point= time
+Process only single flow file, the one which includes given
+.IR time .
+All other aspects that was mentioned for the time range (\fB-t\fR option) apply also for this option.
 .\" Controlling output subsection ---------------------
 .SS Controlling output
 .TP

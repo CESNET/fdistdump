@@ -63,7 +63,7 @@
 static const char *usage_string =
 "Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
 "       [-l limit] [-o field[#direction]] [-s statistic] [-t begin[#end]]\n"
-"       path ...";
+"       [-T time] path ...";
 
 static const char *help_string =
 "MPI_options\n"
@@ -81,6 +81,8 @@ static const char *help_string =
 "            Shortcut for aggregation (-a), sort (-o) and record limit (-l).\n"
 "     -t begin[#end], --time-range=begin[#end]\n"
 "            Process only flow files from begin to end time range.\n"
+"     -T time, --time-point=time\n"
+"            Process only single flow file, the one which includes given time.\n"
 "\n"
 "Controlling output\n"
 "     --output-format=format\n"
@@ -316,8 +318,7 @@ next_token:
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
- * \param[in] range_str Aggregation string, usually gathered from command
- *                        line.
+ * \param[in] range_str Time range string, usually gathered from command line.
  * \return Error code. E_OK or E_ARG.
  */
 static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
@@ -402,6 +403,75 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
 
                 return E_ARG;
         }
+
+        return E_OK;
+}
+
+
+/** \brief Parse and store time point string.
+ *
+ * Function tries to parse time point string, fills time_begin and time_end
+ * with appropriate values on success. Beggining time is aligned to the
+ * beginning of the rotation interval, ending time is set to the beginning of
+ * the next rotation interval. Therefor exacly one flow file will be processed.
+ *
+ * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
+ * Beginning time is aligned to the beginning of the rotation interval, ending
+ * time is aligned to the ending of the rotation interval:
+ *
+ * 0     5    10    15    20   -------->   0     5    10    15    20
+ * |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+ *          ^                                    ^     ^
+ *        begin                                begin  end
+ *
+ * If range string is successfully parsed, E_OK is returned. On error,
+ * content of time_begin and time_end is undefined and E_ARG is
+ * returned.
+ *
+ * \param[in,out] args Structure with parsed command line parameters and other
+ *                   program settings.
+ * \param[in] range_str Time string, usually gathered from the command line.
+ * \return Error code. E_OK or E_ARG.
+ */
+static error_code_t set_time_point(struct cmdline_args *args, char *time_str)
+{
+        error_code_t primary_errno = E_OK;
+        bool utc = false;
+
+        assert(args != NULL && time_str != NULL);
+
+        /* Convert time string to the tm structure. */
+        primary_errno = str_to_tm(time_str, &utc, &args->time_begin);
+        if (primary_errno != E_OK) {
+                return E_ARG;
+        }
+
+        if (!utc) {
+                time_t tmp;
+
+                //input time is localtime, let mktime() decide about DST
+                args->time_begin.tm_isdst = -1;
+                tmp = mktime(&args->time_begin);
+                gmtime_r(&tmp, &args->time_begin);
+        }
+
+        /* Align time to the beginning of the rotation interval. */
+        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_begin.tm_sec--;
+        }
+
+        /*
+         * Copy the aligned time to the ending time and increment ending and
+         * align it to create interval of FLOW_FILE_ROTATION_INTERVAL length.
+         */
+        memcpy(&args->time_end, &args->time_begin, sizeof (args->time_end));
+        args->time_end.tm_sec++;
+        while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_end.tm_sec++;
+        }
+
+        /* Check time range sanity. */
+        assert(tm_diff(args->time_end, args->time_begin) > 0);
 
         return E_OK;
 }
@@ -861,7 +931,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         size_t path_str_len = 0;
         bool have_fields = false; //LNF fields are specified
 
-        const char *short_opts = "a:f:l:o:s:t:";
+        const char *short_opts = "a:f:l:o:s:t:T:";
         const struct option long_opts[] = {
                 /* Long and short. */
                 {"aggregation", required_argument, NULL, 'a'},
@@ -870,6 +940,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"order", required_argument, NULL, 'o'},
                 {"statistic", required_argument, NULL, 's'},
                 {"time-range", required_argument, NULL, 't'},
+                {"time-point", required_argument, NULL, 'T'},
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
@@ -943,6 +1014,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 case 't': //time range
                         primary_errno = set_time_range(args, optarg);
+                        break;
+
+                case 'T': //time point
+                        primary_errno = set_time_point(args, optarg);
                         break;
 
 
