@@ -35,23 +35,6 @@ Among other features,
 allows you to list, sort and aggregate records with the possibility to apply powerful record
 .IR filter .
 .PP
-Each
-.I path
-argument given to
-.B fdistdump
-is either a filename or a directory.
-All
-.IR path s
-will be processed by all the slave processes and therefore should be accessible from every node, where the slave process is invoked.
-Otherwise, warning message will be printed to
-.B stderr
-by affected process and inaccessible
-.I path
-will be ignored.
-In case
-.I path
-is a filename, it will be processed directly.
-In case it is a directory, all the files in that directory will be processed, recursively for all the subdirectories.
 .\" OPTIONS section ------------------------------------------------------------
 .SH OPTIONS
 Non argument options that are duplicated on the command line are not harmful.
@@ -116,10 +99,42 @@ on nodes node2 and node3 (where slave processes are running) will be printed to 
 $ mpiexec -host node1,node2,node3 fdistdump \fIpath\fR
 .RE
 .fi
+.\" Path option subsection ---------------------
+.SS Path
+Each
+.I path
+argument given to
+.B fdistdump
+is either a filename or a directory.
+All
+.IR path s
+will be processed by all the slave processes and therefore should be accessible from every node, where the slave process is invoked.
+Otherwise, warning message will be printed to
+.B stderr
+by affected process and inaccessible
+.I path
+will be ignored.
+In case
+.I path
+is a filename, it will be processed directly.
+In case it is a directory, all the files in that directory will be processed, recursively for all the subdirectories.
+
+The \fIpath\fR is a character string composed of zero or more directives:
+ordinary characters (not %), which are copied unchanged to the output path;
+and conversion specifications, each of which results in some additinal action.
+Each conversion specification is introduced by the character % followed by a conversion specifier character.
+If path begins with "%DIGITS:", then \fIpath\fR is targeted only for one specific slave, the one with DIGITS equal to the MPI rank of the slave.
+
+Conversion specifiers:
+.TP
+.B h
+The conversion specifier is converted into the hostname of the node.
+This is often used to read different files by each slave from a shared storage.
+
 .\" General options subsection ---------------------
 .SS General options
 .TP
-.\" TODO: address prefixes, field overwriting
+.\" TODO: address prefixes, field overwriting, arguments for long options are mandatory also for short options
 .BI -a \ field\fR[,...],\ \fB--aggregation= \fIfield\fR[,...]
 Aggregate flow records together by any number of
 .IR field s.

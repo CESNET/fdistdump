@@ -159,7 +159,9 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
         struct stat stat_buff;
 
 
-        strcat(path, "/");
+        if (path[offset - 1] != '/') {
+                path[offset++] = '/';
+        }
 
         /* Loop through the entire time range. */
         while (tm_diff(end, ctx) > 0) {
@@ -247,24 +249,42 @@ static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
 }
 
 
-bool path_preprocessor(const char *original, char new[PATH_MAX])
+/** \brief Transform format string into path string.
+ *
+ * The format string is a character string composed of zero or more directives:
+ * ordinary characters (not %), which are copied unchanged to the output path;
+ * and conversion specifications, each of which results in an additional action.
+ * Each conversion specification is introduced by the character % followed by a
+ * conversion specifier character.
+ *
+ * If format begins with "%DIGITS:", then path is targeted only for one specific
+ * slave, the one with DIGITS equal to the MPI rank of the slave.
+ *
+ * Conversion specifiers:
+ *   h: converted into the hostname of the node
+ *
+ * \param[in] format Format string.
+ * \param[out] path  Path creted from the format string.
+ * \return True if path should be processed, false if path should be skipped.
+ */
+static bool path_preprocessor(const char *format, char path[PATH_MAX])
 {
         char tmp[PATH_MAX];
         char *last_path = tmp;
         char *perc_sign;
 
 
-        strcpy(tmp, original); //copy all except initial escape sequence
+        strcpy(tmp, format); //copy all except initial conversion specification
 
-        /* Path starts by %DIGIT. */
+        /* Format starts by %DIGIT. */
         if (tmp[0] == '%' && isdigit(tmp[1])) {
                 last_path = tmp + 2;
                 int world_rank;
 
                 while (isdigit(*last_path) && last_path++); //skip all digits
                 if (*last_path++ != ':') { //check for terminating colon
-                        print_warn(E_PATH, 0, "invalid escape sequence, "
-                                        "skipping \"%s\"", original);
+                        print_warn(E_PATH, 0, "invalid conversion specifier, "
+                                        "skipping \"%s\"", format);
                         return false;
                 }
 
@@ -274,27 +294,28 @@ bool path_preprocessor(const char *original, char new[PATH_MAX])
                 }
         }
 
-        /* last_path now contains all except initial escape sequence. */
+        /* last_path now contains all except the initial conversion specifier.*/
         perc_sign = strchr(last_path, '%'); //find first percent sign
         while (perc_sign != NULL) {
                 *perc_sign = '\0';
-                strcat(new, last_path); //copy original path till percent sign
+                strcat(path, last_path); //copy format path till percent sign
 
                 perc_sign++; //move pointer to escaped character
                 switch (*perc_sign) {
                 case 'h':
                         errno = 0;
-                        gethostname(new + strlen(new), PATH_MAX - strlen(new));
+                        gethostname(path + strlen(path),
+                                        PATH_MAX - strlen(path));
                         if (errno != 0) {
                                 errno = ENAMETOOLONG;
                                 print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                                strerror(errno), original);
+                                                strerror(errno), format);
                                 return false;
                         }
                         break;
                 default:
-                        print_warn(E_PATH, 0, "unknown escape sequence, "
-                                        "skipping \"%s\"", original);
+                        print_warn(E_PATH, 0, "unknown conversion specifier, "
+                                        "skipping \"%s\"", format);
                         return false;
                 }
 
@@ -302,9 +323,8 @@ bool path_preprocessor(const char *original, char new[PATH_MAX])
                 perc_sign = strchr(last_path, '%');
         }
 
-        strcat(new, last_path); //copy rest of the original path
-        print_debug("<path_preprocessor> original path: %s\tnew path: %s",
-                        original, new);
+        strcat(path, last_path); //copy rest of the format string
+        print_debug("<path_preprocessor> format: %s\tpath: %s", format, path);
 
 
         return true;

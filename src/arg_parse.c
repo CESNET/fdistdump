@@ -1107,8 +1107,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
 
         /*
-         * Non-option arguments are paths. Combine them into one comma separated
-         * string for better MPI handling.
+         * Non-option arguments are paths. Combine them into one string
+         * separated by the "file Separator" (0x1C) character for better MPI
+         * handling.
          */
         if (optind == argc) { //at least one path is mandatory
                 print_err(E_ARG, 0, "missing path");
