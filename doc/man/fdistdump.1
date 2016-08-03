@@ -221,7 +221,7 @@ and flows received at 2015-21-10 from 7:25 to 7:30, path will be
 .IR begin \ and \ end
 should contain one or more space separated time specifiers.
 Time specifier is date, time, special value or UTC flag.
-Supported date formats are ISO (YYYY-MM-DD), European (DD.MM.YYYY) and American (MM/DD/YYYY), time format is only one (hh:mm). 
+Supported date formats are ISO (YYYY-MM-DD), European (DD.MM.YYYY) and American (MM/DD/YYYY), time format is only one (hh:mm) and also Unix time (number of seconds that have elapsed since 00:00:00 UTC) is supported.
 Special value is either the name of the day of the week or the month name, both according to the current locale, in abbreviated form or the full name.
 UTC flag is either
 .BR U \ or\  UTC
@@ -231,6 +231,16 @@ If no date is given, today is assumed if the given hour is lesser than the curre
 If no time is given, midnight is assumed.
 If only the weekday is given, today is assumed if the given day is less or equal to the current day and last week if it is more.
 If only the month is given, the current year is assumed if the given month is less or equal to the current month and last year if it is more and no year is given.
+
+Alignment of the boundaries to the flow file rotation interval is perfomed.
+Beginning time is aligned to the beginning of the rotation interval, ending time is aligned to the ending of the rotation interval:
+
+.nf
+\& 0     5    10    15    20   -------->   0     5    10    15    20
+\& |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+\&          ^     ^                              ^           ^
+\&        begin  end                           begin        end
+.fi
 .\" Controlling output subsection ---------------------
 .SS Controlling output
 .TP

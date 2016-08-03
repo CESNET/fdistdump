@@ -154,6 +154,7 @@ static const char *const date_formats[] = {
         /* Special formats. */
         "%a", //weekday according to the current locale, abbreviated or full
         "%b", //month according to the current locale, abbreviated or full
+        "%s", //the number of seconds since the Epoch, 1970-01-01 00:00:00 UTC
 };
 
 static const char *const utc_strings[] = {
@@ -299,6 +300,16 @@ next_token:
  * time_end with appropriate values on success. Beginning and ending dates
  * (and times) are  separated with TIME_RANGE_DELIM, if ending date is not
  * specified, current time is used.
+ *
+ * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
+ * Beginning time is aligned to the beginning of the rotation interval, ending
+ * time is aligned to the ending of the rotation interval:
+ *
+ * 0     5    10    15    20   -------->   0     5    10    15    20
+ * |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+ *          ^     ^                              ^           ^
+ *        begin  end                           begin        end
+ *
  * If range string is successfully parsed, E_OK is returned. On error,
  * content of time_begin and time_end is undefined and E_ARG is
  * returned.
@@ -369,6 +380,15 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
                 gmtime_r(&tmp, &args->time_end);
         }
 
+        /* Align beginning time to the beginning of the rotation interval. */
+        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_begin.tm_sec--;
+        }
+        /* Align ending time to the ending of the rotation interval. */
+        while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_end.tm_sec++;
+        }
+
         /* Check time range sanity. */
         if (tm_diff(args->time_end, args->time_begin) <= 0) {
                 char begin[255], end[255];
@@ -377,14 +397,10 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
                 strftime(end, sizeof(end), "%c", &args->time_end);
 
                 print_err(E_ARG, 0, "zero or negative time range duration");
-                print_err(E_ARG, 0, "time range: %s - %s", begin, end);
+                print_err(E_ARG, 0, "time range (after the alignment): %s - %s",
+                                begin, end);
 
                 return E_ARG;
-        }
-
-        /* Align beginning time to closest greater rotation interval. */
-        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
-                args->time_begin.tm_sec++;;
         }
 
         return E_OK;
