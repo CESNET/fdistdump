@@ -62,27 +62,29 @@
 /* Global variables. */
 static const char *usage_string =
 "Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
-"       [-l limit] [-o field[#direction]] [-s statistic] [-t begin[#end]]\n"
-"       [-T time] path ...";
+"       [-l limit] [-o field[#direction]] [-s statistic] [-t time_spec]\n"
+"       [-T begin[#end]] path ...";
 
 static const char *help_string =
 "MPI_options\n"
 "      See your MPI process manager documentation, e.g. mpiexec(1).\n"
 "General options\n"
-"     -a field[,...], --aggregation=field[,...]\n"
+"     Mandatory arguments to long options are mandatory for short options too.\n"
+"\n"
+"     -a, --aggregation=field[,...]\n"
 "            Aggregated flow records together by any number of fields.\n"
-"     -f filter, --filter=filter\n"
+"     -f, --filter=filter\n"
 "            Process only filter matching records.\n"
-"     -l limit, --limit=limit\n"
+"     -l, --limit=limit\n"
 "            Limit the number of records to print.\n"
-"     -o field[#direction], --order=field[#direction]\n"
+"     -o, --order=field[#direction]\n"
 "            Set record sort order.\n"
-"     -s statistic, --statistic=statistic\n"
+"     -s, --statistic=statistic\n"
 "            Shortcut for aggregation (-a), sort (-o) and record limit (-l).\n"
-"     -t begin[#end], --time-range=begin[#end]\n"
-"            Process only flow files from begin to end time range.\n"
-"     -T time, --time-point=time\n"
+"     -t, --time-point=time_spec\n"
 "            Process only single flow file, the one which includes given time.\n"
+"     -T, --time-range=begin[#end]\n"
+"            Process only flow files from begin to the end time range.\n"
 "\n"
 "Controlling output\n"
 "     --output-format=format\n"
@@ -231,7 +233,7 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
                         }
                 }
 
-                print_err(E_ARG, 0, "invalid time format \"%s\"", token);
+                print_err(E_ARG, 0, "invalid time specifier \"%s\"", token);
                 return E_ARG; //conversion failure
 next_token:
                 token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
@@ -939,8 +941,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
                 {"statistic", required_argument, NULL, 's'},
-                {"time-range", required_argument, NULL, 't'},
-                {"time-point", required_argument, NULL, 'T'},
+                {"time-point", required_argument, NULL, 't'},
+                {"time-range", required_argument, NULL, 'T'},
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
@@ -1012,12 +1014,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_stat(args, optarg);
                         break;
 
-                case 't': //time range
-                        primary_errno = set_time_range(args, optarg);
+                case 't': //time point
+                        primary_errno = set_time_point(args, optarg);
                         break;
 
-                case 'T': //time point
-                        primary_errno = set_time_point(args, optarg);
+                case 'T': //time range
+                        primary_errno = set_time_range(args, optarg);
                         break;
 
 

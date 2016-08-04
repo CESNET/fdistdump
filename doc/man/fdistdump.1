@@ -20,9 +20,9 @@ fdistdump \- a tool to query IP flow files using single or distributed system
 .RB [ -s
 .IR statistic ]
 .RB [ -t
-.IR begin [# end ]]
+.IR time_spec ]
 .RB [ -T
-.IR time ]
+.IR begin [# end ]]
 .IR path \ ...
 .\" DESCRIPTION section --------------------------------------------------------
 .SH DESCRIPTION
@@ -133,9 +133,10 @@ This is often used to read different files by each slave from a shared storage.
 
 .\" General options subsection ---------------------
 .SS General options
+.\" TODO: address prefixes, field overwriting
+Mandatory arguments to long options are mandatory for short options too.
 .TP
-.\" TODO: address prefixes, field overwriting, arguments for long options are mandatory also for short options
-.BI -a \ field\fR[,...],\ \fB--aggregation= \fIfield\fR[,...]
+.BR -a , \ --aggregation=\fIfield\fR[,...]
 Aggregate flow records together by any number of
 .IR field s.
 Option argument is comma separated list of
@@ -153,7 +154,7 @@ comes with
 .B libnf-info
 executable, which prints list of implemented fields and their meaning.
 .TP
-.BI -f \ filter\fR,\  --filter= filter
+.BR -f , \ --filter=\fIfilter
 Process only
 .I filter
 matching records.
@@ -171,14 +172,14 @@ filtering engine by default. This will change in future versions and
 .B libnf
 will use its own filtering engine.
 .TP
-.BI -l \ limit\fR,\  --limit= limit
+.BR -l , \ --limit=\fIlimit
 Limit the number of records to print. Option argument is a natural number, special value 0 disables the limit.
 
 Keep in mind that with enabled aggregation, this doesn't reduce the number of processed records.
 During the aggregation, all filter matching records have to be processed for the sake of result correctness.
-On the other hand, without aggregation, this may vastly reduce the number of processed records and the query running time.
+On the other hand, without aggregation, this may vastly reduce the number of processed records and therefore reduce the query running time.
 .TP
-.BI -o \ field\fR[#\fIdirection\fR],\  --order= field\fR[#\fIdirection\fR]
+.BR -o , \ --order=\fIfield\fR[#\fIdirection\fR]
 Set record sort order.
 Sort key is specified by
 .IR field .
@@ -188,10 +189,9 @@ is either
 .BR asc \ or \ desc
 string, which are abbreviations for ascending and descending direction, respectively.
 .TP
-.BI -s \ statistic\fR,\  --statistic= statistic
-Shortcut for aggregation (\fB-a\fR), sort (\fB-o\fR) and record limit (\fB-l\fR). Option argument string
-.I statistic
-is composed of \fB-a\fR argument, optional slash followed by \fB-o\fR argument.
+.BR -s , \ --statistic=\fIstatistic
+Shortcut for aggregation (\fB-a\fR), sort (\fB-o\fR) and record limit (\fB-l\fR).
+Option argument string \fIstatistic \fRis composed of \fB-a \fRargument, optional slash followed by \fB-o \fRargument.
 Formally written
 .IR statistic \ is\  aggregation_field [,...]/[ sort_field [# sort_direction ]].
 
@@ -206,63 +206,49 @@ and may by changed by an explicit
 .B -l
 option.
 .TP
-.BI -t \ begin\fR[#\fIend\fR],\  --time-range= begin\fR[#\fIend\fR]
-Process only flow files from
-.I begin
-to
-.I end
-time range.
-Affects only directory
-.IR path s.
-If
-.I end
-is not provided, current time is assumed as range end.
+.BR -t , \ --time-point=\fItime_spec
+Process only a single flow file on each slave, the one which includes given
+.IR time_spec .
 
-This option is only useful when paths to your flow files contain some information about stored flows timestamps.
+Time based options (\fB-t\fR and \fB-T\fR) are useful only if paths to your flow files contain some information about stored flows timestamps.
 Flow file usually contains flow records received during some time window, e.g., 5 minute period.
-If
-.I path
-to your flow files carry information about the beginning of this period, you can use this option to easily create queries, where only flow files from
-.I begin
-to
-.I end
-will be processed.
+If \fIpath\fR to your flow files carry information about the beginning of this period, you can use these options to easily create queries, where only flow files from certain time will be processed.
 
 Currently, following directory hierarchy is required:
 .IR profile_name / YYYY / MM / DD / hh /nfcapd. YYYYMMDDhhmm .
-For example for profile
-.B live
-and flows received at 2015-21-10 from 7:25 to 7:30, path will be
+For example for profile \fBlive\fR and flows received at 2015-21-10 from 7:25 to 7:30, path will be
 .BR live/2015/10/21/10/nfcapd.20151020725 .
+Therefore time based options affects only directory \fIpath\fRs.
 
-.IR begin \ and \ end
-should contain one or more space separated time specifiers.
-Time specifier is date, time, special value or UTC flag.
+\fItime_spec\fR string should contain one or more white-space separated time specifiers.
+Time specifier is a representation of a date, time, special value or UTC flag.
 Supported date formats are ISO (YYYY-MM-DD), European (DD.MM.YYYY) and American (MM/DD/YYYY), time format is only one (hh:mm) and also Unix time (number of seconds that have elapsed since 00:00:00 UTC) is supported.
 Special value is either the name of the day of the week or the month name, both according to the current locale, in abbreviated form or the full name.
-UTC flag is either
-.BR U \ or\  UTC
-string (case-insensitive). If present, all the time specifiers are assumed to be in UTC instead of local time.
+The UTC flag is either \fBU\fR or \fBUTC\fR string. If the UTC flag is present, all the time specifiers are assumed to be in UTC instead of local time.
 
 If no date is given, today is assumed if the given hour is lesser than the current hour and yesterday is assumed if it is more.
 If no time is given, midnight is assumed.
 If only the weekday is given, today is assumed if the given day is less or equal to the current day and last week if it is more.
 If only the month is given, the current year is assumed if the given month is less or equal to the current month and last year if it is more and no year is given.
 
-Alignment of the boundaries to the flow file rotation interval is perfomed.
+.TP
+.BR -T , \ --time-range=\fIbegin\fR[#\fIend\fR]
+Process only flow files from \fIbegin\fR to the \fIend\fR time range.
+Both \fIbegin\fR and \fIend\fR are \fItime_spec\fR strings.
+If \fIend\fR is not provided, current time is assumed as range end.
+All other aspects that was mentioned for the time point option (\fB-t\fR) apply also for this option.
+
+If given \fIbegin\fR and \fIend\fR times are not aligned to the flow file rotation intervals (which is usually 5 minutes), alignment is automaticly perfomed.
 Beginning time is aligned to the beginning of the rotation interval, ending time is aligned to the ending of the rotation interval:
 
 .nf
-\& 0     5    10    15    20   -------->   0     5    10    15    20
-\& |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
-\&          ^     ^                              ^           ^
-\&        begin  end                           begin        end
+.RS
+0     5    10    15    20   -------->   0     5    10    15    20
+|_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+         ^     ^                              ^           ^
+       begin  end                           begin        end
+.RE
 .fi
-.TP
-.BI -T \ time\fR,\  --time-point= time
-Process only single flow file, the one which includes given
-.IR time .
-All other aspects that was mentioned for the time range (\fB-t\fR option) apply also for this option.
 .\" Controlling output subsection ---------------------
 .SS Controlling output
 .TP
@@ -401,7 +387,7 @@ It contains number of processed flows, sum of data packets and a sum of data byt
 It also contains query duration (without MPI initialization) and number of flows processed per second.
 Summary has the following format:
 
-summary: F flows, P packets, B k bytes
+summary: F flows, P packets, B bytes
          T seconds, F/T flows/second
 .TP
 .BI --fields= field \fR[,...]
