@@ -1,6 +1,6 @@
 .\" Man page for fdistdump
 .\" Author: Jan Wrona, <wrona@cesnet.cz>
-.TH FDISTDUMP 1 "2015-10-16" "0.1" "fdistdump manual"
+.TH FDISTDUMP 1 "2015-10-16" "0.1.0" "fdistdump manual"
 .\" NAME section ---------------------------------------------------------------
 .SH NAME
 fdistdump \- a tool to query IP flow files using single or distributed system
@@ -38,6 +38,7 @@ allows you to list, sort and aggregate records with the possibility to apply pow
 .\" OPTIONS section ------------------------------------------------------------
 .SH OPTIONS
 Non argument options that are duplicated on the command line are not harmful.
+Mandatory arguments to long options are mandatory for short options too.
 .\" TODO: Following is not true for fields.
 .\" For options that require an argument, each duplication will override the previous argument value.
 .\" MPI_options subsection ---------------------
@@ -134,7 +135,6 @@ This is often used to read different files by each slave from a shared storage.
 .\" General options subsection ---------------------
 .SS General options
 .\" TODO: address prefixes, field overwriting
-Mandatory arguments to long options are mandatory for short options too.
 .TP
 .BR -a , \ --aggregation=\fIfield\fR[,...]
 Aggregate flow records together by any number of
@@ -414,24 +414,19 @@ If any other
 .I field
 is present in the list, it will be used as aggregation key.
 .TP
-.BI --progress-bar= progress_bar_type
-Set progress bar type. Progress is calculated with resolution of one file.
+.BI --progress-bar-type= progress_bar_type
+Set progress bar type.
+Progress is calculated with resolution of one file.
 This may be inaccurate if records are unevenly spread among files.
 
-.I progress_bar_type
-is one of
-.BR none ,\  basic ,\  extended \ or\  file.
-.B none
-will disable progress bar,
-.B basic
-will show only total progress (enabled by default),
-.B extended
-will also show per slave progress.
-Parameter
-.B file
-will continually rewrite file
-.B progress.json
-with current total and per slave progress.
+\fIprogress_bar_type\fR is one of
+.BR none ,\  total ,\  perslave \ or\  json.
+\fBnone\fR will disable progress bar, \fBtotal\fR will print only total progress (enabled by default), \fBperslave\fR will print per slave progress together with total progress, \fBjson\fR will print per slave progress formatted as a JSON.
+.TP
+.BI --progress-bar-dest= progress_bar_destination
+Set progress bar destination.
+There are two special values: stdout and stderr (which is also default).
+Every other value will be treated as a filename and \fBfdistdump\fR will continually rewrite this file with the current progress.
 .\" Other options subsection ---------------------
 .SS Other options
 .TP

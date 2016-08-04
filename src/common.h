@@ -104,10 +104,10 @@ enum { //tags
 typedef enum { //progress bar type
         PROGRESS_BAR_UNSET,
         PROGRESS_BAR_NONE,
-        PROGRESS_BAR_BASIC,
-        PROGRESS_BAR_EXTENDED,
-        PROGRESS_BAR_FILE,
-} progress_bar_t;
+        PROGRESS_BAR_TOTAL,
+        PROGRESS_BAR_PERSLAVE,
+        PROGRESS_BAR_JSON,
+} progress_bar_type_t;
 /**
  * @}
  */ //common_enum

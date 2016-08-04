@@ -50,6 +50,7 @@
 #include <string.h> //strlen()
 #include <stdbool.h>
 #include <assert.h>
+#include <errno.h>
 
 #include <mpi.h>
 #include <libnf.h>
@@ -81,12 +82,13 @@ struct mem_write_callback_data {
 };
 
 static struct progress_bar_ctx {
-        progress_bar_t type;
+        progress_bar_type_t type;
         size_t slave_cnt;
         size_t *files_slave_cur; //slave_cnt size
         size_t *files_slave_sum; //slave_cnt size
         size_t files_cur;
         size_t files_sum;
+        FILE *out_stream;
 } progress_bar_ctx;
 
 
@@ -178,14 +180,14 @@ static error_code_t print_rec_callback(uint8_t *data, size_t data_len,
 
 
 /* Progress bar print. */
-void progress_bar_print(void)
+static void progress_bar_print(void)
 {
         struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
-        FILE *out_stream;
-        double master_percentage;
+        double total_percentage;
         double slave_percentage[pbc->slave_cnt];
 
 
+        /* Calculate percentage progress for each slave. */
         for (size_t i = 0; i < pbc->slave_cnt; ++i) {
                 assert(pbc->files_slave_cur[i] <= pbc->files_slave_sum[i]);
                 if (pbc->files_slave_sum[i] == 0) {
@@ -196,61 +198,70 @@ void progress_bar_print(void)
                 }
         }
 
+        /* Calculate total percentage progress. */
         assert(pbc->files_cur <= pbc->files_sum);
         if (pbc->files_sum == 0) {
-                master_percentage = 100.0;
+                total_percentage = 100.0;
         } else {
-                master_percentage = (double)pbc->files_cur /
+                total_percentage = (double)pbc->files_cur /
                         pbc->files_sum * 100.0;
         }
 
-        if (pbc->type == PROGRESS_BAR_BASIC ||
-                        pbc->type == PROGRESS_BAR_EXTENDED) {
-                out_stream = stderr;
+        /* Diverge for each progress bar type. */
+        switch (pbc->type) {
+        case PROGRESS_BAR_TOTAL:
+                fprintf(pbc->out_stream, "[reading files] ");
+                fprintf(pbc->out_stream, "total: %zu/%zu (%.0f %%)",
+                                pbc->files_cur, pbc->files_sum,
+                                total_percentage);
+                break;
 
-                fprintf(out_stream, "[reading files] ");
-                fprintf(out_stream, "master: %zu/%zu (%.0f %%)", pbc->files_cur,
-                                pbc->files_sum, master_percentage);
-
-                if (pbc->type == PROGRESS_BAR_EXTENDED) {
-                        for (size_t i = 0; i < pbc->slave_cnt; ++i) {
-                                fprintf(out_stream, " | %zu: %zu/%zu (%.0f %%)",
-                                                i + 1, pbc->files_slave_cur[i],
-                                                pbc->files_slave_sum[i],
-                                                slave_percentage[i]);
-                        }
-                }
-
-                if (master_percentage == 100.0) {
-                        fprintf(out_stream, " DONE\n");
-                } else {
-                        putc('\r', out_stream);
-                }
-                fflush(out_stream);
-        }
-
-        if (pbc->type == PROGRESS_BAR_FILE) {
-                out_stream = fopen("progress.json", "w");
-                assert(out_stream != NULL);
-
-                putc('{', out_stream);
-
-                fprintf(out_stream, "\"master\":%.0f", master_percentage);
+        case PROGRESS_BAR_PERSLAVE:
+                fprintf(pbc->out_stream, "[reading files] ");
+                fprintf(pbc->out_stream, "total: %zu/%zu (%.0f %%)",
+                                pbc->files_cur, pbc->files_sum,
+                                total_percentage);
 
                 for (size_t i = 0; i < pbc->slave_cnt; ++i) {
-                        fprintf(out_stream, ",\"sl%zu\":%.0f", i + 1,
+                        fprintf(pbc->out_stream, " | %zu: %zu/%zu (%.0f %%)",
+                                        i + 1, pbc->files_slave_cur[i],
+                                        pbc->files_slave_sum[i],
                                         slave_percentage[i]);
                 }
+                break;
 
-                putc('}', out_stream);
-                putc('\n', out_stream);
+        case PROGRESS_BAR_JSON:
+                fprintf(pbc->out_stream, "{\"total\":%.0f", total_percentage);
+                for (size_t i = 0; i < pbc->slave_cnt; ++i) {
+                        fprintf(pbc->out_stream, ",\"slave%zu\":%.0f", i + 1,
+                                        slave_percentage[i]);
+                }
+                putc('}', pbc->out_stream);
+                break;
 
-                fclose(out_stream);
+        default:
+                assert(!"unknown progress bar type");
+                break;
         }
+
+        /* Different behavior for streams and for files. */
+        if (pbc->out_stream == stdout || pbc->out_stream == stderr) { //stream
+                if (pbc->files_cur == pbc->files_sum) {
+                        putc('\n', pbc->out_stream); //done, break line
+                } else {
+                        putc('\r', pbc->out_stream); //not done, return carriage
+                }
+        } else { //file
+                putc('\n', pbc->out_stream); //proper text file termination
+                rewind(pbc->out_stream);
+        }
+
+        fflush(pbc->out_stream);
 }
 
-/* Initialize - gather file count from each slave. */
-error_code_t progress_bar_init(progress_bar_t type, size_t slave_cnt)
+/* Progress bar initialization: gather file count from each slave etc. */
+static error_code_t progress_bar_init(progress_bar_type_t type, char *dest,
+                size_t slave_cnt)
 {
         struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
 
@@ -265,7 +276,20 @@ error_code_t progress_bar_init(progress_bar_t type, size_t slave_cnt)
         }
 
         pbc->type = type; //store progress bar type
-        pbc->slave_cnt = slave_cnt; //store progress bar type
+        pbc->slave_cnt = slave_cnt; //store slave count
+
+        if (dest == NULL || strcmp(dest, "stderr") == 0) {
+                pbc->out_stream = stderr; //default is stderr
+        } else if (strcmp(dest, "stdout") == 0) {
+                pbc->out_stream = stdout;
+        } else { //destination is file
+                pbc->out_stream = fopen(dest, "w");
+                if (pbc->out_stream == NULL) {
+                        print_warn(E_ARG, 0, "invalid progress bar destination "
+                                        "\"%s\": %s", dest, strerror(errno));
+                        pbc->type = PROGRESS_BAR_NONE; //disable progress bar
+                }
+        }
 
         /* Receive number of files to be processed. */
         MPI_Gather(MPI_IN_PLACE, 0, MPI_UNSIGNED_LONG, pbc->files_slave_sum - 1,
@@ -284,7 +308,8 @@ error_code_t progress_bar_init(progress_bar_t type, size_t slave_cnt)
         return E_OK;
 }
 
-bool progress_bar_refresh(int source)
+/* Progress bar refresh. */
+static bool progress_bar_refresh(int source)
 {
         struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
 
@@ -298,12 +323,19 @@ bool progress_bar_refresh(int source)
         return pbc->files_cur == pbc->files_sum;
 }
 
-void progress_bar_finish(void)
+/* Progress bar cleanup. */
+static void progress_bar_finish(void)
 {
         struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
 
         free(pbc->files_slave_cur);
         free(pbc->files_slave_sum);
+
+        /* Close output stream only if it's file. */
+        if (pbc->out_stream != stdout && pbc->out_stream != stderr &&
+                        fclose(pbc->out_stream) == EOF) {
+                print_warn(E_INTERNAL, 0, "progress bar: %s", strerror(errno));
+        }
 }
 
 
@@ -719,8 +751,8 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 
 
         if (mtc.shared.working_mode != MODE_PASS) {
-                primary_errno = progress_bar_init(args->progress_bar,
-                                mtc.slave_cnt);
+                primary_errno = progress_bar_init(args->progress_bar_type,
+                                args->progress_bar_dest, mtc.slave_cnt);
                 if (primary_errno != E_OK) {
                         goto finalize;
                 }

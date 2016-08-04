@@ -108,8 +108,10 @@ static const char *help_string =
 "            Print/don't  print  summary at the end of the query.\n"
 "     --fields=field[,...]\n"
 "            Set the list of printed fields.\n"
-"     --progress-bar=progress_bar_type\n"
+"     --progress-bar-type=progress_bar_type\n"
 "            Set progress bar type.\n"
+"     --progress-bar-dest=progress_bar_destination\n"
+"            Set progress bar destination.\n"
 "\n"
 "Other options\n"
 "     --no-fast-topn\n"
@@ -139,7 +141,8 @@ enum { //command line options, have to start above ASCII
         OPT_NO_SUMMARY, //don't print summary
 
         OPT_FIELDS, //specification of listed fields
-        OPT_PROGRESS_BAR, //specification of listed fields
+        OPT_PROGRESS_BAR_TYPE, //type of the progress bar
+        OPT_PROGRESS_BAR_DEST, //destination of the progress bar
 
         OPT_HELP, //print help
         OPT_VERSION, //print version
@@ -775,7 +778,8 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 
         /* Check for various possible errors. */
         if (errno != 0) {
-                perror(limit_str);
+                print_err(E_ARG, 0, "invalid limit \"%s\": %s", limit_str,
+                                strerror(errno));
                 return E_ARG;
         }
         if (*endptr != '\0') { //remaining characters
@@ -904,20 +908,20 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         return E_OK;
 }
 
-static error_code_t set_progress_bar(progress_bar_t *progress_bar,
-                const char *progress_bar_str)
+static error_code_t set_progress_bar_type(progress_bar_type_t *type,
+                const char *progress_bar_type_str)
 {
-        if (strcmp(progress_bar_str, "none") == 0) {
-                *progress_bar = PROGRESS_BAR_NONE;
-        } else if (strcmp(progress_bar_str, "basic") == 0) {
-                *progress_bar = PROGRESS_BAR_BASIC;
-        } else if (strcmp(progress_bar_str, "extended") == 0) {
-                *progress_bar = PROGRESS_BAR_EXTENDED;
-        } else if (strcmp(progress_bar_str, "file") == 0) {
-                *progress_bar = PROGRESS_BAR_FILE;
+        if (strcmp(progress_bar_type_str, "none") == 0) {
+                *type = PROGRESS_BAR_NONE;
+        } else if (strcmp(progress_bar_type_str, "total") == 0) {
+                *type = PROGRESS_BAR_TOTAL;
+        } else if (strcmp(progress_bar_type_str, "perslave") == 0) {
+                *type = PROGRESS_BAR_PERSLAVE;
+        } else if (strcmp(progress_bar_type_str, "json") == 0) {
+                *type = PROGRESS_BAR_JSON;
         } else {
                 print_err(E_ARG, 0, "unknown progress bar type \"%s\"",
-                                progress_bar_str);
+                                progress_bar_type_str);
                 return E_ARG;
         }
 
@@ -965,7 +969,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"summary", no_argument, NULL, OPT_SUMMARY},
                 {"no-summary", no_argument, NULL, OPT_NO_SUMMARY},
                 {"fields", required_argument, NULL, OPT_FIELDS},
-                {"progress-bar", required_argument, NULL, OPT_PROGRESS_BAR},
+                {"progress-bar-type", required_argument, NULL,
+                        OPT_PROGRESS_BAR_TYPE},
+                {"progress-bar-dest", required_argument, NULL,
+                        OPT_PROGRESS_BAR_DEST},
 
                 {"help", no_argument, NULL, OPT_HELP},
                 {"version", no_argument, NULL, OPT_VERSION},
@@ -1082,9 +1089,13 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         have_fields = true;
                         break;
 
-                case OPT_PROGRESS_BAR:
-                        primary_errno = set_progress_bar(&args->progress_bar,
-                                        optarg);
+                case OPT_PROGRESS_BAR_TYPE:
+                        primary_errno = set_progress_bar_type(
+                                        &args->progress_bar_type, optarg);
+                        break;
+
+                case OPT_PROGRESS_BAR_DEST:
+                        args->progress_bar_dest = optarg;
                         break;
 
 
@@ -1147,8 +1158,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         }
 
         /* If progress bar type was not set, enable basic progress bar. */
-        if (args->progress_bar == PROGRESS_BAR_UNSET) {
-                args->progress_bar = PROGRESS_BAR_BASIC;
+        if (args->progress_bar_type == PROGRESS_BAR_UNSET) {
+                args->progress_bar_type = PROGRESS_BAR_TOTAL;
         }
 
 

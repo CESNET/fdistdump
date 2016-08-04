@@ -80,7 +80,8 @@ struct cmdline_args {
         bool use_fast_topn; //enables fast top-N algorithm
 
         struct output_params output_params; //output (printing) parameters
-        progress_bar_t progress_bar;
+        progress_bar_type_t progress_bar_type;
+        char *progress_bar_dest;
 };
 
 
