@@ -75,7 +75,6 @@
 
 /* Global variables. */
 extern MPI_Datatype mpi_struct_shared_task_ctx;
-extern int secondary_errno;
 
 
 /* Thread shared. */
@@ -92,6 +91,12 @@ struct slave_task_ctx {
         size_t slave_cnt; //slave count
         struct processed_summ processed_summ; //read from regular records
         struct metadata_summ metadata_summ; //read from metadata records
+};
+
+/* Thread private. */
+struct thread_ctx {
+        lnf_file_t *file; //LNF file
+        lnf_rec_t *rec; //LNF record
 };
 
 
@@ -238,9 +243,9 @@ static void metadata_summ_send(struct metadata_summ *s)
         MPI_Send(s, 15, MPI_UINT64_T, ROOT_PROC, TAG_STATS, MPI_COMM_WORLD);
 }
 
-static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
+static error_code_t task_send_file(struct slave_task_ctx *stc,
+                const struct thread_ctx *tc)
 {
-        error_code_t primary_errno = E_OK;
         int secondary_errno;
 
         size_t file_rec_cntr = 0;
@@ -254,8 +259,6 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
         size_t db_rec_cntr = 0; //number of records in current buffer
 
         MPI_Request request = MPI_REQUEST_NULL;
-        lnf_file_t *file;
-        lnf_rec_t *rec;
         uint32_t rec_size = 0;
 
         struct processed_summ processed_summ = {0};
@@ -265,23 +268,6 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
         } fast_fields[LNF_FLD_TERM_];//fields array compressed for faster access
         size_t fast_fields_cnt = 0;
 
-
-        /* Open flow file. */
-        secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "unable to open file \"%s\"",
-                                path);
-                return E_LNF;
-        }
-
-        //TODO: no longer using OMP tasks
-        /* Initialize LNF record. Have to be unique in each OMP task. */
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
-                goto close_file;
-        }
 
         /* Fill fast fields array and calculate constant record size. */
         for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
@@ -299,11 +285,11 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
          * No aggregation -> store record to buffer.
          * Send buffer, if buffer full, otherwise continue reading.
          */
-        while ((secondary_errno = lnf_read(file, rec)) == LNF_OK) {
+        while ((secondary_errno = lnf_read(tc->file, tc->rec)) == LNF_OK) {
                 file_rec_cntr++;
 
                 /* Apply filter (if there is any). */
-                if (stc->filter && !lnf_filter_match(stc->filter, rec)) {
+                if (stc->filter && !lnf_filter_match(stc->filter, tc->rec)) {
                         continue;
                 }
                 file_proc_rec_cntr++;
@@ -338,14 +324,14 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
                 }
 
                 /* Increment private processed_summ counters. */
-                data_summ_update(&processed_summ, rec);
+                data_summ_update(&processed_summ, tc->rec);
 
                 *(uint32_t *)(db + db_off) = rec_size;
                 db_off += sizeof (rec_size);
 
                 /* Loop through the fields and fill the data buffer. */
                 for (size_t i = 0; i < fast_fields_cnt; ++i) {
-                        lnf_rec_fget(rec, fast_fields[i].id, db + db_off);
+                        lnf_rec_fget(tc->rec, fast_fields[i].id, db + db_off);
                         db_off += fast_fields[i].size;
                 }
 
@@ -361,22 +347,17 @@ static error_code_t task_send_file(struct slave_task_ctx *stc, const char *path)
                 stc->proc_rec_cntr += db_rec_cntr; //increment shared counter
         }
 
-        /* Eventually set record limit reached flag. */
+        /* Either set record limit reached flag or check if EOF was reached. */
         if (stc->shared.rec_limit && stc->proc_rec_cntr >=
                         stc->shared.rec_limit) {
                 stc->rec_limit_reached = true;
-        /* Otherwise check if EOF was reached. */
         } else if (secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF; //no it wasn't, a problem occured
+                print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
         /* Atomic increment of shared processed_summ by all threads. */
         data_summ_share(&stc->processed_summ, &processed_summ);
-        metadata_summ_read(&stc->metadata_summ, file);
-
-        lnf_rec_free(rec);
-close_file:
-        lnf_close(file);
+        metadata_summ_read(&stc->metadata_summ, tc->file);
 
         /* Buffers will be invalid after return, wait for send to complete. */
         #pragma omp critical (mpi)
@@ -384,87 +365,61 @@ close_file:
                 MPI_Wait(&request, MPI_STATUS_IGNORE);
         }
 
-        print_debug("<task_send_file> thread %d, file %s, read %zu, "
-                        "processed %zu, sent %zu B", omp_get_thread_num(),
-                        path, file_rec_cntr, file_proc_rec_cntr,
-                        file_sent_bytes);
+        print_debug("<task_send_file> thread %d, read %zu, processed %zu, "
+                        "sent %zu B", omp_get_thread_num(), file_rec_cntr,
+                        file_proc_rec_cntr, file_sent_bytes);
 
 
-        return primary_errno;
+        return E_OK;
 }
 
 
 static error_code_t task_store_file(struct slave_task_ctx *stc,
-                const char *path)
+                const struct thread_ctx *tc)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
 
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
-        lnf_file_t *file;
-        lnf_rec_t *rec;
         struct processed_summ processed_summ = {0};
-
-        /* Open flow file. */
-        secondary_errno = lnf_open(&file, path, LNF_READ, NULL);
-        if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "unable to open file \"%s\"",
-                                path);
-                return E_LNF;
-        }
-
-        /* Initialize LNF record. Have to be unique in each OMP task. */
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
-                goto close_file;
-        }
 
         /*
          * Read all records from file. Hot path.
          * Aggreagation -> write record to memory and continue.
          * Ignore record limit.
          */
-        while ((secondary_errno = lnf_read(file, rec)) == LNF_OK) {
+        while ((secondary_errno = lnf_read(tc->file, tc->rec)) == LNF_OK) {
                 file_rec_cntr++;
 
                 /* Apply filter (if there is any). */
-                if (stc->filter && !lnf_filter_match(stc->filter, rec)) {
+                if (stc->filter && !lnf_filter_match(stc->filter, tc->rec)) {
                         continue;
                 }
                 file_proc_rec_cntr++;
                 /* Increment private processed_summ counters. */
-                data_summ_update(&processed_summ, rec);
+                data_summ_update(&processed_summ, tc->rec);
 
-                secondary_errno = lnf_mem_write(stc->aggr_mem, rec);
+                secondary_errno = lnf_mem_write(stc->aggr_mem, tc->rec);
                 if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
                         print_err(primary_errno, secondary_errno,
                                         "lnf_mem_write()");
-                        goto free_lnf_rec;
+                        break;
                 }
-
         }
 
         /* Check if we reach end of file. */
         if (secondary_errno != LNF_EOF) {
-                primary_errno = E_LNF; //no, we didn't, a problem occured
+                print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
         /* Atomic increment of shared processed_summ by all threads. */
         data_summ_share(&stc->processed_summ, &processed_summ);
-        metadata_summ_read(&stc->metadata_summ, file);
+        metadata_summ_read(&stc->metadata_summ, tc->file);
 
-free_lnf_rec:
-        lnf_rec_free(rec);
-close_file:
-        lnf_close(file);
-
-        print_debug("<task_store_file> thread %d, file %s, read %zu, "
-                        "processed %zu", omp_get_thread_num(),
-                        path, file_rec_cntr, file_proc_rec_cntr);
+        print_debug("<task_store_file> thread %d, read %zu, processed %zu",
+                       omp_get_thread_num(), file_rec_cntr, file_proc_rec_cntr);
 
         return primary_errno;
 }
@@ -483,6 +438,9 @@ static void task_free(struct slave_task_ctx *stc)
 
 static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
 {
+        int secondary_errno;
+
+
         assert(filter != NULL && filter_str != NULL && strlen(filter_str) != 0);
 
         /* Initialize filter. */
@@ -580,6 +538,7 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
 static error_code_t isend_loop(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
+        int secondary_errno;
 
         uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
         bool db_mem_idx = 0; //currently used data buffer index
@@ -659,6 +618,7 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
 static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
+        int secondary_errno;
 
         uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
         bool db_mem_idx = 0; //currently used data buffer index
@@ -680,7 +640,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         int sort_direction = LNF_SORT_NONE;
 
 
-        /* Initialize LNF record. TODO: use global record */
+        /* Initialize LNF record. */
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
@@ -865,12 +825,15 @@ send_terminator:
 static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
+        int secondary_errno;
+
         int rec_len;
         char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
         lnf_mem_cursor_t **lookup_cursors;
         size_t lookup_cursors_idx = 0;
         size_t lookup_cursors_size = LOOKUP_CURSOR_INIT_SIZE;
         size_t received_cnt = 0;
+
 
         /* Allocate some lookup cursors. */
         lookup_cursors = malloc(lookup_cursors_size *
@@ -987,13 +950,13 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
 }
 
 
-void progress_report_init(size_t files_cnt)
+static void progress_report_init(size_t files_cnt)
 {
         MPI_Gather(&files_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0, MPI_UNSIGNED_LONG,
                         ROOT_PROC, MPI_COMM_WORLD);
 }
 
-void progress_report_next(void)
+static void progress_report_next(void)
 {
         MPI_Request request = MPI_REQUEST_NULL;
 
@@ -1006,6 +969,67 @@ void progress_report_next(void)
         }
 }
 
+
+static error_code_t process_parallel(struct slave_task_ctx *stc,
+                const f_array_t *files)
+{
+        error_code_t primary_errno = E_OK;
+        int secondary_errno;
+        struct thread_ctx tc;
+
+
+        /* Initialize LNF record for each thread only once. */
+        secondary_errno = lnf_rec_init(&tc.rec);
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                goto merge_mem;
+        }
+
+        /* Parallel loop through all the files. */
+        #pragma omp for schedule(guided) nowait
+        for (size_t i = 0; i < files->f_cnt; ++i) {
+                const char *path = files->f_items[i].f_name;
+
+
+                /* Error on one of the threads. */
+                if (primary_errno != E_OK) {
+                        continue; //OpenMP cannot break from for loop
+                }
+
+                /* Open a flow file. */
+                secondary_errno = lnf_open(&tc.file, path, LNF_READ, NULL);
+                if (secondary_errno != LNF_OK) {
+                        print_warn(E_LNF, secondary_errno,
+                                        "unable to open file \"%s\"", path);
+                        continue;
+                }
+
+                /* Process the file accordingly. */
+                if (stc->aggr_mem) {
+                        primary_errno = task_store_file(stc, &tc);
+                } else if (!stc->rec_limit_reached) {
+                        primary_errno = task_send_file(stc, &tc);
+                }
+
+                lnf_close(tc.file);
+
+                /* Report that another file has been processed. */
+                progress_report_next();
+        } //don't wait for other threads and start merging memory immediately
+
+        /* Free LNF record for each thread. */
+        lnf_rec_free(tc.rec);
+
+merge_mem:
+        /* Merge thread specific hash tables into one. */
+        if (stc->aggr_mem) {
+                lnf_mem_merge_threads(stc->aggr_mem);
+        }
+
+
+        return primary_errno;
+}
 
 error_code_t slave(int world_size)
 {
@@ -1020,6 +1044,7 @@ error_code_t slave(int world_size)
         stc.slave_cnt = world_size - 1; //all nodes without master
 
 
+        //TODO: goto finalize_task will cause deadlock because of progress bar
         /* Wait for reception of task context from master. */
         primary_errno = task_receive_ctx(&stc);
         if (primary_errno != E_OK) {
@@ -1043,29 +1068,13 @@ error_code_t slave(int world_size)
         progress_report_init(files.f_cnt);
 
 
-        //TODO: return codes, secondary_errno
-        #pragma omp parallel
+        #pragma omp parallel reduction(max:primary_errno)
         {
-                /* Parallel loop through all the files. */
-                #pragma omp for schedule(guided) nowait
-                for (size_t i = 0; i < files.f_cnt; ++i) {
-                        const char *path = files.f_items[i].f_name;
-
-                        if (stc.aggr_mem) {
-                                primary_errno = task_store_file(&stc, path);
-                        } else if (!stc.rec_limit_reached) {
-                                primary_errno = task_send_file(&stc, path);
-                        }
-
-                        /* Report that another file has been processed. */
-                        progress_report_next();
-                } //don't wait for other threads and start merging memory
-
-                /* Merge thread specific hash tables into one. */
-                if (stc.aggr_mem) {
-                        lnf_mem_merge_threads(stc.aggr_mem);
-                }
+                primary_errno = process_parallel(&stc, &files);
         } //impicit barrier
+        if (primary_errno != E_OK) {
+                goto finalize_task;
+        }
 
         /*
          * In case of aggregation or sorting, records were stored into memory

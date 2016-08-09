@@ -53,12 +53,12 @@
 
 
 /* linked list of file names */
-typedef struct f_item_s {
+typedef struct {
         char *f_name;
         off_t f_size;
 } f_item_t;
 
-typedef struct f_array_s {
+typedef struct {
         f_item_t *f_items;
         size_t f_cnt;
         size_t a_size;
