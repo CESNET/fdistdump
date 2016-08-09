@@ -92,7 +92,7 @@ static const char *help_string =
 "     --output-ts-conv=timestamp_conversion\n"
 "            Set timestamp output conversion format.\n"
 "     --output-ts-localtime\n"
-"            Convert  timestamps  to  local  time.\n"
+"            Convert timestamps to local time.\n"
 "     --output-volume-conv=volume_conversion\n"
 "            Set volume output conversion format.\n"
 "     --output-tcpflags-conv=TCP_flags_conversion\n"
@@ -100,12 +100,13 @@ static const char *help_string =
 "     --output-addr-conv=IP_address_conversion\n"
 "            Set IP address output conversion format.\n"
 "     --output-proto-conv=IP_protocol_conversion\n"
-"            Set  IP  protocol  output  conversion  format.\n"
+"            Set IP protocol output conversion format.\n"
 "     --output-duration-conv=duration_conversion\n"
 "            Set duration conversion format.\n"
-"     --summary\n"
-"     --no-summary\n"
-"            Print/don't  print  summary at the end of the query.\n"
+"     --processed-summary=yes|no|only\n"
+"            Print/don't print/print only processed data summary.\n"
+"     --metadata-summary=yes|no|only\n"
+"            Print/don't print/print only metadata summary.\n"
 "     --fields=field[,...]\n"
 "            Set the list of printed fields.\n"
 "     --progress-bar-type=progress_bar_type\n"
@@ -137,8 +138,8 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
         OPT_OUTPUT_DURATION_CONV, //output IP protocol conversion
-        OPT_SUMMARY, //print summary
-        OPT_NO_SUMMARY, //don't print summary
+        OPT_PROCESSED_SUMM, //processed data summary
+        OPT_METADATA_SUMM, //metadata summary
 
         OPT_FIELDS, //specification of listed fields
         OPT_PROGRESS_BAR_TYPE, //type of the progress bar
@@ -908,6 +909,23 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         return E_OK;
 }
 
+static error_code_t set_output_summ(output_summ_t *os, char *summ_str)
+{
+        if (strcmp(summ_str, "yes") == 0) {
+                *os = OUTPUT_SUMM_YES;
+        } else if (strcmp(summ_str, "no") == 0) {
+                *os = OUTPUT_SUMM_NO;
+        } else if (strcmp(summ_str, "only") == 0) {
+                *os = OUTPUT_SUMM_ONLY;
+        } else {
+                print_err(E_ARG, 0, "invalid summary parameter \"%s\"",
+                                summ_str);
+                return E_ARG;
+        }
+
+        return E_OK;
+}
+
 static error_code_t set_progress_bar_type(progress_bar_type_t *type,
                 const char *progress_bar_type_str)
 {
@@ -966,8 +984,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"output-duration-conv", required_argument, NULL,
                         OPT_OUTPUT_DURATION_CONV},
 
-                {"summary", no_argument, NULL, OPT_SUMMARY},
-                {"no-summary", no_argument, NULL, OPT_NO_SUMMARY},
+                {"processed-summary", required_argument, NULL,
+                        OPT_PROCESSED_SUMM},
+                {"metadata-summary", required_argument, NULL,
+                        OPT_METADATA_SUMM},
                 {"fields", required_argument, NULL, OPT_FIELDS},
                 {"progress-bar-type", required_argument, NULL,
                         OPT_PROGRESS_BAR_TYPE},
@@ -1075,12 +1095,16 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         break;
 
 
-                case OPT_SUMMARY:
-                        args->output_params.summary = OUTPUT_SUMMARY_YES;
+                case OPT_PROCESSED_SUMM:
+                        primary_errno = set_output_summ(
+                                        &args->output_params.processed_summ,
+                                        optarg);
                         break;
 
-                case OPT_NO_SUMMARY:
-                        args->output_params.summary = OUTPUT_SUMMARY_NO;
+                case OPT_METADATA_SUMM:
+                        primary_errno = set_output_summ(
+                                        &args->output_params.metadata_summ,
+                                        optarg);
                         break;
 
                 case OPT_FIELDS:
@@ -1259,8 +1283,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_DURATION_CONV_STR;
                 }
 
-                if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
-                        args->output_params.summary = OUTPUT_SUMMARY_YES;
+                if (args->output_params.processed_summ == OUTPUT_SUMM_UNSET) {
+                        args->output_params.processed_summ = OUTPUT_SUMM_YES;
+                }
+                if (args->output_params.metadata_summ == OUTPUT_SUMM_UNSET) {
+                        args->output_params.metadata_summ = OUTPUT_SUMM_NO;
                 }
                 break;
 
@@ -1297,8 +1324,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_DURATION_CONV_NONE;
                 }
 
-                if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
-                        args->output_params.summary = OUTPUT_SUMMARY_NO;
+                if (args->output_params.processed_summ == OUTPUT_SUMM_UNSET) {
+                        args->output_params.processed_summ = OUTPUT_SUMM_NO;
+                }
+                if (args->output_params.metadata_summ == OUTPUT_SUMM_UNSET) {
+                        args->output_params.metadata_summ = OUTPUT_SUMM_NO;
                 }
                 break;
         default:

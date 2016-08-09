@@ -96,10 +96,11 @@ typedef enum {
 } output_duration_conv_t;
 
 typedef enum {
-        OUTPUT_SUMMARY_UNSET,
-        OUTPUT_SUMMARY_YES,
-        OUTPUT_SUMMARY_NO,
-} output_summary_t;
+        OUTPUT_SUMM_UNSET,
+        OUTPUT_SUMM_YES,
+        OUTPUT_SUMM_NO,
+        OUTPUT_SUMM_ONLY,
+} output_summ_t;
 
 
 struct output_params {
@@ -115,14 +116,16 @@ struct output_params {
         output_ip_proto_conv_t ip_proto_conv;
         output_duration_conv_t duration_conv;
 
-        output_summary_t summary;
+        output_summ_t processed_summ;
+        output_summ_t metadata_summ;
 };
 
 void output_setup(struct output_params op, const struct field_info *fi);
 void print_rec(const uint8_t *data);
 error_code_t print_mem(lnf_mem_t *mem, size_t limit);
 
-/* Print task summart. */
-void print_summary(const struct stats *stats, double duration);
+/* Print task summary. */
+void print_processed_summ(const struct processed_summ *s, double duration);
+void print_metadata_summ(const struct metadata_summ *s);
 
 #endif //OUTPUT_H

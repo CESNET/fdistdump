@@ -117,11 +117,32 @@ typedef enum { //progress bar type
  * \defgroup common_struct Common structures usable everywhere
  * @{
  */
-struct stats {
+struct processed_summ {
         uint64_t flows;
         uint64_t pkts;
         uint64_t bytes;
 };
+
+struct metadata_summ {
+        uint64_t flows;
+        uint64_t flows_tcp;
+        uint64_t flows_udp;
+        uint64_t flows_icmp;
+        uint64_t flows_other;
+
+        uint64_t pkts;
+        uint64_t pkts_tcp;
+        uint64_t pkts_udp;
+        uint64_t pkts_icmp;
+        uint64_t pkts_other;
+
+        uint64_t bytes;
+        uint64_t bytes_tcp;
+        uint64_t bytes_udp;
+        uint64_t bytes_icmp;
+        uint64_t bytes_other;
+};
+
 
 //XXX: reflect changes also in mpi_struct_shared_task_ctx
 #define STRUCT_FIELD_INFO_ELEMS 4

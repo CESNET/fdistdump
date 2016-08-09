@@ -293,8 +293,8 @@ static const char * timestamp_to_str(const uint64_t *ts)
 
                 off = strftime(global_str, sizeof (global_str),
                                 output_params.ts_conv_str, timeconv(&sec));
-                snprintf(global_str + off, sizeof (global_str) - off, ".%.3" PRIu64,
-                                msec);
+                snprintf(global_str + off, sizeof (global_str) - off, ".%.3"
+                                PRIu64, msec);
                 break;
 
         default:
@@ -805,7 +805,7 @@ void output_setup(struct output_params op, const struct field_info *fi)
 void print_rec(const uint8_t *data)
 {
         size_t off = 0;
-        static bool first_rec = 1;
+        static bool first_rec = true;
         static size_t col_width[LNF_FLD_TERM_];
 
         if (first_rec) {
@@ -931,24 +931,51 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         return E_OK;
 }
 
-void print_summary(const struct stats *stats, double duration)
+void print_processed_summ(const struct processed_summ *s, double duration)
 {
         int header_len;
-        const double flows_per_sec = stats->flows / duration;
+        const double flows_per_sec = s->flows / duration;
 
 
-        if (output_params.summary != OUTPUT_SUMMARY_YES) {
+        if (output_params.processed_summ != OUTPUT_SUMM_YES) {
                 return;
         }
 
         putchar('\n');
-        header_len = printf("summary: ");
+        header_len = printf("processed data summary: ");
         assert(header_len >= 0);
 
-        printf("%s flows, ", volume_to_str(&stats->flows));
-        printf("%s packets, ", volume_to_str(&stats->pkts));
-        printf("%s bytes\n", volume_to_str(&stats->bytes));
+        printf("%s flows, ", volume_to_str(&s->flows));
+        printf("%s packets, ", volume_to_str(&s->pkts));
+        printf("%s bytes\n", volume_to_str(&s->bytes));
 
         printf("%*s%f seconds, %s flows/second\n", header_len, "", duration,
                         double_volume_to_str(&flows_per_sec));
+}
+
+void print_metadata_summ(const struct metadata_summ *s)
+{
+        if (output_params.metadata_summ != OUTPUT_SUMM_YES) {
+                return;
+        }
+
+        printf("\nmetadata summary:\n");
+
+        printf("\t flows total:   %s\n", volume_to_str(&s->flows));
+        printf("\t flows TCP:     %s\n", volume_to_str(&s->flows_tcp));
+        printf("\t flows UDP:     %s\n", volume_to_str(&s->flows_udp));
+        printf("\t flows ICMP:    %s\n", volume_to_str(&s->flows_icmp));
+        printf("\t flows other:   %s\n", volume_to_str(&s->flows_other));
+
+        printf("\t packets total: %s\n", volume_to_str(&s->pkts));
+        printf("\t packets TCP:   %s\n", volume_to_str(&s->pkts_tcp));
+        printf("\t packets UDP:   %s\n", volume_to_str(&s->pkts_udp));
+        printf("\t packets ICMP:  %s\n", volume_to_str(&s->pkts_icmp));
+        printf("\t packets other: %s\n", volume_to_str(&s->pkts_other));
+
+        printf("\t bytes total:   %s\n", volume_to_str(&s->bytes));
+        printf("\t bytes TCP:     %s\n", volume_to_str(&s->bytes_tcp));
+        printf("\t bytes UDP:     %s\n", volume_to_str(&s->bytes_udp));
+        printf("\t bytes ICMP:    %s\n", volume_to_str(&s->bytes_icmp));
+        printf("\t bytes other:   %s\n", volume_to_str(&s->bytes_other));
 }

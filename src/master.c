@@ -579,11 +579,11 @@ free_db_mem:
 }
 
 
-static void stats_recv(struct stats *s, size_t slave_cnt)
+static void processed_summ_recv(struct processed_summ *s, size_t slave_cnt)
 {
-        struct stats received;
+        struct processed_summ received;
 
-        /* Wait for statistics from every slave. */
+        /* Wait for data statistics from every slave. */
         for (size_t i = 0; i < slave_cnt; ++i) {
                 MPI_Recv(&received, 3, MPI_UINT64_T, MPI_ANY_SOURCE, TAG_STATS,
                                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -591,6 +591,35 @@ static void stats_recv(struct stats *s, size_t slave_cnt)
                 s->flows += received.flows;
                 s->pkts += received.pkts;
                 s->bytes += received.bytes;
+        }
+}
+
+static void metadata_summ_recv(struct metadata_summ *s, size_t slave_cnt)
+{
+        struct metadata_summ received;
+
+        /* Wait for meta statistics from every slave. */
+        for (size_t i = 0; i < slave_cnt; ++i) {
+                MPI_Recv(&received, 15, MPI_UINT64_T, MPI_ANY_SOURCE, TAG_STATS,
+                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                s->flows += received.flows;
+                s->flows_tcp += received.flows_tcp;
+                s->flows_udp += received.flows_udp;
+                s->flows_icmp += received.flows_icmp;
+                s->flows_other += received.flows_other;
+
+                s->pkts += received.pkts;
+                s->pkts_tcp += received.pkts_tcp;
+                s->pkts_udp += received.pkts_udp;
+                s->pkts_icmp += received.pkts_icmp;
+                s->pkts_other += received.pkts_other;
+
+                s->bytes += received.bytes;
+                s->bytes_tcp += received.bytes_tcp;
+                s->bytes_udp += received.bytes_udp;
+                s->bytes_icmp += received.bytes_icmp;
+                s->bytes_other += received.bytes_other;
         }
 }
 
@@ -726,7 +755,8 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 {
         error_code_t primary_errno = E_OK;
         struct master_task_ctx mtc; //master task context
-        struct stats stats = {0}; //statistics form slaves
+        struct processed_summ processed_summ = {0}; //data statistics
+        struct metadata_summ metadata_summ = {0}; //metadata statistics
         double duration = -MPI_Wtime(); //start time measurement
 
 
@@ -787,11 +817,15 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 
 finalize:
         /* Receive statistics from every slave, print them. */
-        //TODO: when using list mode and record limit, stats are incorrect
-        stats_recv(&stats, mtc.slave_cnt);
+        //TODO: when using list mode and record limit, processed summary doesn't
+        //      match with actualy printed records
+        processed_summ_recv(&processed_summ, mtc.slave_cnt);
+        metadata_summ_recv(&metadata_summ, mtc.slave_cnt);
+
         duration += MPI_Wtime(); //end time measurement
 
-        print_summary(&stats, duration);
+        print_processed_summ(&processed_summ, duration);
+        print_metadata_summ(&metadata_summ);
 
 
         return primary_errno;
