@@ -89,14 +89,16 @@ struct slave_task_ctx {
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
         size_t slave_cnt; //slave count
-        struct processed_summ processed_summ; //read from regular records
-        struct metadata_summ metadata_summ; //read from metadata records
+        struct processed_summ processed_summ; //summary of processed records
+        struct metadata_summ metadata_summ; //summary of flow files metadata
 };
 
 /* Thread private. */
 struct thread_ctx {
         lnf_file_t *file; //LNF file
         lnf_rec_t *rec; //LNF record
+        struct processed_summ processed_summ; //summary of processed records
+        struct metadata_summ metadata_summ; //summary of flow files metadata
 };
 
 
@@ -112,22 +114,22 @@ static void wait_isend_cs(void *data, size_t data_size, MPI_Request *req)
 }
 
 
-static void data_summ_update(struct processed_summ *s, lnf_rec_t *rec)
+static void processed_summ_update(struct processed_summ *private, lnf_rec_t *rec)
 {
         uint64_t tmp;
 
         lnf_rec_fget(rec, LNF_FLD_AGGR_FLOWS, &tmp);
-        s->flows += tmp;
+        private->flows += tmp;
 
         lnf_rec_fget(rec, LNF_FLD_DPKTS, &tmp);
-        s->pkts += tmp;
+        private->pkts += tmp;
 
         lnf_rec_fget(rec, LNF_FLD_DOCTETS, &tmp);
-        s->bytes += tmp;
+        private->bytes += tmp;
 }
 
-static void data_summ_share(struct processed_summ *shared,
-                struct processed_summ *private)
+static void processed_summ_share(struct processed_summ *shared,
+                const struct processed_summ *private)
 {
         #pragma omp atomic
         shared->flows += private->flows;
@@ -139,112 +141,124 @@ static void data_summ_share(struct processed_summ *shared,
         shared->bytes += private->bytes;
 }
 
-static void data_summ_send(struct processed_summ *s)
+/* Read to the temporary variable, check validity and update private. */
+static void metadata_summ_update(struct metadata_summ *private, lnf_file_t *file)
 {
-        MPI_Send(s, 3, MPI_UINT64_T, ROOT_PROC, TAG_STATS, MPI_COMM_WORLD);
-}
+        struct metadata_summ tmp;
 
 
-static void metadata_summ_read(struct metadata_summ *shared, lnf_file_t *file)
-{
-        struct metadata_summ private;
+        /* Flows. */
+        assert(lnf_info(file, LNF_INFO_FLOWS, &tmp.flows,
+                                sizeof (tmp.flows)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_FLOWS_TCP, &tmp.flows_tcp,
+                                sizeof (tmp.flows_tcp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_FLOWS_UDP, &tmp.flows_udp,
+                                sizeof (tmp.flows_udp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_FLOWS_ICMP, &tmp.flows_icmp,
+                                sizeof (tmp.flows_icmp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_FLOWS_OTHER, &tmp.flows_other,
+                                sizeof (tmp.flows_other)) == LNF_OK);
 
-
-        /* Flows: read to local variable, check validity and update shared. */
-        assert(lnf_info(file, LNF_INFO_FLOWS, &private.flows,
-                                sizeof (private.flows)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_FLOWS_TCP, &private.flows_tcp,
-                                sizeof (private.flows_tcp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_FLOWS_UDP, &private.flows_udp,
-                                sizeof (private.flows_udp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_FLOWS_ICMP, &private.flows_icmp,
-                                sizeof (private.flows_icmp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_FLOWS_OTHER, &private.flows_other,
-                                sizeof (private.flows_other)) == LNF_OK);
-
-        if (private.flows != private.flows_tcp + private.flows_udp +
-                        private.flows_icmp + private.flows_other) {
+        if (tmp.flows != tmp.flows_tcp + tmp.flows_udp + tmp.flows_icmp +
+                        tmp.flows_other) {
                 print_warn(E_LNF, 0, "metadata flow count mismatch "
                                 "(total != TCP + UDP + ICMP + other)");
         }
 
-        #pragma omp atomic
-        shared->flows += private.flows;
-        #pragma omp atomic
-        shared->flows_tcp += private.flows_tcp;
-        #pragma omp atomic
-        shared->flows_udp += private.flows_udp;
-        #pragma omp atomic
-        shared->flows_icmp += private.flows_icmp;
-        #pragma omp atomic
-        shared->flows_other += private.flows_other;
+        private->flows += tmp.flows;
+        private->flows_tcp += tmp.flows_tcp;
+        private->flows_udp += tmp.flows_udp;
+        private->flows_icmp += tmp.flows_icmp;
+        private->flows_other += tmp.flows_other;
 
-        /* Packets: read to local variable, check validity and update shared. */
-        assert(lnf_info(file, LNF_INFO_PACKETS, &private.pkts,
-                                sizeof (private.pkts)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_PACKETS_TCP, &private.pkts_tcp,
-                                sizeof (private.pkts_tcp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_PACKETS_UDP, &private.pkts_udp,
-                                sizeof (private.pkts_udp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_PACKETS_ICMP, &private.pkts_icmp,
-                                sizeof (private.pkts_icmp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_PACKETS_OTHER, &private.pkts_other,
-                                sizeof (private.pkts_other)) == LNF_OK);
+        /* Packets. */
+        assert(lnf_info(file, LNF_INFO_PACKETS, &tmp.pkts,
+                                sizeof (tmp.pkts)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_PACKETS_TCP, &tmp.pkts_tcp,
+                                sizeof (tmp.pkts_tcp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_PACKETS_UDP, &tmp.pkts_udp,
+                                sizeof (tmp.pkts_udp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_PACKETS_ICMP, &tmp.pkts_icmp,
+                                sizeof (tmp.pkts_icmp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_PACKETS_OTHER, &tmp.pkts_other,
+                                sizeof (tmp.pkts_other)) == LNF_OK);
 
-        if (private.pkts != private.pkts_tcp + private.pkts_udp +
-                        private.pkts_icmp + private.pkts_other) {
+        if (tmp.pkts != tmp.pkts_tcp + tmp.pkts_udp + tmp.pkts_icmp +
+                        tmp.pkts_other) {
                 print_warn(E_LNF, 0, "metadata packet count mismatch "
                                 "(total != TCP + UDP + ICMP + other)");
         }
 
-        #pragma omp atomic
-        shared->pkts += private.pkts;
-        #pragma omp atomic
-        shared->pkts_tcp += private.pkts_tcp;
-        #pragma omp atomic
-        shared->pkts_udp += private.pkts_udp;
-        #pragma omp atomic
-        shared->pkts_icmp += private.pkts_icmp;
-        #pragma omp atomic
-        shared->pkts_other += private.pkts_other;
+        private->pkts += tmp.pkts;
+        private->pkts_tcp += tmp.pkts_tcp;
+        private->pkts_udp += tmp.pkts_udp;
+        private->pkts_icmp += tmp.pkts_icmp;
+        private->pkts_other += tmp.pkts_other;
 
-        /* Bytes: read to local variable, check validity and update shared. */
-        assert(lnf_info(file, LNF_INFO_BYTES, &private.bytes,
-                                sizeof (private.bytes)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_BYTES_TCP, &private.bytes_tcp,
-                                sizeof (private.bytes_tcp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_BYTES_UDP, &private.bytes_udp,
-                                sizeof (private.bytes_udp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_BYTES_ICMP, &private.bytes_icmp,
-                                sizeof (private.bytes_icmp)) == LNF_OK);
-        assert(lnf_info(file, LNF_INFO_BYTES_OTHER, &private.bytes_other,
-                                sizeof (private.bytes_other)) == LNF_OK);
+        /* Bytes. */
+        assert(lnf_info(file, LNF_INFO_BYTES, &tmp.bytes,
+                                sizeof (tmp.bytes)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_BYTES_TCP, &tmp.bytes_tcp,
+                                sizeof (tmp.bytes_tcp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_BYTES_UDP, &tmp.bytes_udp,
+                                sizeof (tmp.bytes_udp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_BYTES_ICMP, &tmp.bytes_icmp,
+                                sizeof (tmp.bytes_icmp)) == LNF_OK);
+        assert(lnf_info(file, LNF_INFO_BYTES_OTHER, &tmp.bytes_other,
+                                sizeof (tmp.bytes_other)) == LNF_OK);
 
-        if (private.bytes != private.bytes_tcp + private.bytes_udp +
-                        private.bytes_icmp + private.bytes_other) {
+        if (tmp.bytes != tmp.bytes_tcp + tmp.bytes_udp + tmp.bytes_icmp +
+                        tmp.bytes_other) {
                 print_warn(E_LNF, 0, "metadata bytes count mismatch "
                                 "(total != TCP + UDP + ICMP + other)");
         }
 
-        #pragma omp atomic
-        shared->bytes += private.bytes;
-        #pragma omp atomic
-        shared->bytes_tcp += private.bytes_tcp;
-        #pragma omp atomic
-        shared->bytes_udp += private.bytes_udp;
-        #pragma omp atomic
-        shared->bytes_icmp += private.bytes_icmp;
-        #pragma omp atomic
-        shared->bytes_other += private.bytes_other;
+        private->bytes += tmp.bytes;
+        private->bytes_tcp += tmp.bytes_tcp;
+        private->bytes_udp += tmp.bytes_udp;
+        private->bytes_icmp += tmp.bytes_icmp;
+        private->bytes_other += tmp.bytes_other;
 }
 
-static void metadata_summ_send(struct metadata_summ *s)
+static void metadata_summ_share(struct metadata_summ *shared,
+                const struct metadata_summ *private)
 {
-        MPI_Send(s, 15, MPI_UINT64_T, ROOT_PROC, TAG_STATS, MPI_COMM_WORLD);
+        #pragma omp atomic
+        shared->flows += private->flows;
+        #pragma omp atomic
+        shared->flows_tcp += private->flows_tcp;
+        #pragma omp atomic
+        shared->flows_udp += private->flows_udp;
+        #pragma omp atomic
+        shared->flows_icmp += private->flows_icmp;
+        #pragma omp atomic
+        shared->flows_other += private->flows_other;
+
+        #pragma omp atomic
+        shared->pkts += private->pkts;
+        #pragma omp atomic
+        shared->pkts_tcp += private->pkts_tcp;
+        #pragma omp atomic
+        shared->pkts_udp += private->pkts_udp;
+        #pragma omp atomic
+        shared->pkts_icmp += private->pkts_icmp;
+        #pragma omp atomic
+        shared->pkts_other += private->pkts_other;
+
+        #pragma omp atomic
+        shared->bytes += private->bytes;
+        #pragma omp atomic
+        shared->bytes_tcp += private->bytes_tcp;
+        #pragma omp atomic
+        shared->bytes_udp += private->bytes_udp;
+        #pragma omp atomic
+        shared->bytes_icmp += private->bytes_icmp;
+        #pragma omp atomic
+        shared->bytes_other += private->bytes_other;
 }
 
 static error_code_t task_send_file(struct slave_task_ctx *stc,
-                const struct thread_ctx *tc)
+                struct thread_ctx *tc)
 {
         int secondary_errno;
 
@@ -261,7 +275,6 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
         MPI_Request request = MPI_REQUEST_NULL;
         uint32_t rec_size = 0;
 
-        struct processed_summ processed_summ = {0};
         struct {
                 int id;
                 size_t size;
@@ -323,8 +336,8 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                         }
                 }
 
-                /* Increment private processed_summ counters. */
-                data_summ_update(&processed_summ, tc->rec);
+                /* Increment the private processed summary counters. */
+                processed_summ_update(&tc->processed_summ, tc->rec);
 
                 *(uint32_t *)(db + db_off) = rec_size;
                 db_off += sizeof (rec_size);
@@ -355,10 +368,6 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
-        /* Atomic increment of shared processed_summ by all threads. */
-        data_summ_share(&stc->processed_summ, &processed_summ);
-        metadata_summ_read(&stc->metadata_summ, tc->file);
-
         /* Buffers will be invalid after return, wait for send to complete. */
         #pragma omp critical (mpi)
         {
@@ -375,14 +384,13 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
 
 
 static error_code_t task_store_file(struct slave_task_ctx *stc,
-                const struct thread_ctx *tc)
+                struct thread_ctx *tc)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
 
         size_t file_rec_cntr = 0;
         size_t file_proc_rec_cntr = 0;
-        struct processed_summ processed_summ = {0};
 
         /*
          * Read all records from file. Hot path.
@@ -397,8 +405,9 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
                         continue;
                 }
                 file_proc_rec_cntr++;
-                /* Increment private processed_summ counters. */
-                data_summ_update(&processed_summ, tc->rec);
+
+                /* Increment the private processed summary counters. */
+                processed_summ_update(&tc->processed_summ, tc->rec);
 
                 secondary_errno = lnf_mem_write(stc->aggr_mem, tc->rec);
                 if (secondary_errno != LNF_OK) {
@@ -413,10 +422,6 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
         if (secondary_errno != LNF_EOF) {
                 print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
         }
-
-        /* Atomic increment of shared processed_summ by all threads. */
-        data_summ_share(&stc->processed_summ, &processed_summ);
-        metadata_summ_read(&stc->metadata_summ, tc->file);
 
         print_debug("<task_store_file> thread %d, read %zu, processed %zu",
                        omp_get_thread_num(), file_rec_cntr, file_proc_rec_cntr);
@@ -975,7 +980,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
-        struct thread_ctx tc;
+        struct thread_ctx tc = { 0 };
 
 
         /* Initialize LNF record for each thread only once. */
@@ -1005,6 +1010,9 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
                         continue;
                 }
 
+                /* Increment the private metadata summary counters. */
+                metadata_summ_update(&tc.metadata_summ, tc.file);
+
                 /* Process the file accordingly. */
                 if (stc->aggr_mem) {
                         primary_errno = task_store_file(stc, &tc);
@@ -1017,6 +1025,10 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
                 /* Report that another file has been processed. */
                 progress_report_next();
         } //don't wait for other threads and start merging memory immediately
+
+        /* Atomic addition of private summary counters into shared. */
+        processed_summ_share(&stc->processed_summ, &tc.processed_summ);
+        metadata_summ_share(&stc->metadata_summ, &tc.metadata_summ);
 
         /* Free LNF record for each thread. */
         lnf_rec_free(tc.rec);
@@ -1086,8 +1098,11 @@ finalize_task:
         /* Send terminator to master even on error. */
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
-        data_summ_send(&stc.processed_summ);
-        metadata_summ_send(&stc.metadata_summ);
+        /* Reduce statistics to the master. */
+        MPI_Reduce(&stc.processed_summ, NULL, 3, MPI_UINT64_T, MPI_SUM,
+                        ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Reduce(&stc.metadata_summ, NULL, 15, MPI_UINT64_T, MPI_SUM,
+                        ROOT_PROC, MPI_COMM_WORLD);
 
         f_array_free(&files);
         task_free(&stc);

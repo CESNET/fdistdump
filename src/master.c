@@ -579,51 +579,6 @@ free_db_mem:
 }
 
 
-static void processed_summ_recv(struct processed_summ *s, size_t slave_cnt)
-{
-        struct processed_summ received;
-
-        /* Wait for data statistics from every slave. */
-        for (size_t i = 0; i < slave_cnt; ++i) {
-                MPI_Recv(&received, 3, MPI_UINT64_T, MPI_ANY_SOURCE, TAG_STATS,
-                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                s->flows += received.flows;
-                s->pkts += received.pkts;
-                s->bytes += received.bytes;
-        }
-}
-
-static void metadata_summ_recv(struct metadata_summ *s, size_t slave_cnt)
-{
-        struct metadata_summ received;
-
-        /* Wait for meta statistics from every slave. */
-        for (size_t i = 0; i < slave_cnt; ++i) {
-                MPI_Recv(&received, 15, MPI_UINT64_T, MPI_ANY_SOURCE, TAG_STATS,
-                                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                s->flows += received.flows;
-                s->flows_tcp += received.flows_tcp;
-                s->flows_udp += received.flows_udp;
-                s->flows_icmp += received.flows_icmp;
-                s->flows_other += received.flows_other;
-
-                s->pkts += received.pkts;
-                s->pkts_tcp += received.pkts_tcp;
-                s->pkts_udp += received.pkts_udp;
-                s->pkts_icmp += received.pkts_icmp;
-                s->pkts_other += received.pkts_other;
-
-                s->bytes += received.bytes;
-                s->bytes_tcp += received.bytes_tcp;
-                s->bytes_udp += received.bytes_udp;
-                s->bytes_icmp += received.bytes_icmp;
-                s->bytes_other += received.bytes_other;
-        }
-}
-
-
 static error_code_t mode_list_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno;
@@ -755,7 +710,7 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 {
         error_code_t primary_errno = E_OK;
         struct master_task_ctx mtc; //master task context
-        struct processed_summ processed_summ = {0}; //data statistics
+        struct processed_summ processed_summ = {0}; //processed data statistics
         struct metadata_summ metadata_summ = {0}; //metadata statistics
         double duration = -MPI_Wtime(); //start time measurement
 
@@ -819,8 +774,12 @@ finalize:
         /* Receive statistics from every slave, print them. */
         //TODO: when using list mode and record limit, processed summary doesn't
         //      match with actualy printed records
-        processed_summ_recv(&processed_summ, mtc.slave_cnt);
-        metadata_summ_recv(&metadata_summ, mtc.slave_cnt);
+
+        /* Reduce statistics from each slave. */
+        MPI_Reduce(MPI_IN_PLACE, &processed_summ, 3, MPI_UINT64_T, MPI_SUM,
+                        ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Reduce(MPI_IN_PLACE, &metadata_summ, 15, MPI_UINT64_T, MPI_SUM,
+                        ROOT_PROC, MPI_COMM_WORLD);
 
         duration += MPI_Wtime(); //end time measurement
 
