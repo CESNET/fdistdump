@@ -5,12 +5,11 @@ Features:
          is X and the key value of Nth record is also X, it is unnecessary to
          read further records. Similar optimization is possible for descending
          sort.
+        -do not spawn more threads than there are files to process
+        -OpenMP reduction for summaries
 
 Bugfixes:
         -fix coverity bugs
-        -use dynamic allocation for the slave transmit buffers. On some
-         architectures, where stack size limit is low, current static memory
-         allocation may cause big trouble.
 
 Tests:
         -add tests for reading multiple input files at once to test

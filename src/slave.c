@@ -85,6 +85,8 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
+
+        uint8_t *buff[2]; //two chunks of memory for the data buffers
         char *path_str; //file/directory/profile(s) path string
         size_t proc_rec_cntr; //processed record counter
         bool rec_limit_reached; //true if rec_limit records read
@@ -97,6 +99,8 @@ struct slave_task_ctx {
 struct thread_ctx {
         lnf_file_t *file; //LNF file
         lnf_rec_t *rec; //LNF record
+
+        uint8_t *buff[2]; //two chunks of memory for the data buffers
         struct processed_summ processed_summ; //summary of processed records
         struct metadata_summ metadata_summ; //summary of flow files metadata
 };
@@ -257,6 +261,7 @@ static void metadata_summ_share(struct metadata_summ *shared,
         shared->bytes_other += private->bytes_other;
 }
 
+
 static error_code_t task_send_file(struct slave_task_ctx *stc,
                 struct thread_ctx *tc)
 {
@@ -266,11 +271,9 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
         size_t file_proc_rec_cntr = 0;
         size_t file_sent_bytes = 0;
 
-        uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
-        bool db_mem_idx = 0; //currently used data buffer index
-        uint8_t *db = db_mem[db_mem_idx]; //pointer to currently used data buff
-        size_t db_off = 0; //data buffer offset
-        size_t db_rec_cntr = 0; //number of records in current buffer
+        bool buff_idx = 0; //index to the currently used data buffer
+        size_t buff_off = 0; //current data buffer offset
+        size_t buff_rec_cntr = 0; //number of records in the current buffer
 
         MPI_Request request = MPI_REQUEST_NULL;
         uint32_t rec_size = 0;
@@ -308,25 +311,24 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 file_proc_rec_cntr++;
 
                 /* Is there enough space in the buffer for the next record? */
-                if (db_off + rec_size + sizeof (rec_size) > XCHG_BUFF_SIZE) {
+                if (buff_off + rec_size + sizeof (rec_size) > XCHG_BUFF_SIZE) {
                         /* Check record limit and break if exceeded. */
                         if (stc->rec_limit_reached) {
-                                db_rec_cntr = 0;
+                                buff_rec_cntr = 0;
                                 break; //record limit reached by another thread
                         }
 
-                        wait_isend_cs(db, db_off, &request);
-                        file_sent_bytes += db_off;
+                        wait_isend_cs(tc->buff[buff_idx], buff_off, &request);
+                        file_sent_bytes += buff_off;
 
                         /* Increment shared counter. */
                         #pragma omp atomic
-                        stc->proc_rec_cntr += db_rec_cntr;
+                        stc->proc_rec_cntr += buff_rec_cntr;
 
                         /* Clear buffer context variables. */
-                        db_off = 0;
-                        db_rec_cntr = 0;
-                        db_mem_idx = !db_mem_idx; //toggle data buffers
-                        db = db_mem[db_mem_idx];
+                        buff_off = 0;
+                        buff_rec_cntr = 0;
+                        buff_idx = !buff_idx; //toggle data buffers
 
                         /* Check record limit again and break if exceeded. */
                         if (stc->shared.rec_limit && stc->proc_rec_cntr >=
@@ -339,25 +341,26 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 /* Increment the private processed summary counters. */
                 processed_summ_update(&tc->processed_summ, tc->rec);
 
-                *(uint32_t *)(db + db_off) = rec_size;
-                db_off += sizeof (rec_size);
+                *(uint32_t *)(tc->buff[buff_idx] + buff_off) = rec_size;
+                buff_off += sizeof (rec_size);
 
                 /* Loop through the fields and fill the data buffer. */
                 for (size_t i = 0; i < fast_fields_cnt; ++i) {
-                        lnf_rec_fget(tc->rec, fast_fields[i].id, db + db_off);
-                        db_off += fast_fields[i].size;
+                        lnf_rec_fget(tc->rec, fast_fields[i].id,
+                                        tc->buff[buff_idx] + buff_off);
+                        buff_off += fast_fields[i].size;
                 }
 
-                db_rec_cntr++;
+                buff_rec_cntr++;
         }
 
         /* Send remaining records if data buffer is not empty. */
-        if (db_rec_cntr != 0) {
-                wait_isend_cs(db, db_off, &request);
-                file_sent_bytes += db_off;
+        if (buff_rec_cntr != 0) {
+                wait_isend_cs(tc->buff[buff_idx], buff_off, &request);
+                file_sent_bytes += buff_off;
 
                 #pragma omp atomic
-                stc->proc_rec_cntr += db_rec_cntr; //increment shared counter
+                stc->proc_rec_cntr += buff_rec_cntr; //increment shared counter
         }
 
         /* Either set record limit reached flag or check if EOF was reached. */
@@ -545,11 +548,9 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
         error_code_t primary_errno = E_OK;
         int secondary_errno;
 
-        uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
-        bool db_mem_idx = 0; //currently used data buffer index
-        uint8_t *db = db_mem[db_mem_idx]; //pointer to currently used data buff
-        size_t db_off = 0; //data buffer offset
-        size_t db_rec_cntr = 0; //number of records in current buffer
+        bool buff_idx = 0; //currently used data buffer index
+        size_t buff_off = 0; //data buffer offset
+        size_t buff_rec_cntr = 0; //number of records in current buffer
 
         uint32_t rec_size;
         size_t byte_cntr = 0;
@@ -566,34 +567,34 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
         while (cursor != NULL) {
                 /* Read if there is enough space. Save space for record size. */
                 secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, cursor,
-                                (char *)db + db_off + sizeof (rec_size),
+                                (char *)stc->buff[buff_idx] + buff_off + sizeof (rec_size),
                                 (int *)&rec_size,
-                                XCHG_BUFF_SIZE - db_off - sizeof (rec_size));
+                                XCHG_BUFF_SIZE - buff_off - sizeof (rec_size));
                 assert(secondary_errno != LNF_EOF);
 
                 /* Was there enough space in the buffer for the record? */
-                if (secondary_errno != LNF_ERR_NOMEM) {
-                        *(uint32_t *)(db + db_off) = rec_size; //write rec size
-                        db_off += sizeof (rec_size) + rec_size; //shift db off
+                if (secondary_errno != LNF_ERR_NOMEM) { //yes
+                        *(uint32_t *)(stc->buff[buff_idx] + buff_off) = rec_size;
+                        buff_off += sizeof (rec_size) + rec_size;
 
-                        db_rec_cntr++;
+                        buff_rec_cntr++;
                         rec_cntr++;
 
                         /* Shift cursor to next record. */
                         secondary_errno = lnf_mem_next_c(stc->aggr_mem,
                                         &cursor);
-                } else {
+                } else { //no
                         /* Send buffer. */
                         MPI_Wait(&request, MPI_STATUS_IGNORE);
-                        MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                        MPI_COMM_WORLD, &request);
-                        byte_cntr += db_off;
+                        MPI_Isend(stc->buff[buff_idx], buff_off, MPI_BYTE,
+                                        ROOT_PROC, TAG_DATA, MPI_COMM_WORLD,
+                                        &request);
+                        byte_cntr += buff_off;
 
                         /* Clear buffer context variables. */
-                        db_off = 0;
-                        db_rec_cntr = 0;
-                        db_mem_idx = !db_mem_idx; //toggle data buffers
-                        db = db_mem[db_mem_idx];
+                        buff_off = 0;
+                        buff_rec_cntr = 0;
+                        buff_idx = !buff_idx; //toggle data buffers
                 }
         }
         if (secondary_errno != LNF_EOF) {
@@ -604,11 +605,11 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
 
 
         /* Send remaining records if data buffer is not empty. */
-        if (db_rec_cntr != 0) {
+        if (buff_rec_cntr != 0) {
                 MPI_Wait(&request, MPI_STATUS_IGNORE);
-                MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD, &request);
-                byte_cntr += db_off;
+                MPI_Isend(stc->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC,
+                                TAG_DATA, MPI_COMM_WORLD, &request);
+                byte_cntr += buff_off;
         }
 
         /* Buffers will be invalid after return, wait for send to complete. */
@@ -625,11 +626,9 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         error_code_t primary_errno = E_OK;
         int secondary_errno;
 
-        uint8_t db_mem[2][XCHG_BUFF_SIZE]; //data buffer
-        bool db_mem_idx = 0; //currently used data buffer index
-        uint8_t *db = db_mem[db_mem_idx]; //pointer to currently used data buff
-        size_t db_off = 0; //data buffer offset
-        size_t db_rec_cntr = 0; //number of records in current buffer
+        bool buff_idx = 0; //currently used data buffer index
+        size_t buff_off = 0; //data buffer offset
+        size_t buff_rec_cntr = 0; //number of records in current buffer
 
         uint32_t rec_size;
         size_t byte_cntr = 0;
@@ -661,35 +660,35 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         while (rec_cntr < stc->shared.rec_limit && cursor != NULL) {
                 /* Read if there is enough space. Save space for record size. */
                 secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, cursor,
-                                (char *)db + db_off + sizeof (rec_size),
+                                (char *)stc->buff[buff_idx] + buff_off + sizeof (rec_size),
                                 (int *)&rec_size,
-                                XCHG_BUFF_SIZE - db_off - sizeof (rec_size));
+                                XCHG_BUFF_SIZE - buff_off - sizeof (rec_size));
                 assert(secondary_errno != LNF_EOF);
 
                 /* Was there enough space in the buffer for the record? */
-                if (secondary_errno != LNF_ERR_NOMEM) {
-                        *(uint32_t *)(db + db_off) = rec_size; //write rec size
-                        db_off += sizeof (rec_size) + rec_size; //shift db off
+                if (secondary_errno != LNF_ERR_NOMEM) { //yes
+                        *(uint32_t *)(stc->buff[buff_idx] + buff_off) = rec_size;
+                        buff_off += sizeof (rec_size) + rec_size;
 
-                        db_rec_cntr++;
+                        buff_rec_cntr++;
                         rec_cntr++;
 
                         /* Shift cursor to next record. */
                         nth_rec_cursor = cursor; //save for future usage
                         secondary_errno = lnf_mem_next_c(stc->aggr_mem,
                                         &cursor);
-                } else {
+                } else { //no
                         /* Send buffer. */
                         MPI_Wait(&request, MPI_STATUS_IGNORE);
-                        MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                        MPI_COMM_WORLD, &request);
-                        byte_cntr += db_off;
+                        MPI_Isend(stc->buff[buff_idx], buff_off, MPI_BYTE,
+                                        ROOT_PROC, TAG_DATA, MPI_COMM_WORLD,
+                                        &request);
+                        byte_cntr += buff_off;
 
                         /* Clear buffer context variables. */
-                        db_off = 0;
-                        db_rec_cntr = 0;
-                        db_mem_idx = !db_mem_idx; //toggle data buffers
-                        db = db_mem[db_mem_idx];
+                        buff_off = 0;
+                        buff_rec_cntr = 0;
+                        buff_idx = !buff_idx; //toggle data buffers
                 }
         }
         if (secondary_errno == LNF_EOF) {
@@ -764,17 +763,17 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
 
                 /* Read if there is enough space. Save space for record size. */
                 secondary_errno = lnf_mem_read_raw_c(stc->aggr_mem, cursor,
-                                (char *)db + db_off + sizeof (rec_size),
+                                (char *)stc->buff[buff_idx] + buff_off + sizeof (rec_size),
                                 (int *)&rec_size,
-                                XCHG_BUFF_SIZE - db_off - sizeof (rec_size));
+                                XCHG_BUFF_SIZE - buff_off - sizeof (rec_size));
                 assert(secondary_errno != LNF_EOF);
 
                 /* Was there enough space in the buffer for the record? */
                 if (secondary_errno != LNF_ERR_NOMEM) {
-                        *(uint32_t *)(db + db_off) = rec_size; //write rec size
-                        db_off += sizeof (rec_size) + rec_size; //shift db off
+                        *(uint32_t *)(stc->buff[buff_idx] + buff_off) = rec_size;
+                        buff_off += sizeof (rec_size) + rec_size;
 
-                        db_rec_cntr++;
+                        buff_rec_cntr++;
                         rec_cntr++;
 
                         /* Shift cursor to next record. */
@@ -783,15 +782,15 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                 } else {
                         /* Send buffer. */
                         MPI_Wait(&request, MPI_STATUS_IGNORE);
-                        MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                        MPI_COMM_WORLD, &request);
-                        byte_cntr += db_off;
+                        MPI_Isend(stc->buff[buff_idx], buff_off, MPI_BYTE,
+                                        ROOT_PROC, TAG_DATA, MPI_COMM_WORLD,
+                                        &request);
+                        byte_cntr += buff_off;
 
                         /* Clear buffer context variables. */
-                        db_off = 0;
-                        db_rec_cntr = 0;
-                        db_mem_idx = !db_mem_idx; //toggle data buffers
-                        db = db_mem[db_mem_idx];
+                        buff_off = 0;
+                        buff_rec_cntr = 0;
+                        buff_idx = !buff_idx; //toggle data buffers
                 }
         }
         if (secondary_errno != LNF_OK && secondary_errno != LNF_EOF) {
@@ -803,11 +802,11 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
 
 send_remaining:
         /* Send remaining records if data buffer is not empty. */
-        if (db_rec_cntr != 0) {
+        if (buff_rec_cntr != 0) {
                 MPI_Wait(&request, MPI_STATUS_IGNORE);
-                MPI_Isend(db, db_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                                MPI_COMM_WORLD, &request);
-                byte_cntr += db_off;
+                MPI_Isend(stc->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC,
+                                TAG_DATA, MPI_COMM_WORLD, &request);
+                byte_cntr += buff_off;
         }
 
 free_lnf_rec:
@@ -975,6 +974,13 @@ static void progress_report_next(void)
 }
 
 
+/*
+ * There are two data buffers for each thread. The first one filled and
+ * then passed to nonblocking MPI send function. In the meantime, the
+ * second one is filled. After both these operations are completed,
+ * buffers are switched and the whole process repeats until all data are
+ * sent.
+ */
 static error_code_t process_parallel(struct slave_task_ctx *stc,
                 const f_array_t *files)
 {
@@ -983,12 +989,31 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
         struct thread_ctx tc = { 0 };
 
 
-        /* Initialize LNF record for each thread only once. */
+        /* Initialize LNF record, only once for each thread. */
         secondary_errno = lnf_rec_init(&tc.rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
                 print_err(primary_errno, secondary_errno, "lnf_rec_init()");
                 goto merge_mem;
+        }
+
+        /*
+         * For master thread use already alocated buffers, for everybody else
+         * allocate two new data buffers for records storage.
+         */
+        #pragma omp master
+        {
+                tc.buff[0] = stc->buff[0];
+                tc.buff[1] = stc->buff[1];
+        }
+        if (tc.buff[0] != stc->buff[0]) {
+                tc.buff[0] = malloc(XCHG_BUFF_SIZE * sizeof (**tc.buff));
+                tc.buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (**tc.buff));
+                if (tc.buff[0] == NULL || tc.buff[1] == NULL) {
+                        primary_errno = E_MEM;
+                        print_err(E_MEM, 0, "malloc()");
+                        goto free_lnf_rec;
+                }
         }
 
         /* Parallel loop through all the files. */
@@ -1030,7 +1055,13 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
         processed_summ_share(&stc->processed_summ, &tc.processed_summ);
         metadata_summ_share(&stc->metadata_summ, &tc.metadata_summ);
 
-        /* Free LNF record for each thread. */
+        /* Free data buffers. */
+        if (tc.buff[0] != stc->buff[0]) {
+                free(tc.buff[1]);
+                free(tc.buff[0]);
+        }
+free_lnf_rec:
+        /* Free LNF record. */
         lnf_rec_free(tc.rec);
 
 merge_mem:
@@ -1055,25 +1086,33 @@ error_code_t slave(int world_size)
 
         stc.slave_cnt = world_size - 1; //all nodes without master
 
+        /* Allocate two data buffers for records storage. */
+        stc.buff[0] = malloc(XCHG_BUFF_SIZE * sizeof (**stc.buff));
+        stc.buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (**stc.buff));
+        if (stc.buff[0] == NULL || stc.buff[1] == NULL) {
+                primary_errno = E_MEM;
+                print_err(E_MEM, 0, "malloc()");
+                goto finalize_task;
+        }
 
-        //TODO: goto finalize_task will cause deadlock because of progress bar
+        //TODO: goto free_buffers will cause deadlock because of progress bar
         /* Wait for reception of task context from master. */
         primary_errno = task_receive_ctx(&stc);
         if (primary_errno != E_OK) {
-                goto finalize_task;
+                goto free_buffers;
         }
 
         /* Mode specific initialization. */
         primary_errno = task_init_mode(&stc);
         if (primary_errno != E_OK) {
-                goto finalize_task;
+                goto free_buffers;
         }
 
         /* Data source specific initialization. */
         primary_errno = f_array_fill(&files, stc.path_str,
                         stc.shared.time_begin, stc.shared.time_end);
         if (primary_errno != E_OK) {
-                goto finalize_task;
+                goto free_buffers;
         }
 
         /* Report number of files to be processed. */
@@ -1085,7 +1124,7 @@ error_code_t slave(int world_size)
                 primary_errno = process_parallel(&stc, &files);
         } //impicit barrier
         if (primary_errno != E_OK) {
-                goto finalize_task;
+                goto free_buffers;
         }
 
         /*
@@ -1093,6 +1132,11 @@ error_code_t slave(int world_size)
          * and we need to process and send them to master.
          */
         primary_errno = task_postprocess(&stc);
+
+
+free_buffers:
+        free(stc.buff[1]);
+        free(stc.buff[0]);
 
 finalize_task:
         /* Send terminator to master even on error. */

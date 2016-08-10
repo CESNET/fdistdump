@@ -434,9 +434,9 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
 {
         error_code_t primary_errno = E_OK;
 
-        uint8_t *db_mem; //big chunk of memory
-        uint8_t *db[slave_cnt][2]; //pointers to db_mem
-        bool db_idx[slave_cnt]; //index to currently used data_buff
+        uint8_t *buff_mem; //big chunk of memory for all data buffers
+        uint8_t *buff[slave_cnt][2]; //pointers to the buff_mem
+        bool buff_idx[slave_cnt]; //indexes to the currently used data buffers
 
         MPI_Request requests[slave_cnt + 1]; //plus one for progress
         MPI_Status status;
@@ -446,9 +446,9 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
         bool limit_exceeded = false;
 
 
-        /* Allocate two receive buffers for each slave as continuous memory. */
-        db_mem = malloc(2 * XCHG_BUFF_SIZE * slave_cnt * sizeof (*db_mem));
-        if (db_mem == NULL) {
+        /* Allocate two receive buffers for each slave as a continuous memory.*/
+        buff_mem = malloc(2 * XCHG_BUFF_SIZE * slave_cnt * sizeof (*buff_mem));
+        if (buff_mem == NULL) {
                 secondary_errno = 0;
                 print_err(E_MEM, secondary_errno, "malloc()");
                 return E_MEM;
@@ -459,33 +459,33 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
          * nonblocking MPI receive function, the second one is processed at the
          * same time. After both these operations are completed, buffers are
          * switched. Buffer switching (toggling) is independent for each slave,
-         * that's why array db_idx[slave_cnt] is needed.
-         * db_mem is partitioned in db in the following manner:
+         * that's why array buff_idx[slave_cnt] is needed.
+         * buff_mem is partitioned in buff in the following manner:
          *
          * <--------- XCHG_BUFF_SIZE -------> <-------- XCHG_BUFF_SIZE -------->
          * ---------------------------------------------------------------------
-         * |            db[0][0]             |             db[0][1]            |
-         * ---------------------------------------------------------------------
-         * |            db[1][0]             |             db[1][1]            |
+         * |           buff[0][0]            |            buff[0][1]           |
+         * --------------------------------------------------------------------
+         * |           buff[1][0]            |            buff[1][1]           |
          * ---------------------------------------------------------------------
          * .                                                                   .
          * .                                                                   .
          * .                                                                   .
          * ---------------------------------------------------------------------
-         * |      db[slave_cnt - 1][0]       |      db[slave_cnt - 1][1]       |
+         * |     buff[slave_cnt - 1][0]      |     buff[slave_cnt - 1][1]      |
          * ---------------------------------------------------------------------
          */
         for (size_t i = 0; i < slave_cnt; ++i) {
                 requests[i] = MPI_REQUEST_NULL;
 
-                db[i][0] = db_mem + (i * 2 * XCHG_BUFF_SIZE);
-                db[i][1] = db[i][0] + XCHG_BUFF_SIZE;
+                buff[i][0] = buff_mem + (i * 2 * XCHG_BUFF_SIZE);
+                buff[i][1] = buff[i][0] + XCHG_BUFF_SIZE;
         }
-        memset(db_idx, 0, slave_cnt * sizeof (db_idx[0]));
+        memset(buff_idx, 0, slave_cnt * sizeof (buff_idx[0]));
 
         /* Start first individual nonblocking data receive from every slave. */
         for (size_t i = 0; i < slave_cnt; ++i) {
-                uint8_t *free_buff = db[i][db_idx[i]]; //shortcut
+                uint8_t *free_buff = buff[i][buff_idx[i]]; //shortcut
 
                 MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1, TAG_DATA,
                                 MPI_COMM_WORLD, &requests[i]);
@@ -534,12 +534,12 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
                 }
                 byte_cntr += msg_size;
 
-                rec_ptr = db[slave_idx][db_idx[slave_idx]]; //first record
+                rec_ptr = buff[slave_idx][buff_idx[slave_idx]]; //first record
                 msg_end = rec_ptr + msg_size; //end of the last record
-                db_idx[slave_idx] = !db_idx[slave_idx]; //toggle buffers
+                buff_idx[slave_idx] = !buff_idx[slave_idx]; //toggle buffers
 
                 /* Start receiving next message into free buffer. */
-                MPI_Irecv(db[slave_idx][db_idx[slave_idx]], XCHG_BUFF_SIZE,
+                MPI_Irecv(buff[slave_idx][buff_idx[slave_idx]], XCHG_BUFF_SIZE,
                                 MPI_BYTE, status.MPI_SOURCE, TAG_DATA,
                                 MPI_COMM_WORLD, &requests[slave_idx]);
 
@@ -571,7 +571,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
         }
 
 free_db_mem:
-        free(db_mem);
+        free(buff_mem);
 
         print_debug("<irecv_loop> processed %zu records, received %zu B",
                         rec_cntr, byte_cntr);
