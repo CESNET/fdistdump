@@ -1,15 +1,17 @@
+Bugfixes:
+        -fix coverity bugs
+
 Features:
         -try and test new libnf versions (> 1.16), check and reflect changes
+
+Optimizations:
         -optimization for ascending sort, there is possibility to vastly reduce
          number of read/transfered records. If the key value of first records
          is X and the key value of Nth record is also X, it is unnecessary to
          read further records. Similar optimization is possible for descending
          sort.
         -do not spawn more threads than there are files to process
-        -OpenMP reduction for summaries
-
-Bugfixes:
-        -fix coverity bugs
+        -OpenMP reduction for summaries (needs OpenMP 4.0, GCC 4.9)
 
 Tests:
         -add tests for reading multiple input files at once to test
@@ -17,10 +19,10 @@ Tests:
         -add tests for reading single/multiple very large files to test
          buffer switching
         -add tests for reading nonexistent/invalid/empty files in all modes.
-         There is possibility of deadlock.
+         There is a possibility of deadlock.
 
 Documentation:
-        -add info about path preprocessor
+        -clarify repeating options
 
 Others:
         -create and use more MPI tags
