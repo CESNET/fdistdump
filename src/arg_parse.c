@@ -59,6 +59,19 @@
 #include <libnf.h>
 
 
+#define STAT_DELIM "/" //statistic/order
+#define TIME_RANGE_DELIM "#" //begin#end
+#define SORT_DELIM "#" //flows#asc
+#define TIME_DELIM " \t\n\v\f\r" //whitespace
+#define FIELDS_DELIM "," //LNF fields delimiter
+
+#define DEFAULT_LIST_FIELDS "first,pkts,bytes,srcip,dstip,srcport,dstport,proto"
+#define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
+#define DEFAULT_AGGR_FIELDS "duration,flows,pkts,bytes,bps,pps,bpp"
+#define DEFAULT_STAT_SORT_KEY "flows"
+#define DEFAULT_STAT_REC_LIMIT 10
+
+
 /* Global variables. */
 static const char *usage_string =
 "Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
@@ -103,10 +116,6 @@ static const char *help_string =
 "            Set IP protocol output conversion format.\n"
 "     --output-duration-conv=duration_conversion\n"
 "            Set duration conversion format.\n"
-"     --processed-summary=yes|no|only\n"
-"            Print/don't print/print only processed data summary.\n"
-"     --metadata-summary=yes|no|only\n"
-"            Print/don't print/print only metadata summary.\n"
 "     --fields=field[,...]\n"
 "            Set the list of printed fields.\n"
 "     --progress-bar-type=progress_bar_type\n"
@@ -130,6 +139,8 @@ extern int secondary_errno;
 enum { //command line options, have to start above ASCII
         OPT_NO_FAST_TOPN = 256, //disable fast top-N algorithm
 
+        OPT_OUTPUT_ITEMS, //output items (records, processed records summary,
+                          //metadata summary)
         OPT_OUTPUT_FORMAT, //output (print) format
         OPT_OUTPUT_TS_CONV, //output timestamp conversion
         OPT_OUTPUT_TS_LOCALTIME, //output timestamp in localtime
@@ -138,8 +149,6 @@ enum { //command line options, have to start above ASCII
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
         OPT_OUTPUT_DURATION_CONV, //output IP protocol conversion
-        OPT_PROCESSED_SUMM, //processed data summary
-        OPT_METADATA_SUMM, //metadata summary
 
         OPT_FIELDS, //specification of listed fields
         OPT_PROGRESS_BAR_TYPE, //type of the progress bar
@@ -541,6 +550,7 @@ static error_code_t add_fields_from_str(struct field_info *fields,
         char *token;
         char *saveptr = NULL;
 
+
         for (token = strtok_r(fields_str, FIELDS_DELIM, &saveptr); //first token
                         token != NULL;
                         token = strtok_r(NULL, FIELDS_DELIM, &saveptr)) //next
@@ -798,6 +808,39 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 }
 
 
+static error_code_t set_output_items(struct output_params *op, char *items_str)
+{
+        char *token;
+        char *saveptr = NULL;
+
+
+        op->print_records = OUTPUT_ITEM_NO;
+        op->print_processed_summ = OUTPUT_ITEM_NO;
+        op->print_metadata_summ = OUTPUT_ITEM_NO;
+
+        for (token = strtok_r(items_str, FIELDS_DELIM, &saveptr); //first token
+                        token != NULL;
+                        token = strtok_r(NULL, FIELDS_DELIM, &saveptr)) //next
+        {
+                if (strcmp(token, "records") == 0 ||
+                                strcmp(token, "r") == 0) {
+                        op->print_records = OUTPUT_ITEM_YES;
+                } else if (strcmp(token, "processed-records-summary") == 0 ||
+                                strcmp(token, "p") == 0) {
+                        op->print_processed_summ = OUTPUT_ITEM_YES;
+                } else if (strcmp(token, "metadata-summary") == 0 ||
+                                strcmp(token, "m") == 0) {
+                        op->print_metadata_summ = OUTPUT_ITEM_YES;
+                } else {
+                        print_err(E_ARG, 0, "unknown output item \"%s\"", token);
+                        return E_ARG;
+                }
+        }
+
+
+        return E_OK;
+}
+
 static error_code_t set_output_format(struct output_params *op,
                 char *format_str)
 {
@@ -909,23 +952,6 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         return E_OK;
 }
 
-static error_code_t set_output_summ(output_summ_t *os, char *summ_str)
-{
-        if (strcmp(summ_str, "yes") == 0) {
-                *os = OUTPUT_SUMM_YES;
-        } else if (strcmp(summ_str, "no") == 0) {
-                *os = OUTPUT_SUMM_NO;
-        } else if (strcmp(summ_str, "only") == 0) {
-                *os = OUTPUT_SUMM_ONLY;
-        } else {
-                print_err(E_ARG, 0, "invalid summary parameter \"%s\"",
-                                summ_str);
-                return E_ARG;
-        }
-
-        return E_OK;
-}
-
 static error_code_t set_progress_bar_type(progress_bar_type_t *type,
                 const char *progress_bar_type_str)
 {
@@ -969,6 +995,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
 
+                {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
                 {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
                 {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
                 {"output-ts-localtime", no_argument, NULL,
@@ -984,10 +1011,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 {"output-duration-conv", required_argument, NULL,
                         OPT_OUTPUT_DURATION_CONV},
 
-                {"processed-summary", required_argument, NULL,
-                        OPT_PROCESSED_SUMM},
-                {"metadata-summary", required_argument, NULL,
-                        OPT_METADATA_SUMM},
                 {"fields", required_argument, NULL, OPT_FIELDS},
                 {"progress-bar-type", required_argument, NULL,
                         OPT_PROGRESS_BAR_TYPE},
@@ -1055,6 +1078,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         break;
 
 
+                case OPT_OUTPUT_ITEMS:
+                        primary_errno = set_output_items(&args->output_params,
+                                        optarg);
+                        break;
+
                 case OPT_OUTPUT_FORMAT:
                         primary_errno = set_output_format(&args->output_params,
                                         optarg);
@@ -1094,18 +1122,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                         &args->output_params, optarg);
                         break;
 
-
-                case OPT_PROCESSED_SUMM:
-                        primary_errno = set_output_summ(
-                                        &args->output_params.processed_summ,
-                                        optarg);
-                        break;
-
-                case OPT_METADATA_SUMM:
-                        primary_errno = set_output_summ(
-                                        &args->output_params.metadata_summ,
-                                        optarg);
-                        break;
 
                 case OPT_FIELDS:
                         primary_errno = add_fields_from_str(args->fields,
@@ -1249,6 +1265,16 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
         switch (args->output_params.format) {
         case OUTPUT_FORMAT_PRETTY:
+                if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_records = OUTPUT_ITEM_YES;
+                }
+                if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_processed_summ = OUTPUT_ITEM_YES;
+                }
+                if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
+                }
+
                 if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
                         args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
                         args->output_params.ts_conv_str = "%F %T";
@@ -1283,15 +1309,19 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_DURATION_CONV_STR;
                 }
 
-                if (args->output_params.processed_summ == OUTPUT_SUMM_UNSET) {
-                        args->output_params.processed_summ = OUTPUT_SUMM_YES;
-                }
-                if (args->output_params.metadata_summ == OUTPUT_SUMM_UNSET) {
-                        args->output_params.metadata_summ = OUTPUT_SUMM_NO;
-                }
                 break;
 
         case OUTPUT_FORMAT_CSV:
+                if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_records = OUTPUT_ITEM_YES;
+                }
+                if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_processed_summ = OUTPUT_ITEM_NO;
+                }
+                if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
+                }
+
                 if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
                         args->output_params.ts_conv = OUTPUT_TS_CONV_NONE;
                 }
@@ -1324,12 +1354,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_DURATION_CONV_NONE;
                 }
 
-                if (args->output_params.processed_summ == OUTPUT_SUMM_UNSET) {
-                        args->output_params.processed_summ = OUTPUT_SUMM_NO;
-                }
-                if (args->output_params.metadata_summ == OUTPUT_SUMM_UNSET) {
-                        args->output_params.metadata_summ = OUTPUT_SUMM_NO;
-                }
                 break;
         default:
                 assert(!"unkwnown output parameters format");
@@ -1388,6 +1412,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         printf("------------------------------------------------------\n\n");
         }
 #endif //DEBUG
+
 
         return E_OK;
 }

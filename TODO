@@ -10,7 +10,6 @@ Optimizations:
          is X and the key value of Nth record is also X, it is unnecessary to
          read further records. Similar optimization is possible for descending
          sort.
-        -do not spawn more threads than there are files to process
         -OpenMP reduction for summaries (needs OpenMP 4.0, GCC 4.9)
 
 Tests:
@@ -26,3 +25,5 @@ Documentation:
 
 Others:
         -create and use more MPI tags
+        -parse command-line arguments on slaves and remove MODE_PASS
+        -runtime debugging output

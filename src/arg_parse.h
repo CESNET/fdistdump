@@ -52,18 +52,6 @@
 #include <stdbool.h>
 
 
-#define STAT_DELIM "/" //statistic/order
-#define TIME_RANGE_DELIM "#" //begin#end
-#define SORT_DELIM "#" //flows#asc
-#define TIME_DELIM " \t\n\v\f\r" //whitespace
-
-#define DEFAULT_LIST_FIELDS "first,pkts,bytes,srcip,dstip,srcport,dstport,proto"
-#define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
-#define DEFAULT_AGGR_FIELDS "duration,flows,pkts,bytes,bps,pps,bpp"
-#define DEFAULT_STAT_SORT_KEY "flows"
-#define DEFAULT_STAT_REC_LIMIT 10
-
-
 //TODO: include shared_task_ctx
 struct cmdline_args {
         working_mode_t working_mode; //working mode (records, aggregation, topN)

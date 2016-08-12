@@ -210,16 +210,14 @@ static void progress_bar_print(void)
         /* Diverge for each progress bar type. */
         switch (pbc->type) {
         case PROGRESS_BAR_TOTAL:
-                fprintf(pbc->out_stream, "[reading files] ");
-                fprintf(pbc->out_stream, "total: %zu/%zu (%.0f %%)",
+                fprintf(pbc->out_stream, "[reading files] %zu/%zu (%.0f %%)",
                                 pbc->files_cur, pbc->files_sum,
                                 total_percentage);
                 break;
 
         case PROGRESS_BAR_PERSLAVE:
-                fprintf(pbc->out_stream, "[reading files] ");
-                fprintf(pbc->out_stream, "total: %zu/%zu (%.0f %%)",
-                                pbc->files_cur, pbc->files_sum,
+                fprintf(pbc->out_stream, "[reading files] total: %zu/%zu "
+                                "(%.0f %%)", pbc->files_cur, pbc->files_sum,
                                 total_percentage);
 
                 for (size_t i = 0; i < pbc->slave_cnt; ++i) {
@@ -747,8 +745,9 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         /* Send, receive, process. */
         switch (mtc.shared.working_mode) {
         case MODE_PASS:
-                //only termination message will be received from
-                //each slave
+                goto finalize;
+                break;
+
         case MODE_LIST:
                 primary_errno = mode_list_main(&mtc);
                 break;
@@ -770,7 +769,6 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                 progress_bar_finish();
         }
 
-finalize:
         /* Receive statistics from every slave, print them. */
         //TODO: when using list mode and record limit, processed summary doesn't
         //      match with actualy printed records
@@ -786,6 +784,6 @@ finalize:
         print_processed_summ(&processed_summ, duration);
         print_metadata_summ(&metadata_summ);
 
-
+finalize:
         return primary_errno;
 }

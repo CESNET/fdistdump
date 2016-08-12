@@ -53,6 +53,12 @@
 
 
 typedef enum {
+        OUTPUT_ITEM_UNSET,
+        OUTPUT_ITEM_YES,
+        OUTPUT_ITEM_NO,
+} output_item_t;
+
+typedef enum {
         OUTPUT_FORMAT_UNSET,
         OUTPUT_FORMAT_PRETTY,
         OUTPUT_FORMAT_CSV,
@@ -95,15 +101,12 @@ typedef enum {
         OUTPUT_DURATION_CONV_STR,
 } output_duration_conv_t;
 
-typedef enum {
-        OUTPUT_SUMM_UNSET,
-        OUTPUT_SUMM_YES,
-        OUTPUT_SUMM_NO,
-        OUTPUT_SUMM_ONLY,
-} output_summ_t;
-
 
 struct output_params {
+        output_item_t print_records;
+        output_item_t print_processed_summ;
+        output_item_t print_metadata_summ;
+
         output_format_t format;
 
         output_ts_conv_t ts_conv;
@@ -115,9 +118,6 @@ struct output_params {
         output_ip_addr_conv_t ip_addr_conv;
         output_ip_proto_conv_t ip_proto_conv;
         output_duration_conv_t duration_conv;
-
-        output_summ_t processed_summ;
-        output_summ_t metadata_summ;
 };
 
 void output_setup(struct output_params op, const struct field_info *fi);

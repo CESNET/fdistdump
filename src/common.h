@@ -56,15 +56,10 @@
 #include <libnf.h>
 
 #define ROOT_PROC 0 //MPI root processor number
-
 #define MAX_STR_LEN 1024 //maximum length of a general string
-
 #define XCHG_BUFF_SIZE (1024 * 1024) //1 KiB
 
-#define FIELDS_DELIM "," //LNF fields delimiter
-#define MAX_LNF_FIELDS (LNF_FLD_TERM_ + 1) //currently 256
-
-//TODO: move to configuration file and as parameter options
+//TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
 #define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
 #define FLOW_FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"

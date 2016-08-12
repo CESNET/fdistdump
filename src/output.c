@@ -808,6 +808,11 @@ void print_rec(const uint8_t *data)
         static bool first_rec = true;
         static size_t col_width[LNF_FLD_TERM_];
 
+
+        if (output_params.print_records == OUTPUT_ITEM_NO) {
+                return;
+        }
+
         if (first_rec) {
                 for (size_t i = 0; i < fields_cnt; ++i) {
                         const char *header_str = field_get_name(fields[i].id);
@@ -850,6 +855,10 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         size_t fld_max_size = 0; //maximum data size length in bytes
         size_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
 
+
+        if (output_params.print_records == OUTPUT_ITEM_NO) {
+                return E_OK;
+        }
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
@@ -933,49 +942,42 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 
 void print_processed_summ(const struct processed_summ *s, double duration)
 {
-        int header_len;
-        const double flows_per_sec = s->flows / duration;
+        if (output_params.print_processed_summ == OUTPUT_ITEM_YES) {
+                const double flows_per_sec = s->flows / duration;
 
 
-        if (output_params.processed_summ != OUTPUT_SUMM_YES) {
-                return;
+                printf("\nprocessed records summary:\n");
+
+                printf("\t%s flows, ", volume_to_str(&s->flows));
+                printf("%s packets, ", volume_to_str(&s->pkts));
+                printf("%s bytes\n", volume_to_str(&s->bytes));
+
+                printf("\t%f seconds, %s flows/second\n", duration,
+                                double_volume_to_str(&flows_per_sec));
         }
-
-        putchar('\n');
-        header_len = printf("processed data summary: ");
-        assert(header_len >= 0);
-
-        printf("%s flows, ", volume_to_str(&s->flows));
-        printf("%s packets, ", volume_to_str(&s->pkts));
-        printf("%s bytes\n", volume_to_str(&s->bytes));
-
-        printf("%*s%f seconds, %s flows/second\n", header_len, "", duration,
-                        double_volume_to_str(&flows_per_sec));
 }
 
 void print_metadata_summ(const struct metadata_summ *s)
 {
-        if (output_params.metadata_summ != OUTPUT_SUMM_YES) {
-                return;
+        if (output_params.print_metadata_summ == OUTPUT_ITEM_YES) {
+                printf("\nmetadata summary:\n");
+
+                printf("\tflows total:   %s\n", volume_to_str(&s->flows));
+                printf("\tflows TCP:     %s\n", volume_to_str(&s->flows_tcp));
+                printf("\tflows UDP:     %s\n", volume_to_str(&s->flows_udp));
+                printf("\tflows ICMP:    %s\n", volume_to_str(&s->flows_icmp));
+                printf("\tflows other:   %s\n", volume_to_str(&s->flows_other));
+
+                printf("\tpackets total: %s\n", volume_to_str(&s->pkts));
+                printf("\tpackets TCP:   %s\n", volume_to_str(&s->pkts_tcp));
+                printf("\tpackets UDP:   %s\n", volume_to_str(&s->pkts_udp));
+                printf("\tpackets ICMP:  %s\n", volume_to_str(&s->pkts_icmp));
+                printf("\tpackets other: %s\n", volume_to_str(&s->pkts_other));
+
+                printf("\tbytes total:   %s\n", volume_to_str(&s->bytes));
+                printf("\tbytes TCP:     %s\n", volume_to_str(&s->bytes_tcp));
+                printf("\tbytes UDP:     %s\n", volume_to_str(&s->bytes_udp));
+                printf("\tbytes ICMP:    %s\n", volume_to_str(&s->bytes_icmp));
+                printf("\tbytes other:   %s\n", volume_to_str(&s->bytes_other));
         }
-
-        printf("\nmetadata summary:\n");
-
-        printf("\t flows total:   %s\n", volume_to_str(&s->flows));
-        printf("\t flows TCP:     %s\n", volume_to_str(&s->flows_tcp));
-        printf("\t flows UDP:     %s\n", volume_to_str(&s->flows_udp));
-        printf("\t flows ICMP:    %s\n", volume_to_str(&s->flows_icmp));
-        printf("\t flows other:   %s\n", volume_to_str(&s->flows_other));
-
-        printf("\t packets total: %s\n", volume_to_str(&s->pkts));
-        printf("\t packets TCP:   %s\n", volume_to_str(&s->pkts_tcp));
-        printf("\t packets UDP:   %s\n", volume_to_str(&s->pkts_udp));
-        printf("\t packets ICMP:  %s\n", volume_to_str(&s->pkts_icmp));
-        printf("\t packets other: %s\n", volume_to_str(&s->pkts_other));
-
-        printf("\t bytes total:   %s\n", volume_to_str(&s->bytes));
-        printf("\t bytes TCP:     %s\n", volume_to_str(&s->bytes_tcp));
-        printf("\t bytes UDP:     %s\n", volume_to_str(&s->bytes_udp));
-        printf("\t bytes ICMP:    %s\n", volume_to_str(&s->bytes_icmp));
-        printf("\t bytes other:   %s\n", volume_to_str(&s->bytes_other));
 }

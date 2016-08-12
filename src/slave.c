@@ -313,6 +313,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 /* Is there enough space in the buffer for the next record? */
                 if (buff_off + rec_size + sizeof (rec_size) > XCHG_BUFF_SIZE) {
                         /* Check record limit and break if exceeded. */
+                        #pragma omp flush
                         if (stc->rec_limit_reached) {
                                 buff_rec_cntr = 0;
                                 break; //record limit reached by another thread
@@ -334,6 +335,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                         if (stc->shared.rec_limit && stc->proc_rec_cntr >=
                                         stc->shared.rec_limit) {
                                 stc->rec_limit_reached = true;
+                                #pragma omp flush
                                 break; //record limit reached by this thread
                         }
                 }
@@ -367,6 +369,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
         if (stc->shared.rec_limit && stc->proc_rec_cntr >=
                         stc->shared.rec_limit) {
                 stc->rec_limit_reached = true;
+                #pragma omp flush
         } else if (secondary_errno != LNF_EOF) {
                 print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
         }
@@ -922,12 +925,15 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
 
         switch (stc->shared.working_mode) {
         case MODE_LIST:
-                break; //all records already sent while reading
+                /* All records already sent during reading, send terminator. */
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
+                break;
 
         case MODE_SORT:
                 if (stc->shared.rec_limit != 0) {
                         primary_errno = isend_loop(stc);
                 } //else all records already sent while reading
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
                 break;
 
@@ -942,8 +948,12 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
                 } else {
                         primary_errno = isend_loop(stc);
                 }
+                MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
                 break;
+
+        case MODE_PASS:
+                assert(!"invalid working mode");
 
         default:
                 assert(!"unknown working mode");
@@ -1038,11 +1048,34 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
                 /* Increment the private metadata summary counters. */
                 metadata_summ_update(&tc.metadata_summ, tc.file);
 
-                /* Process the file accordingly. */
-                if (stc->aggr_mem) {
+                /* Process the file according to the working mode. */
+                switch (stc->shared.working_mode) {
+                case MODE_LIST:
+                        #pragma omp flush
+                        if (!stc->rec_limit_reached) {
+                                primary_errno = task_send_file(stc, &tc);
+                        }
+                        break;
+
+                case MODE_SORT:
+                        if (stc->shared.rec_limit == 0) {
+                                /* Local sort would be useless. */
+                                primary_errno = task_send_file(stc, &tc);
+                        } else {
+                                /* Perform local sort first. */
+                                primary_errno = task_store_file(stc, &tc);
+                        }
+                        break;
+
+                case MODE_AGGR:
                         primary_errno = task_store_file(stc, &tc);
-                } else if (!stc->rec_limit_reached) {
-                        primary_errno = task_send_file(stc, &tc);
+                        break;
+
+                case MODE_PASS:
+                        assert(!"invalid working mode");
+
+                default:
+                        assert(!"unknown working mode");
                 }
 
                 lnf_close(tc.file);
@@ -1118,6 +1151,10 @@ error_code_t slave(int world_size)
         /* Report number of files to be processed. */
         progress_report_init(files.f_cnt);
 
+        /* Spawn at most files count threads. */
+        if (files.f_cnt < (size_t)omp_get_max_threads()) {
+                omp_set_num_threads(files.f_cnt);
+        }
 
         #pragma omp parallel reduction(max:primary_errno)
         {
@@ -1133,21 +1170,17 @@ error_code_t slave(int world_size)
          */
         primary_errno = task_postprocess(&stc);
 
-
-free_buffers:
-        free(stc.buff[1]);
-        free(stc.buff[0]);
-
-finalize_task:
-        /* Send terminator to master even on error. */
-        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
-
         /* Reduce statistics to the master. */
         MPI_Reduce(&stc.processed_summ, NULL, 3, MPI_UINT64_T, MPI_SUM,
                         ROOT_PROC, MPI_COMM_WORLD);
         MPI_Reduce(&stc.metadata_summ, NULL, 15, MPI_UINT64_T, MPI_SUM,
                         ROOT_PROC, MPI_COMM_WORLD);
 
+free_buffers:
+        free(stc.buff[1]);
+        free(stc.buff[0]);
+
+finalize_task:
         f_array_free(&files);
         task_free(&stc);
 
