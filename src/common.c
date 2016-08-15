@@ -157,6 +157,10 @@ char * working_mode_to_str(working_mode_t working_mode)
                 snprintf(msg, MAX_STR_LEN, "aggregate records");
                 break;
 
+        case MODE_META:
+                snprintf(msg, MAX_STR_LEN, "metadata only");
+                break;
+
         case MODE_PASS:
                 snprintf(msg, MAX_STR_LEN, "pass");
                 break;

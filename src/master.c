@@ -799,6 +799,7 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         print_processed_summ(&processed_summ, duration);
         print_metadata_summ(&metadata_summ);
 
+
 finalize:
         return primary_errno;
 }

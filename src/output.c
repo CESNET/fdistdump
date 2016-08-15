@@ -71,6 +71,7 @@ static struct {
         size_t size;
 } fields[LNF_FLD_TERM_]; //fields array compressed for faster access
 static size_t fields_cnt = 0; //number of fields present in fields array
+static bool first_item = true; //first item will not print '\n'
 
 static const char *ip_proto_str_table[] = {
         [0] = "HOPOPT",
@@ -809,11 +810,13 @@ void print_rec(const uint8_t *data)
         static size_t col_width[LNF_FLD_TERM_];
 
 
-        if (output_params.print_records == OUTPUT_ITEM_NO) {
+        if (output_params.print_records != OUTPUT_ITEM_YES) {
                 return;
         }
 
         if (first_rec) {
+                first_item = first_item ? false : (putchar('\n'), false);
+
                 for (size_t i = 0; i < fields_cnt; ++i) {
                         const char *header_str = field_get_name(fields[i].id);
                         const size_t header_str_len = strlen(header_str);
@@ -856,9 +859,10 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         size_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
 
 
-        if (output_params.print_records == OUTPUT_ITEM_NO) {
+        if (output_params.print_records != OUTPUT_ITEM_YES) {
                 return E_OK;
         }
+        first_item = first_item ? false : (putchar('\n'), false);
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
@@ -942,11 +946,17 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 
 void print_processed_summ(const struct processed_summ *s, double duration)
 {
-        if (output_params.print_processed_summ == OUTPUT_ITEM_YES) {
-                const double flows_per_sec = s->flows / duration;
+        const double flows_per_sec = s->flows / duration;
 
 
-                printf("\nprocessed records summary:\n");
+        if (output_params.print_processed_summ != OUTPUT_ITEM_YES) {
+                return;
+        }
+        first_item = first_item ? false : (putchar('\n'), false);
+
+        switch (output_params.format) {
+        case OUTPUT_FORMAT_PRETTY:
+                printf("processed records summary:\n");
 
                 printf("\t%s flows, ", volume_to_str(&s->flows));
                 printf("%s packets, ", volume_to_str(&s->pkts));
@@ -954,30 +964,85 @@ void print_processed_summ(const struct processed_summ *s, double duration)
 
                 printf("\t%f seconds, %s flows/second\n", duration,
                                 double_volume_to_str(&flows_per_sec));
+                break;
+
+        case OUTPUT_FORMAT_CSV:
+                printf("flows%cpackets%cbytes%cseconds%cflows/second\n",
+                                CSV_SEP, CSV_SEP, CSV_SEP, CSV_SEP);
+
+                printf("%s%c", volume_to_str(&s->flows), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes), CSV_SEP);
+                printf("%f%c%s\n", duration, CSV_SEP,
+                                double_volume_to_str(&flows_per_sec));
+                break;
+
+        default:
+                assert(!"unknown output format");
         }
 }
 
 void print_metadata_summ(const struct metadata_summ *s)
 {
-        if (output_params.print_metadata_summ == OUTPUT_ITEM_YES) {
-                printf("\nmetadata summary:\n");
+        if (output_params.print_metadata_summ != OUTPUT_ITEM_YES) {
+                return;
+        }
+        first_item = first_item ? false : (putchar('\n'), false);
 
-                printf("\tflows total:   %s\n", volume_to_str(&s->flows));
-                printf("\tflows TCP:     %s\n", volume_to_str(&s->flows_tcp));
-                printf("\tflows UDP:     %s\n", volume_to_str(&s->flows_udp));
-                printf("\tflows ICMP:    %s\n", volume_to_str(&s->flows_icmp));
-                printf("\tflows other:   %s\n", volume_to_str(&s->flows_other));
+        switch (output_params.format) {
+        case OUTPUT_FORMAT_PRETTY:
+                printf("metadata summary:\n");
 
-                printf("\tpackets total: %s\n", volume_to_str(&s->pkts));
-                printf("\tpackets TCP:   %s\n", volume_to_str(&s->pkts_tcp));
-                printf("\tpackets UDP:   %s\n", volume_to_str(&s->pkts_udp));
-                printf("\tpackets ICMP:  %s\n", volume_to_str(&s->pkts_icmp));
-                printf("\tpackets other: %s\n", volume_to_str(&s->pkts_other));
+                printf("\tflows:\n");
+                printf("\t\ttotal: %s\n", volume_to_str(&s->flows));
+                printf("\t\tTCP:   %s\n", volume_to_str(&s->flows_tcp));
+                printf("\t\tUDP:   %s\n", volume_to_str(&s->flows_udp));
+                printf("\t\tICMP:  %s\n", volume_to_str(&s->flows_icmp));
+                printf("\t\tother: %s\n", volume_to_str(&s->flows_other));
 
-                printf("\tbytes total:   %s\n", volume_to_str(&s->bytes));
-                printf("\tbytes TCP:     %s\n", volume_to_str(&s->bytes_tcp));
-                printf("\tbytes UDP:     %s\n", volume_to_str(&s->bytes_udp));
-                printf("\tbytes ICMP:    %s\n", volume_to_str(&s->bytes_icmp));
-                printf("\tbytes other:   %s\n", volume_to_str(&s->bytes_other));
+                printf("\tpackets:\n");
+                printf("\t\ttotal: %s\n", volume_to_str(&s->pkts));
+                printf("\t\tTCP:   %s\n", volume_to_str(&s->pkts_tcp));
+                printf("\t\tUDP:   %s\n", volume_to_str(&s->pkts_udp));
+                printf("\t\tICMP:  %s\n", volume_to_str(&s->pkts_icmp));
+                printf("\t\tother: %s\n", volume_to_str(&s->pkts_other));
+
+                printf("\tbytes:\n");
+                printf("\t\ttotal: %s\n", volume_to_str(&s->bytes));
+                printf("\t\tTCP:   %s\n", volume_to_str(&s->bytes_tcp));
+                printf("\t\tUDP:   %s\n", volume_to_str(&s->bytes_udp));
+                printf("\t\tICMP:  %s\n", volume_to_str(&s->bytes_icmp));
+                printf("\t\tother: %s\n", volume_to_str(&s->bytes_other));
+                break;
+
+        case OUTPUT_FORMAT_CSV:
+                printf("field%ctotal%cTCP%cUDP%cICMP%cother\n", CSV_SEP,
+                                CSV_SEP, CSV_SEP, CSV_SEP, CSV_SEP);
+
+                printf("flows%c", CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows_tcp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows_udp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows_icmp), CSV_SEP);
+                printf("%s\n", volume_to_str(&s->flows_other));
+
+                printf("packets%c", CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts_tcp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts_udp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts_icmp), CSV_SEP);
+                printf("%s\n", volume_to_str(&s->pkts_other));
+
+                printf("bytes%c", CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes_tcp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes_udp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes_icmp), CSV_SEP);
+                printf("%s\n", volume_to_str(&s->bytes_other));
+
+                break;
+
+        default:
+                assert(!"unknown output format");
         }
 }

@@ -1206,8 +1206,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
          * Enable metadata-only mode if neither records nor prorcessed summary
          * is desired.
          */
-        if (args->output_params.print_processed_summ != OUTPUT_ITEM_YES &&
-                        args->output_params.print_records != OUTPUT_ITEM_YES) {
+        if (args->output_params.print_processed_summ == OUTPUT_ITEM_NO &&
+                        args->output_params.print_records == OUTPUT_ITEM_NO) {
                 args->working_mode = MODE_META;
         }
 
