@@ -20,15 +20,18 @@ env:
 
 
 before_install:
+        #update, upgrade and install common prerequisites
         - sudo apt-get -qq update
-        - ./travis_install_mpi.sh $MPI
-        - ./install_dependencies.sh
+        - sudo apt-get -qq upgrade
+        - sudo apt-get -qq install gcc automake autoconf libtool
+        #install dependencies
+        - travis/install_dependencies.sh
 
         #as long as clang doesn't work, following can by ommited
         #- export OMPI_CC="${CC}" #CC set by travis as OMPI underlying compiler
         #- export MPICH_CC="${CC}"#CC set by travis as MPICH underlying compiler
 
-        - unset CC #otherwise ./configure would not set mpicc as CC
+        - unset CC #otherwise ./configure would not set mpicc as a CC
 
 install:
         - autoreconf -i
