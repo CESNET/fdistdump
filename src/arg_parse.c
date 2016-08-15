@@ -100,6 +100,8 @@ static const char *help_string =
 "            Process only flow files from begin to the end time range.\n"
 "\n"
 "Controlling output\n"
+"     --output-items= item_list\n"
+"            Set output items.\n"
 "     --output-format=format\n"
 "            Set output (print) format.\n"
 "     --output-ts-conv=timestamp_conversion\n"
