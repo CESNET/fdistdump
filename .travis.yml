@@ -22,7 +22,6 @@ env:
 before_install:
         #update, upgrade and install common prerequisites
         - sudo apt-get -qq update
-        - sudo apt-get -qq upgrade
         - sudo apt-get -qq install gcc automake autoconf libtool
         #install dependencies
         - travis/install_dependencies.sh
