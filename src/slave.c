@@ -535,6 +535,10 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
 
                 break;
 
+        case MODE_META:
+                /* Nothing to do. */
+                return E_OK;
+
         case MODE_PASS:
                 return E_PASS;
 
@@ -952,6 +956,10 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
 
                 break;
 
+        case MODE_META:
+                /* Nothing to do. */
+                break;
+
         case MODE_PASS:
                 assert(!"invalid working mode");
 
@@ -1069,6 +1077,10 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
 
                 case MODE_AGGR:
                         primary_errno = task_store_file(stc, &tc);
+                        break;
+
+                case MODE_META:
+                        /* Metadata already read. */
                         break;
 
                 case MODE_PASS:

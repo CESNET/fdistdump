@@ -87,6 +87,7 @@ typedef enum { //working modes
         MODE_LIST, //list unmodified flow records
         MODE_SORT, //list ordered flow records
         MODE_AGGR, //aggregation and statistic
+        MODE_META, //read only metadata
         MODE_PASS, //do nothing
 } working_mode_t;
 

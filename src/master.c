@@ -577,6 +577,19 @@ free_db_mem:
 }
 
 
+static void progress_bar_loop(void)
+{
+        MPI_Status status;
+
+
+        for (size_t i = 0; i < progress_bar_ctx.files_sum; ++i) {
+                MPI_Recv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
+                                MPI_COMM_WORLD, &status);
+                progress_bar_refresh(status.MPI_SOURCE);
+        }
+}
+
+
 static error_code_t mode_list_main(const struct master_task_ctx *mtc)
 {
         error_code_t primary_errno;
@@ -744,10 +757,6 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 
         /* Send, receive, process. */
         switch (mtc.shared.working_mode) {
-        case MODE_PASS:
-                goto finalize;
-                break;
-
         case MODE_LIST:
                 primary_errno = mode_list_main(&mtc);
                 break;
@@ -760,6 +769,14 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                 primary_errno = mode_aggr_main(&mtc);
                 break;
 
+        case MODE_META:
+                /* Receive only the progress. */
+                progress_bar_loop();
+                break;
+
+        case MODE_PASS:
+                goto finalize;
+
         default:
                 assert(!"unknown working mode");
         }
@@ -769,10 +786,6 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                 progress_bar_finish();
         }
 
-        /* Receive statistics from every slave, print them. */
-        //TODO: when using list mode and record limit, processed summary doesn't
-        //      match with actualy printed records
-
         /* Reduce statistics from each slave. */
         MPI_Reduce(MPI_IN_PLACE, &processed_summ, 3, MPI_UINT64_T, MPI_SUM,
                         ROOT_PROC, MPI_COMM_WORLD);
@@ -781,6 +794,8 @@ error_code_t master(int world_size, const struct cmdline_args *args)
 
         duration += MPI_Wtime(); //end time measurement
 
+        //TODO: when using list mode and record limit, processed records summary
+        //      doesn't match with actualy printed records
         print_processed_summ(&processed_summ, duration);
         print_metadata_summ(&metadata_summ);
 
