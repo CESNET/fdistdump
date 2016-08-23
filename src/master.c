@@ -262,6 +262,8 @@ static error_code_t progress_bar_init(progress_bar_type_t type, char *dest,
                 size_t slave_cnt)
 {
         struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
+        size_t zero = 0; //sendbuf for MPI_Gather
+        size_t files_sum[slave_cnt + 1]; //recvbuf for MPI_Gather
 
 
         /* Allocate memory to keep context. */
@@ -290,10 +292,11 @@ static error_code_t progress_bar_init(progress_bar_type_t type, char *dest,
         }
 
         /* Receive number of files to be processed. */
-        MPI_Gather(MPI_IN_PLACE, 0, MPI_UNSIGNED_LONG, pbc->files_slave_sum - 1,
-                        1, MPI_UNSIGNED_LONG, ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Gather(&zero, 1, MPI_UNSIGNED_LONG, files_sum, 1, MPI_UNSIGNED_LONG,
+                        ROOT_PROC, MPI_COMM_WORLD);
 
         for (size_t i = 0; i < slave_cnt; ++i) {
+                pbc->files_slave_sum[i] = files_sum[i + 1];
                 pbc->files_sum += pbc->files_slave_sum[i];
         }
 
