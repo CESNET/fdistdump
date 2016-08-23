@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -62,8 +62,8 @@ AGG_FIELD="dstport"
 FILTER="\"dst ip fd52:4efb:6b9d:c7d7::2\""
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -a $AGG_FIELD \
-        --output-format=csv --fields=first,last,bytes,pkts -f $FILTER"
+FDD_CMD="mpiexec -np 2 $G_FDIST_DUMP -a $AGG_FIELD --output-format=csv \
+        --fields=first,last,bytes,pkts -f $FILTER $G_INPUT_DATA"
 eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
@@ -100,5 +100,3 @@ else
         echo "     nfd-cmd: ${NFD_CMD}"
         exit 1
 fi
-
-exit 0

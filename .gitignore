@@ -17,6 +17,7 @@ Makefile
 /config.log
 /config.status
 /stamp-h1
+/src/.dirstamp
 
 #vim
 *~
@@ -24,9 +25,8 @@ Makefile
 *.swo
 
 #tests
-/tests/*
-!/tests/*.c
-!/tests/*.test
+*.log
+*.trs
 
 #object files
 *.o

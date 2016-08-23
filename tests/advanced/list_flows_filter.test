@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -60,9 +60,9 @@ FILTER="\"port 23\""
 
 
 # run FDistDump query (store same command for logging)
-FDD_CMD="mpirun -np 2 $G_FDIST_DUMP -r $G_INPUT_DATA -l 50 -f $FILTER \
-        --output-format=csv \
-        --fields=first,last,bytes,pkts,srcport,dstport,tcpflags,srcip,dstip,proto"
+FDD_CMD="mpiexec -np 2 $G_FDIST_DUMP -l 50 -f $FILTER --output-format=csv \
+        --fields=first,last,bytes,pkts,srcport,dstport,tcpflags,srcip,dstip,proto \
+        $G_INPUT_DATA"
 eval "$FDD_CMD" > "$G_FDD_RESULTS"
 ret_code=$?
 if [ ! $ret_code -eq 0 ]; then
@@ -99,5 +99,3 @@ else
         echo "     nfd-cmd: ${NFD_CMD}"
         exit 1
 fi
-
-exit 0

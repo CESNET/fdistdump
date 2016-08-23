@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -53,7 +53,7 @@ else
         proc_cnt=$1
 fi
 
-mpirun -np $proc_cnt ./mem_init
+mpiexec -np $proc_cnt ./test_mem_init
 
 if [ $? -eq 0 ]; then
         echo "${TEST_DESC} was successful (${proc_cnt} processes)."

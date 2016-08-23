@@ -46,6 +46,8 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include "config.h"
+
 #include <stddef.h> //size_t
 #include <time.h> //struct tm
 #include <stdbool.h>
@@ -54,24 +56,14 @@
 #include <libnf.h>
 
 #define ROOT_PROC 0 //MPI root processor number
-
 #define MAX_STR_LEN 1024 //maximum length of a general string
-
 #define XCHG_BUFF_SIZE (1024 * 1024) //1 KiB
 
-#define FIELDS_DELIM "," //LNF fields delimiter
-#define MAX_LNF_FIELDS (LNF_FLD_TERM_ + 1) //currently 256
-
-//TODO: move to configuration file and as parameter options
+//TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
-#define FLOW_FILE_BASE_DIR "/data/profiles_data/"
-#define FLOW_FILE_PROFILE "live"
-#define FLOW_FILE_SOURCE "telia"
-#define FLOW_FILE_PATH_FORMAT "%Y/%m/%d/"
+#define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
 #define FLOW_FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"
-#define FLOW_FILE_PATH (FLOW_FILE_BASE_DIR FLOW_FILE_PROFILE "/" \
-                FLOW_FILE_SOURCE "/" FLOW_FILE_PATH_FORMAT \
-                FLOW_FILE_NAME_FORMAT)
+#define FLOW_FILE_FORMAT (FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT)
 
 
 /**
@@ -95,6 +87,7 @@ typedef enum { //working modes
         MODE_LIST, //list unmodified flow records
         MODE_SORT, //list ordered flow records
         MODE_AGGR, //aggregation and statistic
+        MODE_META, //read only metadata
         MODE_PASS, //do nothing
 } working_mode_t;
 
@@ -107,10 +100,10 @@ enum { //tags
 typedef enum { //progress bar type
         PROGRESS_BAR_UNSET,
         PROGRESS_BAR_NONE,
-        PROGRESS_BAR_BASIC,
-        PROGRESS_BAR_EXTENDED,
-        PROGRESS_BAR_FILE,
-} progress_bar_t;
+        PROGRESS_BAR_TOTAL,
+        PROGRESS_BAR_PERSLAVE,
+        PROGRESS_BAR_JSON,
+} progress_bar_type_t;
 /**
  * @}
  */ //common_enum
@@ -120,11 +113,32 @@ typedef enum { //progress bar type
  * \defgroup common_struct Common structures usable everywhere
  * @{
  */
-struct stats {
+struct processed_summ {
         uint64_t flows;
         uint64_t pkts;
         uint64_t bytes;
 };
+
+struct metadata_summ {
+        uint64_t flows;
+        uint64_t flows_tcp;
+        uint64_t flows_udp;
+        uint64_t flows_icmp;
+        uint64_t flows_other;
+
+        uint64_t pkts;
+        uint64_t pkts_tcp;
+        uint64_t pkts_udp;
+        uint64_t pkts_icmp;
+        uint64_t pkts_other;
+
+        uint64_t bytes;
+        uint64_t bytes_tcp;
+        uint64_t bytes_udp;
+        uint64_t bytes_icmp;
+        uint64_t bytes_other;
+};
+
 
 //XXX: reflect changes also in mpi_struct_shared_task_ctx
 #define STRUCT_FIELD_INFO_ELEMS 4
@@ -146,8 +160,8 @@ struct shared_task_ctx {
 
         size_t rec_limit; //record/aggregation limit
 
-        struct tm interval_begin; //begin of time interval
-        struct tm interval_end; //end of time interval
+        struct tm time_begin; //beginning of the time range
+        struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
 };

@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 # Author: Pavel Krobot, <Pavel.Krobot@cesnet.cz>
 # Date: 2015
@@ -54,14 +54,15 @@ else
         proc_cnt=$1
 fi
 
-mpirun -np $proc_cnt ./mem_setup -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f "src port 80 and proto TCP"
+ARGS=(-a srcip,dstip,srcport,dstport,proto -f "src port 80 and proto TCP" -l 100 -o flows test.nffile)
+mpiexec -np $proc_cnt ./test_mem_setup "${ARGS[@]}"
 
 if [ $? -eq 0 ]; then
         echo "${TEST_DESC} was successful (${proc_cnt} processes)."
-        echo "     test-args: -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f \"src port 80 and proto TCP\""
+        echo "     test-args: ${ARGS[@]}"
         exit 0
 else
         echo "${TEST_DESC} failed - returned $? (${proc_cnt} processes)."
-        echo "     test-args: -a srcip,dstip,srcport,dstport,proto -r test.nffile  -l 100 -o flows -f \"src port 80 and proto TCP\""
+        echo "     test-args: ${ARGS[@]}"
         exit 1
 fi

@@ -2,6 +2,7 @@
  * \file flookup.c
  * \brief
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
+ * \author Jan Wrona, <wrona@cesnet.cz>
  * \date 2015
  */
 
@@ -51,9 +52,14 @@
 #include <string.h>
 #include <stddef.h> //size_t
 #include <limits.h> //PATH_MAX
+#include <assert.h>
+#include <ctype.h> //isdigit()
+#include <unistd.h> //gethostname()
 
 #include <dirent.h>
 #include <sys/stat.h>
+
+#include <mpi.h>
 
 
 #define F_ARRAY_INIT_SIZE 50
@@ -144,19 +150,24 @@ off_t f_array_get_size_sum(const f_array_t *fa)
 }
 
 
-/* fill file array by file names according to time range expression */
-error_code_t f_array_fill_from_time(f_array_t *fa, const struct tm begin,
-                const struct tm end)
+static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
+                struct tm begin, struct tm end)
 {
         error_code_t primary_errno = E_OK;
-        char new_path[PATH_MAX] = "";
+        size_t offset = strlen(path);
         struct tm ctx = begin;
+        struct stat stat_buff;
 
-        /* Loop through entire interval. */
+
+        if (path[offset - 1] != '/') {
+                path[offset++] = '/';
+        }
+
+        /* Loop through the entire time range. */
         while (tm_diff(end, ctx) > 0) {
                 /* Construct path string from time. */
-                if (strftime(new_path, PATH_MAX, FLOW_FILE_PATH, &ctx) == 0) {
-                        print_err(E_PATH, 0, "strftime()");
+                if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
+                                        &ctx) == 0) {
                         return E_PATH;
                 }
 
@@ -164,83 +175,204 @@ error_code_t f_array_fill_from_time(f_array_t *fa, const struct tm begin,
                 ctx.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
                 mktime_utc(&ctx);
 
+                /* Check file existence. */
+                if (stat(path, &stat_buff) != 0) {
+                        secondary_errno = errno;
+                        print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                        strerror(errno), path);
+                } else {
+                        primary_errno = f_array_add(fa, path, stat_buff.st_size);
+                        if (primary_errno != E_OK) {
+                                return primary_errno;
+                        }
+                }
+        }
+
+
+        return E_OK;
+}
+
+static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
+{
+        error_code_t primary_errno = E_OK;
+
+        DIR *dir;
+        struct dirent *entry;
+
+        struct stat stat_buff;
+
+
+        /* Detect file type. */
+        if (stat(path, &stat_buff) != 0) {
+                secondary_errno = errno;
+                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                strerror(errno), path);
+                return E_PATH;
+        }
+
+        if (!S_ISDIR(stat_buff.st_mode)) { //path is everything but direcotry
+                return f_array_add(fa, path, stat_buff.st_size);
+        }
+
+        /* Path is directory. */
+        dir = opendir(path);
+        if (dir == NULL) {
+                secondary_errno = errno;
+                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
+                                path);
+                return E_PATH;
+        }
+
+        /* Get all filenames, dot starting filenames are ignored. */
+        while ((entry = readdir(dir)) != NULL) {
+                char new_path[PATH_MAX];
+
+                if (entry->d_name[0] == '.') {
+                        continue;
+                }
+
+                assert(strlen(path) + strlen(entry->d_name) + 2 <= PATH_MAX);
+                strcpy(new_path, path);
+                strcat(new_path, "/");
+                strcat(new_path, entry->d_name);
+
                 primary_errno = f_array_fill_from_path(fa, new_path);
                 if (primary_errno != E_OK) {
                         return primary_errno;
                 }
         }
 
-        return E_OK;
+        closedir(dir);
+
+
+        return primary_errno;
 }
 
-/* fill file array by file names according to path expression */
-error_code_t f_array_fill_from_path(f_array_t *fa, const char *path)
+
+/** \brief Transform format string into path string.
+ *
+ * The format string is a character string composed of zero or more directives:
+ * ordinary characters (not %), which are copied unchanged to the output path;
+ * and conversion specifications, each of which results in an additional action.
+ * Each conversion specification is introduced by the character % followed by a
+ * conversion specifier character.
+ *
+ * If format begins with "%DIGITS:", then path is targeted only for one specific
+ * slave, the one with DIGITS equal to the MPI rank of the slave.
+ *
+ * Conversion specifiers:
+ *   h: converted into the hostname of the node
+ *
+ * \param[in] format Format string.
+ * \param[out] path  Path creted from the format string.
+ * \return True if path should be processed, false if path should be skipped.
+ */
+static bool path_preprocessor(const char *format, char path[PATH_MAX])
 {
-        DIR *dirp;
-        struct dirent *dp;
-        struct stat fs_buff;
-        char new_path[PATH_MAX] = "";
+        char tmp[PATH_MAX];
+        char *last_path = tmp;
+        char *perc_sign;
 
-        /* detect file type */
-        if (stat(path, &fs_buff) != 0) {
-                secondary_errno = errno;
-                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                strerror(errno), path);
-                return E_OK;
-        }
 
-        /* regular file */
-        if (S_ISREG(fs_buff.st_mode)) {
-                return f_array_add(fa, path, fs_buff.st_size);
+        strcpy(tmp, format); //copy all except initial conversion specification
 
-        /* directory */
-        } else if (S_ISDIR(fs_buff.st_mode)) {
-                if ((dirp = opendir(path)) == NULL) {
-                        secondary_errno = errno;
-                        print_err(E_PATH, secondary_errno, "%s \"%s\"",
-                                        strerror(errno), path);
-                        return E_PATH;
+        /* Format starts by %DIGIT. */
+        if (tmp[0] == '%' && isdigit(tmp[1])) {
+                last_path = tmp + 2;
+                int world_rank;
+
+                while (isdigit(*last_path) && last_path++); //skip all digits
+                if (*last_path++ != ':') { //check for terminating colon
+                        print_warn(E_PATH, 0, "invalid conversion specifier, "
+                                        "skipping \"%s\"", format);
+                        return false;
                 }
 
-                /// TODO consider NORMAL profiles dir structure here ------>>>
-                /* get all relevant filenames */
-                while ((dp = readdir(dirp)) != NULL) {
-                        /* ignore file names starting with dot */
-                        /// TODO ignore unwanted subprofiles dirs OR
-                        ///      consider only expected dirs
-                        if (dp->d_name[0] != '.') {
-                                strcpy(new_path, path);
-                                strcat(new_path, "/");
-                                strcat(new_path, dp->d_name);
-                                error_code_t ret = f_array_fill_from_path(fa,
-                                                new_path);
-                                if (ret != E_OK) {
-                                        return ret;
-                                }
+                MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+                if (world_rank != atoi(tmp + 1)) {
+                        return false; //this path is not for me (different rank)
+                }
+        }
+
+        /* last_path now contains all except the initial conversion specifier.*/
+        perc_sign = strchr(last_path, '%'); //find first percent sign
+        while (perc_sign != NULL) {
+                *perc_sign = '\0';
+                strcat(path, last_path); //copy format path till percent sign
+
+                perc_sign++; //move pointer to escaped character
+                switch (*perc_sign) {
+                case 'h':
+                        errno = 0;
+                        gethostname(path + strlen(path),
+                                        PATH_MAX - strlen(path));
+                        if (errno != 0) {
+                                errno = ENAMETOOLONG;
+                                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                                strerror(errno), format);
+                                return false;
                         }
+                        break;
+                default:
+                        print_warn(E_PATH, 0, "unknown conversion specifier, "
+                                        "skipping \"%s\"", format);
+                        return false;
                 }
-                closedir(dirp);
-                /// <<<- TODO consider NORMAL profiles dir structure there <<<
+
+                last_path = perc_sign + 1; //ptr to next regular character
+                perc_sign = strchr(last_path, '%');
         }
 
-        return E_OK;
+        strcat(path, last_path); //copy rest of the format string
+        print_debug("<path_preprocessor> format: %s\tpath: %s", format, path);
+
+
+        return true;
 }
 
-/*
-int main(void)
+
+error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
+                struct tm end)
 {
-        f_array_t files;
+        error_code_t primary_errno = E_OK;
 
-        f_array_init(&files);
+        struct stat stat_buff;
+        const bool have_time_range = tm_diff(end, begin) > 0;
 
-        flist_lookup_files_path(&files, "..");
+        char *token;
+        char *saveptr;
 
-        for (size_t i = 0; i < files.f_cnt; ++i) {
-                printf("Processing: %s (%zu)\n", files.f_items[i].f_name,
-                                files.f_items[i].f_size);
+
+        for (token = strtok_r(paths, "\x1C", &saveptr); //first token
+                        token != NULL;
+                        token = strtok_r(NULL, "\x1C", &saveptr)) //next
+        {
+                char path[PATH_MAX] = { 0 };
+
+                if (!path_preprocessor(token, path)) {
+                        continue;
+                }
+
+                /* Detect file type. */
+                if (stat(path, &stat_buff) != 0) {
+                        secondary_errno = errno;
+                        print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                        strerror(errno), path);
+                        continue;
+                }
+
+                if (have_time_range && S_ISDIR(stat_buff.st_mode)) {
+                        primary_errno = f_array_fill_from_time(fa, path, begin,
+                                        end);
+                } else {
+                        primary_errno = f_array_fill_from_path(fa, path);
+                }
+
+                if (primary_errno != E_OK) {
+                        break;
+                }
         }
 
-        f_array_free(&files);
 
+        return primary_errno;
 }
-*/

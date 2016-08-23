@@ -52,18 +52,6 @@
 #include <stdbool.h>
 
 
-#define STAT_DELIM "/" //statistic/order
-#define INTERVAL_DELIM "#" //begin#end
-#define SORT_DELIM "#" //flows#asc
-#define TIME_DELIM " \t\n\v\f\r" //whitespace
-
-#define DEFAULT_LIST_FIELDS "first,pkts,bytes,srcip,dstip,srcport,dstport,proto"
-#define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
-#define DEFAULT_AGGR_FIELDS "duration,flows,pkts,bytes,bps,pps,bpp"
-#define DEFAULT_STAT_SORT_KEY "flows"
-#define DEFAULT_STAT_REC_LIMIT 10
-
-
 //TODO: include shared_task_ctx
 struct cmdline_args {
         working_mode_t working_mode; //working mode (records, aggregation, topN)
@@ -74,13 +62,14 @@ struct cmdline_args {
 
         size_t rec_limit; //read/aggregate/topN record limit
 
-        struct tm interval_begin; //begin of time interval
-        struct tm interval_end; //end of time interval
+        struct tm time_begin; //beginning of the time range
+        struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
 
         struct output_params output_params; //output (printing) parameters
-        progress_bar_t progress_bar;
+        progress_bar_type_t progress_bar_type;
+        char *progress_bar_dest;
 };
 
 
@@ -99,5 +88,7 @@ struct cmdline_args {
  * \return Error code. E_OK, E_PASS or E_ARG.
  */
 error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv);
+
+void free_args(struct cmdline_args *args);
 
 #endif //ARG_PARSE_H

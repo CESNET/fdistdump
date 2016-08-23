@@ -44,8 +44,8 @@
 
 #define _XOPEN_SOURCE //strptime()
 
+#include "common.h"
 #include "arg_parse.h"
-#include "config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,24 +59,102 @@
 #include <libnf.h>
 
 
+#define STAT_DELIM "/" //statistic/order
+#define TIME_RANGE_DELIM "#" //begin#end
+#define SORT_DELIM "#" //flows#asc
+#define TIME_DELIM " \t\n\v\f\r" //whitespace
+#define FIELDS_DELIM "," //LNF fields delimiter
+
+#define DEFAULT_LIST_FIELDS "first,pkts,bytes,srcip,dstip,srcport,dstport,proto"
+#define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
+#define DEFAULT_AGGR_FIELDS "duration,flows,pkts,bytes,bps,pps,bpp"
+#define DEFAULT_STAT_SORT_KEY "flows"
+#define DEFAULT_STAT_REC_LIMIT 10
+
+
 /* Global variables. */
+static const char *usage_string =
+"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
+"       [-l limit] [-o field[#direction]] [-s statistic] [-t time_spec]\n"
+"       [-T begin[#end]] path ...";
+
+static const char *help_string =
+"MPI_options\n"
+"      See your MPI process manager documentation, e.g. mpiexec(1).\n"
+"General options\n"
+"     Mandatory arguments to long options are mandatory for short options too.\n"
+"\n"
+"     -a, --aggregation=field[,...]\n"
+"            Aggregated flow records together by any number of fields.\n"
+"     -f, --filter=filter\n"
+"            Process only filter matching records.\n"
+"     -l, --limit=limit\n"
+"            Limit the number of records to print.\n"
+"     -o, --order=field[#direction]\n"
+"            Set record sort order.\n"
+"     -s, --statistic=statistic\n"
+"            Shortcut for aggregation (-a), sort (-o) and record limit (-l).\n"
+"     -t, --time-point=time_spec\n"
+"            Process only single flow file, the one which includes given time.\n"
+"     -T, --time-range=begin[#end]\n"
+"            Process only flow files from begin to the end time range.\n"
+"\n"
+"Controlling output\n"
+"     --output-items= item_list\n"
+"            Set output items.\n"
+"     --output-format=format\n"
+"            Set output (print) format.\n"
+"     --output-ts-conv=timestamp_conversion\n"
+"            Set timestamp output conversion format.\n"
+"     --output-ts-localtime\n"
+"            Convert timestamps to local time.\n"
+"     --output-volume-conv=volume_conversion\n"
+"            Set volume output conversion format.\n"
+"     --output-tcpflags-conv=TCP_flags_conversion\n"
+"            Set TCP flags output conversion format.\n"
+"     --output-addr-conv=IP_address_conversion\n"
+"            Set IP address output conversion format.\n"
+"     --output-proto-conv=IP_protocol_conversion\n"
+"            Set IP protocol output conversion format.\n"
+"     --output-duration-conv=duration_conversion\n"
+"            Set duration conversion format.\n"
+"     --fields=field[,...]\n"
+"            Set the list of printed fields.\n"
+"     --progress-bar-type=progress_bar_type\n"
+"            Set progress bar type.\n"
+"     --progress-bar-dest=progress_bar_destination\n"
+"            Set progress bar destination.\n"
+"\n"
+"Other options\n"
+"     --no-fast-topn\n"
+"            Disable fast top-N algorithm.\n"
+"\n"
+"Getting help\n"
+"     --help Print a help message and exit.\n"
+"     --version\n"
+"            Display version information and exit.\n";
+
+
 extern int secondary_errno;
+
 
 enum { //command line options, have to start above ASCII
         OPT_NO_FAST_TOPN = 256, //disable fast top-N algorithm
 
+        OPT_OUTPUT_ITEMS, //output items (records, processed records summary,
+                          //metadata summary)
         OPT_OUTPUT_FORMAT, //output (print) format
         OPT_OUTPUT_TS_CONV, //output timestamp conversion
         OPT_OUTPUT_TS_LOCALTIME, //output timestamp in localtime
-        OPT_OUTPUT_STAT_CONV, //output statistics conversion
+        OPT_OUTPUT_VOLUME_CONV, //output volumetric field conversion
         OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
         OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
         OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
         OPT_OUTPUT_DURATION_CONV, //output IP protocol conversion
-        OPT_OUTPUT_SUMMARY, //print summary?
 
         OPT_FIELDS, //specification of listed fields
-        OPT_PROGRESS_BAR, //specification of listed fields
+        OPT_PROGRESS_BAR_TYPE, //type of the progress bar
+        OPT_PROGRESS_BAR_DEST, //destination of the progress bar
 
         OPT_HELP, //print help
         OPT_VERSION, //print version
@@ -95,6 +173,7 @@ static const char *const date_formats[] = {
         /* Special formats. */
         "%a", //weekday according to the current locale, abbreviated or full
         "%b", //month according to the current locale, abbreviated or full
+        "%s", //the number of seconds since the Epoch, 1970-01-01 00:00:00 UTC
 };
 
 static const char *const utc_strings[] = {
@@ -105,18 +184,6 @@ static const char *const utc_strings[] = {
         "UT",
         "UTC",
 };
-
-
-static int str_yes_or_no(const char *str)
-{
-        if (strcmp(str, "y") == 0 || strcmp(str, "yes") == 0) {
-                return 1;
-        } else if (strcmp(str, "n") == 0 || strcmp(str, "no") == 0) {
-                return 0;
-        } else {
-                return -1;
-        }
-}
 
 
 /** \brief Convert string into tm structure.
@@ -181,7 +248,7 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
                         }
                 }
 
-                print_err(E_ARG, 0, "invalid time format \"%s\"", token);
+                print_err(E_ARG, 0, "invalid time specifier \"%s\"", token);
                 return E_ARG; //conversion failure
 next_token:
                 token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
@@ -246,24 +313,32 @@ next_token:
 }
 
 
-/** \brief Parse and store time interval string.
+/** \brief Parse and store time range string.
  *
- * Function tries to parse time interval string, fills interval_begin and
- * interval_end with appropriate values on success. Beginning and ending dates
- * (and times) are  separated with INTERVAL_DELIM, if ending date is not
+ * Function tries to parse time range string, fills time_begin and
+ * time_end with appropriate values on success. Beginning and ending dates
+ * (and times) are  separated with TIME_RANGE_DELIM, if ending date is not
  * specified, current time is used.
- * If interval string is successfully parsed, E_OK is returned. On error,
- * content of interval_begin and interval_end is undefined and E_ARG is
+ *
+ * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
+ * Beginning time is aligned to the beginning of the rotation interval, ending
+ * time is aligned to the ending of the rotation interval:
+ *
+ * 0     5    10    15    20   -------->   0     5    10    15    20
+ * |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+ *          ^     ^                              ^           ^
+ *        begin  end                           begin        end
+ *
+ * If range string is successfully parsed, E_OK is returned. On error,
+ * content of time_begin and time_end is undefined and E_ARG is
  * returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
- * \param[in] interval_str Aggregation string, usually gathered from command
- *                        line.
+ * \param[in] range_str Time range string, usually gathered from command line.
  * \return Error code. E_OK or E_ARG.
  */
-static error_code_t set_time_interval(struct cmdline_args *args,
-                char *interval_str)
+static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
 {
         error_code_t primary_errno = E_OK;
         char *begin_str;
@@ -273,34 +348,34 @@ static error_code_t set_time_interval(struct cmdline_args *args,
         bool begin_utc = false;
         bool end_utc = false;
 
-        assert(args != NULL && interval_str != NULL);
+        assert(args != NULL && range_str != NULL);
 
-        /* Split time interval string. */
-        begin_str = strtok_r(interval_str, INTERVAL_DELIM, &saveptr);
+        /* Split time range string. */
+        begin_str = strtok_r(range_str, TIME_RANGE_DELIM, &saveptr);
         if (begin_str == NULL) {
-                print_err(E_ARG, 0, "invalid interval string \"%s\"\n",
-                                interval_str);
+                print_err(E_ARG, 0, "invalid time range string \"%s\"\n",
+                                range_str);
                 return E_ARG;
         }
-        end_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr); //NULL is valid
-        trailing_str = strtok_r(NULL, INTERVAL_DELIM, &saveptr);
+        end_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr); //NULL is valid
+        trailing_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr);
         if (trailing_str != NULL) {
-                print_err(E_ARG, 0, "interval trailing string \"%s\"\n",
+                print_err(E_ARG, 0, "time range trailing string \"%s\"\n",
                                 trailing_str);
                 return E_ARG;
         }
 
         /* Convert time strings to tm structure. */
-        primary_errno = str_to_tm(begin_str, &begin_utc, &args->interval_begin);
+        primary_errno = str_to_tm(begin_str, &begin_utc, &args->time_begin);
         if (primary_errno != E_OK) {
                 return E_ARG;
         }
         if (end_str == NULL) { //NULL means until now
                 const time_t now = time(NULL);
-                localtime_r(&now, &args->interval_end);
+                localtime_r(&now, &args->time_end);
         } else {
                 primary_errno = str_to_tm(end_str, &end_utc,
-                                &args->interval_end);
+                                &args->time_end);
                 if (primary_errno != E_OK) {
                         return E_ARG;
                 }
@@ -309,37 +384,111 @@ static error_code_t set_time_interval(struct cmdline_args *args,
         if (!begin_utc) {
                 time_t tmp;
 
-                //let mktime() decide about DST
-                args->interval_begin.tm_isdst = -1;
-                tmp = mktime(&args->interval_begin);
-                gmtime_r(&tmp, &args->interval_begin);
+                //input time is localtime, let mktime() decide about DST
+                args->time_begin.tm_isdst = -1;
+                tmp = mktime(&args->time_begin);
+                gmtime_r(&tmp, &args->time_begin);
         }
         if (!end_utc) {
                 time_t tmp;
 
-                //let mktime() decide about DST
-                args->interval_end.tm_isdst = -1;
-                tmp = mktime(&args->interval_end);
-                gmtime_r(&tmp, &args->interval_end);
+                //input time is localtime, let mktime() decide about DST
+                args->time_end.tm_isdst = -1;
+                tmp = mktime(&args->time_end);
+                gmtime_r(&tmp, &args->time_end);
         }
 
-        /* Check interval sanity. */
-        if (tm_diff(args->interval_end, args->interval_begin) <= 0) {
+        /* Align beginning time to the beginning of the rotation interval. */
+        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_begin.tm_sec--;
+        }
+        /* Align ending time to the ending of the rotation interval. */
+        while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_end.tm_sec++;
+        }
+
+        /* Check time range sanity. */
+        if (tm_diff(args->time_end, args->time_begin) <= 0) {
                 char begin[255], end[255];
 
-                strftime(begin, sizeof(begin), "%c", &args->interval_begin);
-                strftime(end, sizeof(end), "%c", &args->interval_end);
+                strftime(begin, sizeof(begin), "%c", &args->time_begin);
+                strftime(end, sizeof(end), "%c", &args->time_end);
 
-                print_err(E_ARG, 0, "zero or negative interval duration");
-                print_err(E_ARG, 0, "interval: %s - %s", begin, end);
+                print_err(E_ARG, 0, "zero or negative time range duration");
+                print_err(E_ARG, 0, "time range (after the alignment): %s - %s",
+                                begin, end);
 
                 return E_ARG;
         }
 
-        /* Align beginning time to closest greater rotation interval. */
-        while (mktime_utc(&args->interval_begin) % FLOW_FILE_ROTATION_INTERVAL){
-                args->interval_begin.tm_sec++;;
+        return E_OK;
+}
+
+
+/** \brief Parse and store time point string.
+ *
+ * Function tries to parse time point string, fills time_begin and time_end
+ * with appropriate values on success. Beggining time is aligned to the
+ * beginning of the rotation interval, ending time is set to the beginning of
+ * the next rotation interval. Therefor exacly one flow file will be processed.
+ *
+ * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
+ * Beginning time is aligned to the beginning of the rotation interval, ending
+ * time is aligned to the ending of the rotation interval:
+ *
+ * 0     5    10    15    20   -------->   0     5    10    15    20
+ * |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+ *          ^                                    ^     ^
+ *        begin                                begin  end
+ *
+ * If range string is successfully parsed, E_OK is returned. On error,
+ * content of time_begin and time_end is undefined and E_ARG is
+ * returned.
+ *
+ * \param[in,out] args Structure with parsed command line parameters and other
+ *                   program settings.
+ * \param[in] range_str Time string, usually gathered from the command line.
+ * \return Error code. E_OK or E_ARG.
+ */
+static error_code_t set_time_point(struct cmdline_args *args, char *time_str)
+{
+        error_code_t primary_errno = E_OK;
+        bool utc = false;
+
+        assert(args != NULL && time_str != NULL);
+
+        /* Convert time string to the tm structure. */
+        primary_errno = str_to_tm(time_str, &utc, &args->time_begin);
+        if (primary_errno != E_OK) {
+                return E_ARG;
         }
+
+        if (!utc) {
+                time_t tmp;
+
+                //input time is localtime, let mktime() decide about DST
+                args->time_begin.tm_isdst = -1;
+                tmp = mktime(&args->time_begin);
+                gmtime_r(&tmp, &args->time_begin);
+        }
+
+        /* Align time to the beginning of the rotation interval. */
+        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_begin.tm_sec--;
+        }
+
+        /*
+         * Copy the aligned time to the ending time and increment ending and
+         * align it to create interval of FLOW_FILE_ROTATION_INTERVAL length.
+         */
+        memcpy(&args->time_end, &args->time_begin, sizeof (args->time_end));
+        args->time_end.tm_sec++;
+        while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
+                args->time_end.tm_sec++;
+        }
+
+        /* Check time range sanity. */
+        assert(tm_diff(args->time_end, args->time_begin) > 0);
 
         return E_OK;
 }
@@ -402,6 +551,7 @@ static error_code_t add_fields_from_str(struct field_info *fields,
 {
         char *token;
         char *saveptr = NULL;
+
 
         for (token = strtok_r(fields_str, FIELDS_DELIM, &saveptr); //first token
                         token != NULL;
@@ -641,7 +791,8 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 
         /* Check for various possible errors. */
         if (errno != 0) {
-                perror(limit_str);
+                print_err(E_ARG, 0, "invalid limit \"%s\": %s", limit_str,
+                                strerror(errno));
                 return E_ARG;
         }
         if (*endptr != '\0') { //remaining characters
@@ -658,6 +809,39 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
         return E_OK;
 }
 
+
+static error_code_t set_output_items(struct output_params *op, char *items_str)
+{
+        char *token;
+        char *saveptr = NULL;
+
+
+        op->print_records = OUTPUT_ITEM_NO;
+        op->print_processed_summ = OUTPUT_ITEM_NO;
+        op->print_metadata_summ = OUTPUT_ITEM_NO;
+
+        for (token = strtok_r(items_str, FIELDS_DELIM, &saveptr); //first token
+                        token != NULL;
+                        token = strtok_r(NULL, FIELDS_DELIM, &saveptr)) //next
+        {
+                if (strcmp(token, "records") == 0 ||
+                                strcmp(token, "r") == 0) {
+                        op->print_records = OUTPUT_ITEM_YES;
+                } else if (strcmp(token, "processed-records-summary") == 0 ||
+                                strcmp(token, "p") == 0) {
+                        op->print_processed_summ = OUTPUT_ITEM_YES;
+                } else if (strcmp(token, "metadata-summary") == 0 ||
+                                strcmp(token, "m") == 0) {
+                        op->print_metadata_summ = OUTPUT_ITEM_YES;
+                } else {
+                        print_err(E_ARG, 0, "unknown output item \"%s\"", token);
+                        return E_ARG;
+                }
+        }
+
+
+        return E_OK;
+}
 
 static error_code_t set_output_format(struct output_params *op,
                 char *format_str)
@@ -688,18 +872,18 @@ static error_code_t set_output_ts_conv(struct output_params *op,
         return E_OK;
 }
 
-static error_code_t set_output_stat_conv(struct output_params *op,
-                char *stat_conv_str)
+static error_code_t set_output_volume_conv(struct output_params *op,
+                char *volume_conv_str)
 {
-        if (strcmp(stat_conv_str, "none") == 0) {
-                op->stat_conv= OUTPUT_STAT_CONV_NONE;
-        } else if (strcmp(stat_conv_str, "metric-prefix") == 0) {
-                op->stat_conv = OUTPUT_STAT_CONV_METRIC_PREFIX;
-        } else if (strcmp(stat_conv_str, "binary-prefix") == 0) {
-                op->stat_conv = OUTPUT_STAT_CONV_BINARY_PREFIX;
+        if (strcmp(volume_conv_str, "none") == 0) {
+                op->volume_conv= OUTPUT_VOLUME_CONV_NONE;
+        } else if (strcmp(volume_conv_str, "metric-prefix") == 0) {
+                op->volume_conv = OUTPUT_VOLUME_CONV_METRIC_PREFIX;
+        } else if (strcmp(volume_conv_str, "binary-prefix") == 0) {
+                op->volume_conv = OUTPUT_VOLUME_CONV_BINARY_PREFIX;
         } else {
-                print_err(E_ARG, 0, "unknown output statistics conversion "
-                                "string \"%s\"", stat_conv_str);
+                print_err(E_ARG, 0, "unknown output volume conversion "
+                                "string \"%s\"", volume_conv_str);
                 return E_ARG;
         }
 
@@ -770,39 +954,20 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         return E_OK;
 }
 
-static error_code_t set_output_summary(struct output_params *op,
-                char *summary_str)
+static error_code_t set_progress_bar_type(progress_bar_type_t *type,
+                const char *progress_bar_type_str)
 {
-        switch (str_yes_or_no(summary_str)) {
-        case 0: //no
-                op->summary = OUTPUT_SUMMARY_NO;
-                break;
-        case 1: //yes
-                op->summary = OUTPUT_SUMMARY_YES;
-                break;
-        default: //other
-                print_err(E_ARG, 0, "unknown output summary string" "\"%s\"",
-                                summary_str);
-                return E_ARG;
-        }
-
-        return E_OK;
-}
-
-static error_code_t set_progress_bar(progress_bar_t *progress_bar,
-                const char *progress_bar_str)
-{
-        if (strcmp(progress_bar_str, "none") == 0) {
-                *progress_bar = PROGRESS_BAR_NONE;
-        } else if (strcmp(progress_bar_str, "basic") == 0) {
-                *progress_bar = PROGRESS_BAR_BASIC;
-        } else if (strcmp(progress_bar_str, "extended") == 0) {
-                *progress_bar = PROGRESS_BAR_EXTENDED;
-        } else if (strcmp(progress_bar_str, "file") == 0) {
-                *progress_bar = PROGRESS_BAR_FILE;
+        if (strcmp(progress_bar_type_str, "none") == 0) {
+                *type = PROGRESS_BAR_NONE;
+        } else if (strcmp(progress_bar_type_str, "total") == 0) {
+                *type = PROGRESS_BAR_TOTAL;
+        } else if (strcmp(progress_bar_type_str, "perslave") == 0) {
+                *type = PROGRESS_BAR_PERSLAVE;
+        } else if (strcmp(progress_bar_type_str, "json") == 0) {
+                *type = PROGRESS_BAR_JSON;
         } else {
                 print_err(E_ARG, 0, "unknown progress bar type \"%s\"",
-                                progress_bar_str);
+                                progress_bar_type_str);
                 return E_ARG;
         }
 
@@ -815,32 +980,30 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         error_code_t primary_errno = E_OK;
         int opt;
         int sort_key = LNF_FLD_ZERO_;
-        size_t input_arg_cnt = 0;
+        size_t path_str_len = 0;
         bool have_fields = false; //LNF fields are specified
 
-        const char usage_string[] = "Usage: mpirun [ options ] " PACKAGE_NAME
-                " [ <args> ]\n";
-        const char help_string[] = "help\n";
-        const char *short_opts = "a:f:l:o:r:s:t:";
+        const char *short_opts = "a:f:l:o:s:t:T:";
         const struct option long_opts[] = {
                 /* Long and short. */
                 {"aggregation", required_argument, NULL, 'a'},
                 {"filter", required_argument, NULL, 'f'},
                 {"limit", required_argument, NULL, 'l'},
                 {"order", required_argument, NULL, 'o'},
-                {"read", required_argument, NULL, 'r'},
                 {"statistic", required_argument, NULL, 's'},
-                {"time", required_argument, NULL, 't'},
+                {"time-point", required_argument, NULL, 't'},
+                {"time-range", required_argument, NULL, 'T'},
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
 
+                {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
                 {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
                 {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
                 {"output-ts-localtime", no_argument, NULL,
                         OPT_OUTPUT_TS_LOCALTIME},
-                {"output-stat-conv", required_argument, NULL,
-                        OPT_OUTPUT_STAT_CONV},
+                {"output-volume-conv", required_argument, NULL,
+                        OPT_OUTPUT_VOLUME_CONV},
                 {"output-tcpflags-conv", required_argument, NULL,
                         OPT_OUTPUT_TCP_FLAGS_CONV},
                 {"output-addr-conv", required_argument, NULL,
@@ -849,10 +1012,12 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         OPT_OUTPUT_IP_PROTO_CONV},
                 {"output-duration-conv", required_argument, NULL,
                         OPT_OUTPUT_DURATION_CONV},
-                {"output-summary", required_argument, NULL, OPT_OUTPUT_SUMMARY},
 
                 {"fields", required_argument, NULL, OPT_FIELDS},
-                {"progress-bar", required_argument, NULL, OPT_PROGRESS_BAR},
+                {"progress-bar-type", required_argument, NULL,
+                        OPT_PROGRESS_BAR_TYPE},
+                {"progress-bar-dest", required_argument, NULL,
+                        OPT_PROGRESS_BAR_DEST},
 
                 {"help", no_argument, NULL, OPT_HELP},
                 {"version", no_argument, NULL, OPT_VERSION},
@@ -884,7 +1049,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_filter(args, optarg);
                         break;
 
-                case 'l': //limit
+                case 'l': //record limit
                         primary_errno = set_limit(args, optarg);
                         break;
 
@@ -896,19 +1061,17 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         primary_errno = set_sort_field(args->fields, optarg);
                         break;
 
-                case 'r': //path to input file or directory
-                        args->path_str = optarg;
-                        input_arg_cnt++;
-                        break;
-
-                case 's': //statistic
+                case 's': //statistic shortcut
                         args->working_mode = MODE_AGGR;
                         primary_errno = set_stat(args, optarg);
                         break;
 
-                case 't': //time interval
-                        primary_errno = set_time_interval(args, optarg);
-                        input_arg_cnt++;
+                case 't': //time point
+                        primary_errno = set_time_point(args, optarg);
+                        break;
+
+                case 'T': //time range
+                        primary_errno = set_time_range(args, optarg);
                         break;
 
 
@@ -916,6 +1079,11 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         args->use_fast_topn = false;
                         break;
 
+
+                case OPT_OUTPUT_ITEMS:
+                        primary_errno = set_output_items(&args->output_params,
+                                        optarg);
+                        break;
 
                 case OPT_OUTPUT_FORMAT:
                         primary_errno = set_output_format(&args->output_params,
@@ -931,8 +1099,8 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         args->output_params.ts_localtime = true;
                         break;
 
-                case OPT_OUTPUT_STAT_CONV:
-                        primary_errno = set_output_stat_conv(
+                case OPT_OUTPUT_VOLUME_CONV:
+                        primary_errno = set_output_volume_conv(
                                         &args->output_params, optarg);
                         break;
 
@@ -956,11 +1124,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                         &args->output_params, optarg);
                         break;
 
-                case OPT_OUTPUT_SUMMARY:
-                        primary_errno = set_output_summary(&args->output_params,
-                                        optarg);
-                        break;
-
 
                 case OPT_FIELDS:
                         primary_errno = add_fields_from_str(args->fields,
@@ -968,14 +1131,18 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                         have_fields = true;
                         break;
 
-                case OPT_PROGRESS_BAR:
-                        primary_errno = set_progress_bar(&args->progress_bar,
-                                        optarg);
+                case OPT_PROGRESS_BAR_TYPE:
+                        primary_errno = set_progress_bar_type(
+                                        &args->progress_bar_type, optarg);
+                        break;
+
+                case OPT_PROGRESS_BAR_DEST:
+                        args->progress_bar_dest = optarg;
                         break;
 
 
                 case OPT_HELP: //help
-                        printf(usage_string);
+                        printf("%s\n\n", usage_string);
                         printf("%s", help_string);
                         return E_PASS;
 
@@ -994,29 +1161,36 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         }
 
 
-        /* Non-option arguments are undesirable. */
-        if (optind != argc) {
-                print_err(E_ARG, 0, "unknown non-option argument \"%s\"",
-                                argv[optind]);
-                fprintf(stderr, usage_string);
+        /*
+         * Non-option arguments are paths. Combine them into one string
+         * separated by the "file Separator" (0x1C) character for better MPI
+         * handling.
+         */
+        if (optind == argc) { //at least one path is mandatory
+                print_err(E_ARG, 0, "missing path");
                 return E_ARG;
         }
 
-        /* Correct data input check. */
-        if (input_arg_cnt == 0) {
-                print_err(E_ARG, 0, "missing data input specifier (-r or -t)");
-                fprintf(stderr, usage_string);
-                return E_ARG;
-        } else if (input_arg_cnt > 1) {
-                print_err(E_ARG, 0, "only one data input specifier allowed");
-                fprintf(stderr, usage_string);
-                return E_ARG;
+        for (int i = optind; i < argc; ++i) { //loop through all non-option args
+                if (strchr(argv[i], 0x1C) != NULL) {
+                        print_err(E_ARG, 0, "file separator character (0x1C) is"
+                                        " forbidden in path string", argv[i]);
+                        return E_ARG;
+                }
+                path_str_len += strlen(argv[i]) + 1; //one more for sep or '\0'
         }
 
-        if (args->path_str && (strlen(args->path_str) >= PATH_MAX)) {
-                print_err(E_ARG, 0, "path string too long (limit is %lu)",
-                                PATH_MAX);
-                return E_ARG;
+        args->path_str = calloc(path_str_len, sizeof (char)); //implicit null
+        if (args->path_str == NULL) {
+                print_err(E_MEM, 0, "calloc()");
+                return E_MEM;
+        }
+
+        for (int i = optind; i < argc; ++i) { //loop through all non-option args
+                strcat(args->path_str, argv[i]); //copy path
+                if (i != argc - 1) { //not the last path, add separator
+                        args->path_str[strlen(args->path_str)] = 0x1C;
+                }
         }
 
 
@@ -1026,10 +1200,18 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         }
 
         /* If progress bar type was not set, enable basic progress bar. */
-        if (args->progress_bar == PROGRESS_BAR_UNSET) {
-                args->progress_bar = PROGRESS_BAR_BASIC;
+        if (args->progress_bar_type == PROGRESS_BAR_UNSET) {
+                args->progress_bar_type = PROGRESS_BAR_TOTAL;
         }
 
+        /*
+         * Enable metadata-only mode if neither records nor prorcessed summary
+         * is desired.
+         */
+        if (args->output_params.print_processed_summ == OUTPUT_ITEM_NO &&
+                        args->output_params.print_records == OUTPUT_ITEM_NO) {
+                args->working_mode = MODE_META;
+        }
 
         /* Set some mode specific defaluts. */
         switch (args->working_mode) {
@@ -1078,6 +1260,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
                 break;
 
+        case MODE_META:
+                break;
+
         case MODE_PASS:
                 break;
 
@@ -1093,14 +1278,24 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
         switch (args->output_params.format) {
         case OUTPUT_FORMAT_PRETTY:
+                if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_records = OUTPUT_ITEM_YES;
+                }
+                if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_processed_summ = OUTPUT_ITEM_YES;
+                }
+                if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
+                }
+
                 if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
                         args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
                         args->output_params.ts_conv_str = "%F %T";
                 }
 
-                if (args->output_params.stat_conv == OUTPUT_STAT_CONV_UNSET) {
-                        args->output_params.stat_conv =
-                                OUTPUT_STAT_CONV_METRIC_PREFIX;
+                if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
+                        args->output_params.volume_conv =
+                                OUTPUT_VOLUME_CONV_METRIC_PREFIX;
                 }
 
                 if (args->output_params.tcp_flags_conv ==
@@ -1127,18 +1322,25 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_DURATION_CONV_STR;
                 }
 
-                if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
-                        args->output_params.summary = OUTPUT_SUMMARY_YES;
-                }
                 break;
 
         case OUTPUT_FORMAT_CSV:
+                if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_records = OUTPUT_ITEM_YES;
+                }
+                if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_processed_summ = OUTPUT_ITEM_NO;
+                }
+                if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
+                        args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
+                }
+
                 if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
                         args->output_params.ts_conv = OUTPUT_TS_CONV_NONE;
                 }
 
-                if (args->output_params.stat_conv == OUTPUT_STAT_CONV_UNSET) {
-                        args->output_params.stat_conv = OUTPUT_STAT_CONV_NONE;
+                if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
+                        args->output_params.volume_conv = OUTPUT_VOLUME_CONV_NONE;
                 }
 
                 if (args->output_params.tcp_flags_conv ==
@@ -1165,9 +1367,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                                 OUTPUT_DURATION_CONV_NONE;
                 }
 
-                if (args->output_params.summary == OUTPUT_SUMMARY_UNSET) {
-                        args->output_params.summary = OUTPUT_SUMMARY_NO;
-                }
                 break;
         default:
                 assert(!"unkwnown output parameters format");
@@ -1178,6 +1377,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         {
         static char fld_name_buff[LNF_INFO_BUFSIZE];
         int field;
+        char begin[255], end[255];
+        char *path = args->path_str;
+        int c;
 
         printf("------------------------------------------------------\n");
         printf("mode: %s\n", working_mode_to_str(args->working_mode));
@@ -1206,18 +1408,30 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 printf("filter: %s\n", args->filter_str);
         }
 
-        if (args->path_str != NULL) {
-                printf("path: %s\n", args->path_str);
-        } else {
-                char begin[255], end[255];
-
-                strftime(begin, sizeof(begin), "%c", &args->interval_begin);
-                strftime(end, sizeof(end), "%c", &args->interval_end);
-                printf("interval: %s - %s\n", begin, end);
+        printf("paths:\n\t");
+        while ((c = *path++)) {
+                if (c == 0x1C) { //substitute separator with end of line
+                        putchar('\n');
+                        putchar('\t');
+                } else {
+                        putchar(c);
+                }
         }
+        putchar('\n');
+
+        strftime(begin, sizeof(begin), "%c", &args->time_begin);
+        strftime(end, sizeof(end), "%c", &args->time_end);
+        printf("time range: %s - %s\n", begin, end);
         printf("------------------------------------------------------\n\n");
         }
 #endif //DEBUG
 
+
         return E_OK;
+}
+
+
+void free_args(struct cmdline_args *args)
+{
+        free(args->path_str);
 }

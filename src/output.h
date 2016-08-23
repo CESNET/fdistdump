@@ -53,6 +53,12 @@
 
 
 typedef enum {
+        OUTPUT_ITEM_UNSET,
+        OUTPUT_ITEM_YES,
+        OUTPUT_ITEM_NO,
+} output_item_t;
+
+typedef enum {
         OUTPUT_FORMAT_UNSET,
         OUTPUT_FORMAT_PRETTY,
         OUTPUT_FORMAT_CSV,
@@ -65,10 +71,10 @@ typedef enum {
 } output_ts_conv_t;
 
 typedef enum {
-        OUTPUT_STAT_CONV_UNSET,
-        OUTPUT_STAT_CONV_NONE,
-        OUTPUT_STAT_CONV_METRIC_PREFIX,
-        OUTPUT_STAT_CONV_BINARY_PREFIX,
+        OUTPUT_VOLUME_CONV_UNSET,
+        OUTPUT_VOLUME_CONV_NONE,
+        OUTPUT_VOLUME_CONV_METRIC_PREFIX,
+        OUTPUT_VOLUME_CONV_BINARY_PREFIX,
 } output_stat_conv_t;
 
 typedef enum {
@@ -95,36 +101,30 @@ typedef enum {
         OUTPUT_DURATION_CONV_STR,
 } output_duration_conv_t;
 
-typedef enum {
-        OUTPUT_SUMMARY_UNSET,
-        OUTPUT_SUMMARY_YES,
-        OUTPUT_SUMMARY_NO,
-} output_summary_t;
-
 
 struct output_params {
+        output_item_t print_records;
+        output_item_t print_processed_summ;
+        output_item_t print_metadata_summ;
+
         output_format_t format;
 
         output_ts_conv_t ts_conv;
         char *ts_conv_str;
         bool ts_localtime; //output timestamp in localtime instead of UTC
 
-        output_stat_conv_t stat_conv;
+        output_stat_conv_t volume_conv;
         output_tcp_flags_conv_t tcp_flags_conv;
         output_ip_addr_conv_t ip_addr_conv;
         output_ip_proto_conv_t ip_proto_conv;
         output_duration_conv_t duration_conv;
-
-        output_summary_t summary;
 };
 
 void output_setup(struct output_params op, const struct field_info *fi);
+
 void print_rec(const uint8_t *data);
 error_code_t print_mem(lnf_mem_t *mem, size_t limit);
-
-/* Print statistics. */
-void print_stats(const struct stats *stats);
-void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
-                progress_bar_t type);
+void print_processed_summ(const struct processed_summ *s, double duration);
+void print_metadata_summ(const struct metadata_summ *s);
 
 #endif //OUTPUT_H

@@ -42,6 +42,7 @@
  *
  */
 
+#include "common.h"
 #include "output.h"
 
 #include <stdio.h>
@@ -70,6 +71,7 @@ static struct {
         size_t size;
 } fields[LNF_FLD_TERM_]; //fields array compressed for faster access
 static size_t fields_cnt = 0; //number of fields present in fields array
+static bool first_item = true; //first item will not print '\n'
 
 static const char *ip_proto_str_table[] = {
         [0] = "HOPOPT",
@@ -292,8 +294,8 @@ static const char * timestamp_to_str(const uint64_t *ts)
 
                 off = strftime(global_str, sizeof (global_str),
                                 output_params.ts_conv_str, timeconv(&sec));
-                snprintf(global_str + off, sizeof (global_str) - off, ".%.3lu",
-                                msec);
+                snprintf(global_str + off, sizeof (global_str) - off, ".%.3"
+                                PRIu64, msec);
                 break;
 
         default:
@@ -303,85 +305,85 @@ static const char * timestamp_to_str(const uint64_t *ts)
         return global_str;
 }
 
-static const char * double_stat_to_str(const double *stat)
+static const char * double_volume_to_str(const double *volume)
 {
-        double stat_conv = *stat;
+        double volume_conv = *volume;
         size_t unit_table_idx = 0;
         const char **unit_table;
 
-        switch (output_params.stat_conv) {
-        case OUTPUT_STAT_CONV_NONE:
+        switch (output_params.volume_conv) {
+        case OUTPUT_VOLUME_CONV_NONE:
                 break;
 
-        case OUTPUT_STAT_CONV_METRIC_PREFIX:
+        case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
                 unit_table = decimal_unit_table;
-                while (stat_conv > 1000.0 && unit_table_idx + 1 <
+                while (volume_conv > 1000.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(decimal_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1000.0;
+                        volume_conv /= 1000.0;
                 }
                 break;
 
-        case OUTPUT_STAT_CONV_BINARY_PREFIX:
+        case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
                 unit_table = binary_unit_table;
-                while (stat_conv > 1024.0 && unit_table_idx + 1 <
+                while (volume_conv > 1024.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(binary_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1024.0;
+                        volume_conv /= 1024.0;
                 }
                 break;
 
         default:
-                assert(!"unknown statistics conversion");
+                assert(!"unknown volume conversion");
         }
 
         if (unit_table_idx == 0) { //small number or no conversion
-                snprintf(global_str, sizeof (global_str), "%.1f", stat_conv);
+                snprintf(global_str, sizeof (global_str), "%.1f", volume_conv);
         } else { //converted unit plus unit string from unit table
-                snprintf(global_str, sizeof (global_str), "%.1f %s", stat_conv,
-                                unit_table[unit_table_idx]);
+                snprintf(global_str, sizeof (global_str), "%.1f %s",
+                                volume_conv, unit_table[unit_table_idx]);
         }
 
         return global_str;
 }
 
-static const char * stat_to_str(const uint64_t *stat)
+static const char * volume_to_str(const uint64_t *volume)
 {
-        double stat_conv = *stat;
+        double volume_conv = *volume;
         size_t unit_table_idx = 0;
         const char **unit_table;
 
-        switch (output_params.stat_conv) {
-        case OUTPUT_STAT_CONV_NONE:
+        switch (output_params.volume_conv) {
+        case OUTPUT_VOLUME_CONV_NONE:
                 break;
 
-        case OUTPUT_STAT_CONV_METRIC_PREFIX:
+        case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
                 unit_table = decimal_unit_table;
-                while (stat_conv > 1000.0 && unit_table_idx + 1 <
+                while (volume_conv > 1000.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(decimal_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1000.0;
+                        volume_conv /= 1000.0;
                 }
                 break;
 
-        case OUTPUT_STAT_CONV_BINARY_PREFIX:
+        case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
                 unit_table = binary_unit_table;
-                while (stat_conv > 1024.0 && unit_table_idx + 1 <
+                while (volume_conv > 1024.0 && unit_table_idx + 1 <
                                 ARRAY_SIZE(binary_unit_table)) {
                         unit_table_idx++;
-                        stat_conv /= 1024.0;
+                        volume_conv /= 1024.0;
                 }
                 break;
 
         default:
-                assert(!"unknown statistics conversion");
+                assert(!"unknown volume conversion");
         }
 
         if (unit_table_idx == 0) { //small number or no conversion
-                snprintf(global_str, sizeof (global_str), "%" PRIu64, *stat);
+                snprintf(global_str, sizeof (global_str), "%" PRIu64, *volume);
         } else { //converted unit plus unit string from unit table
-                snprintf(global_str, sizeof (global_str), "%.1f %s", stat_conv,
-                                unit_table[unit_table_idx]);
+                snprintf(global_str, sizeof (global_str), "%.1f %s",
+                                volume_conv, unit_table[unit_table_idx]);
         }
 
         return global_str;
@@ -661,11 +663,11 @@ field_to_str_t field_to_str_func_table[] = {
         [LNF_FLD_RECEIVED] = (field_to_str_t)timestamp_to_str,
 
         /* Statistical fields. */
-        [LNF_FLD_DOCTETS] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_DPKTS] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_OUT_BYTES] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_OUT_PKTS] = (field_to_str_t)stat_to_str,
-        [LNF_FLD_AGGR_FLOWS] = (field_to_str_t)stat_to_str,
+        [LNF_FLD_DOCTETS] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_DPKTS] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_OUT_BYTES] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_OUT_PKTS] = (field_to_str_t)volume_to_str,
+        [LNF_FLD_AGGR_FLOWS] = (field_to_str_t)volume_to_str,
 
         /* TCP flags. */
         [LNF_FLD_TCP_FLAGS] = (field_to_str_t)tcp_flags_to_str,
@@ -675,10 +677,10 @@ field_to_str_t field_to_str_func_table[] = {
 
         /* Computed: duration. */
         [LNF_FLD_CALC_DURATION] = (field_to_str_t)duration_to_str,
-        /* Computed: statistics. */
-        [LNF_FLD_CALC_BPS] = (field_to_str_t)double_stat_to_str,
-        [LNF_FLD_CALC_PPS] = (field_to_str_t)double_stat_to_str,
-        [LNF_FLD_CALC_BPP] = (field_to_str_t)double_stat_to_str,
+        /* Computed: volumetric. */
+        [LNF_FLD_CALC_BPS] = (field_to_str_t)double_volume_to_str,
+        [LNF_FLD_CALC_PPS] = (field_to_str_t)double_volume_to_str,
+        [LNF_FLD_CALC_BPP] = (field_to_str_t)double_volume_to_str,
 
         [LNF_FLD_TERM_] = NULL,
 };
@@ -804,10 +806,17 @@ void output_setup(struct output_params op, const struct field_info *fi)
 void print_rec(const uint8_t *data)
 {
         size_t off = 0;
-        static bool first_rec = 1;
+        static bool first_rec = true;
         static size_t col_width[LNF_FLD_TERM_];
 
+
+        if (output_params.print_records != OUTPUT_ITEM_YES) {
+                return;
+        }
+
         if (first_rec) {
+                first_item = first_item ? false : (putchar('\n'), false);
+
                 for (size_t i = 0; i < fields_cnt; ++i) {
                         const char *header_str = field_get_name(fields[i].id);
                         const size_t header_str_len = strlen(header_str);
@@ -849,6 +858,11 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         size_t fld_max_size = 0; //maximum data size length in bytes
         size_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
 
+
+        if (output_params.print_records != OUTPUT_ITEM_YES) {
+                return E_OK;
+        }
+        first_item = first_item ? false : (putchar('\n'), false);
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
@@ -930,68 +944,105 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         return E_OK;
 }
 
-void print_stats(const struct stats *stats)
+void print_processed_summ(const struct processed_summ *s, double duration)
 {
-        if (output_params.summary != OUTPUT_SUMMARY_YES) {
+        const double flows_per_sec = s->flows / duration;
+
+
+        if (output_params.print_processed_summ != OUTPUT_ITEM_YES) {
                 return;
         }
+        first_item = first_item ? false : (putchar('\n'), false);
 
-        printf("summary: ");
-        printf("%s flows, ", stat_to_str(&stats->flows));
-        printf("%s packets, ", stat_to_str(&stats->pkts));
-        printf("%s bytes", stat_to_str(&stats->bytes));
-        putchar('\n');
+        switch (output_params.format) {
+        case OUTPUT_FORMAT_PRETTY:
+                printf("processed records summary:\n");
+
+                printf("\t%s flows, ", volume_to_str(&s->flows));
+                printf("%s packets, ", volume_to_str(&s->pkts));
+                printf("%s bytes\n", volume_to_str(&s->bytes));
+
+                printf("\t%f seconds, %s flows/second\n", duration,
+                                double_volume_to_str(&flows_per_sec));
+                break;
+
+        case OUTPUT_FORMAT_CSV:
+                printf("flows%cpackets%cbytes%cseconds%cflows/second\n",
+                                CSV_SEP, CSV_SEP, CSV_SEP, CSV_SEP);
+
+                printf("%s%c", volume_to_str(&s->flows), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes), CSV_SEP);
+                printf("%f%c%s\n", duration, CSV_SEP,
+                                double_volume_to_str(&flows_per_sec));
+                break;
+
+        default:
+                assert(!"unknown output format");
+        }
 }
 
-void print_progress_bar(const size_t *cur, const size_t *tot, size_t cnt,
-                progress_bar_t type)
+void print_metadata_summ(const struct metadata_summ *s)
 {
-        size_t sum_cur = 0;
-        size_t sum_tot = 0;
-        FILE *out_stream;
-
-
-        for (size_t i = 0; i < cnt; ++i) {
-                sum_cur += cur[i];
-                sum_tot += tot[i];
+        if (output_params.print_metadata_summ != OUTPUT_ITEM_YES) {
+                return;
         }
+        first_item = first_item ? false : (putchar('\n'), false);
 
-        if (type == PROGRESS_BAR_BASIC || type == PROGRESS_BAR_EXTENDED) {
-                out_stream = stderr;
+        switch (output_params.format) {
+        case OUTPUT_FORMAT_PRETTY:
+                printf("metadata summary:\n");
 
-                fprintf(out_stream, "[progress] ");
-                fprintf(out_stream, "master: %zu/%zu (%.0f %%)", sum_cur,
-                                sum_tot, (double)sum_cur / sum_tot * 100);
+                printf("\tflows:\n");
+                printf("\t\ttotal: %s\n", volume_to_str(&s->flows));
+                printf("\t\tTCP:   %s\n", volume_to_str(&s->flows_tcp));
+                printf("\t\tUDP:   %s\n", volume_to_str(&s->flows_udp));
+                printf("\t\tICMP:  %s\n", volume_to_str(&s->flows_icmp));
+                printf("\t\tother: %s\n", volume_to_str(&s->flows_other));
 
-                if (type == PROGRESS_BAR_EXTENDED) {
-                        for (size_t i = 0; i < cnt; ++i) {
-                                fprintf(out_stream, " | %zu: %zu/%zu (%.0f %%)",
-                                                i + 1, cur[i], tot[i],
-                                                (double)cur[i] / tot[i] * 100);
-                        }
-                }
+                printf("\tpackets:\n");
+                printf("\t\ttotal: %s\n", volume_to_str(&s->pkts));
+                printf("\t\tTCP:   %s\n", volume_to_str(&s->pkts_tcp));
+                printf("\t\tUDP:   %s\n", volume_to_str(&s->pkts_udp));
+                printf("\t\tICMP:  %s\n", volume_to_str(&s->pkts_icmp));
+                printf("\t\tother: %s\n", volume_to_str(&s->pkts_other));
 
-                putc('\r', out_stream);
-                fflush(out_stream);
-        }
+                printf("\tbytes:\n");
+                printf("\t\ttotal: %s\n", volume_to_str(&s->bytes));
+                printf("\t\tTCP:   %s\n", volume_to_str(&s->bytes_tcp));
+                printf("\t\tUDP:   %s\n", volume_to_str(&s->bytes_udp));
+                printf("\t\tICMP:  %s\n", volume_to_str(&s->bytes_icmp));
+                printf("\t\tother: %s\n", volume_to_str(&s->bytes_other));
+                break;
 
-        if (type == PROGRESS_BAR_FILE) {
-                out_stream = fopen("progress.json", "w");
-                assert(out_stream != NULL);
+        case OUTPUT_FORMAT_CSV:
+                printf("field%ctotal%cTCP%cUDP%cICMP%cother\n", CSV_SEP,
+                                CSV_SEP, CSV_SEP, CSV_SEP, CSV_SEP);
 
-                putc('{', out_stream);
+                printf("flows%c", CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows_tcp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows_udp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->flows_icmp), CSV_SEP);
+                printf("%s\n", volume_to_str(&s->flows_other));
 
-                fprintf(out_stream, "\"master\":%.0f",
-                                (double)sum_cur / sum_tot * 100);
+                printf("packets%c", CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts_tcp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts_udp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->pkts_icmp), CSV_SEP);
+                printf("%s\n", volume_to_str(&s->pkts_other));
 
-                for (size_t i = 0; i < cnt; ++i) {
-                        fprintf(out_stream, ",\"%zu\":%.0f", i + 1,
-                                        (double)cur[i] / tot[i] * 100);
-                }
+                printf("bytes%c", CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes_tcp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes_udp), CSV_SEP);
+                printf("%s%c", volume_to_str(&s->bytes_icmp), CSV_SEP);
+                printf("%s\n", volume_to_str(&s->bytes_other));
 
-                putc('}', out_stream);
-                putc('\n', out_stream);
+                break;
 
-                fclose(out_stream);
+        default:
+                assert(!"unknown output format");
         }
 }

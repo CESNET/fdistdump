@@ -46,6 +46,7 @@
 #ifndef MASTER_H
 #define MASTER_H
 
+#include "common.h"
 #include "arg_parse.h"
 
 /** \brief Master program function.
