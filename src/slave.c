@@ -380,9 +380,14 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 MPI_Wait(&request, MPI_STATUS_IGNORE);
         }
 
+#ifdef _OPENMP
         print_debug("<task_send_file> thread %d, read %zu, processed %zu, "
                         "sent %zu B", omp_get_thread_num(), file_rec_cntr,
                         file_proc_rec_cntr, file_sent_bytes);
+#else
+        print_debug("<task_send_file> read %zu, processed %zu, sent %zu B",
+                        file_rec_cntr, file_proc_rec_cntr, file_sent_bytes);
+#endif //_OPENMP
 
 
         return E_OK;
@@ -429,8 +434,13 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
                 print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
+#ifdef _OPENMP
         print_debug("<task_store_file> thread %d, read %zu, processed %zu",
                        omp_get_thread_num(), file_rec_cntr, file_proc_rec_cntr);
+#else
+        print_debug("<task_store_file> read %zu, processed %zu", file_rec_cntr,
+                        file_proc_rec_cntr);
+#endif //_OPENMP
 
         return primary_errno;
 }
@@ -1163,10 +1173,12 @@ error_code_t slave(int world_size)
         /* Report number of files to be processed. */
         progress_report_init(files.f_cnt);
 
+#ifdef _OPENMP
         /* Spawn at most files count threads. */
         if (files.f_cnt < (size_t)omp_get_max_threads()) {
                 omp_set_num_threads(files.f_cnt);
         }
+#endif //_OPENMP
 
         #pragma omp parallel reduction(max:primary_errno)
         {
