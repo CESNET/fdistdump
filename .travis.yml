@@ -21,13 +21,13 @@ env:
         - MPI=mpich
         - MPI=mpich OPENMP="--disable-openmp"
 
-matrix:
-        exclude:
-        #clang < 3.7 doesn't fully support OpenMP
-        - compiler: clang
-          env: MPI=openmpi
-        - compiler: clang
-          env: MPI=mpich
+#matrix:
+#        exclude:
+#        #clang < 3.7 doesn't fully support OpenMP
+#        - compiler: clang
+#          env: MPI=openmpi
+#        - compiler: clang
+#          env: MPI=mpich
 
 
 before_install:

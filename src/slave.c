@@ -55,8 +55,10 @@
 #include <limits.h> //PATH_MAX
 #include <unistd.h> //access
 
-#include <mpi.h>
+#ifdef _OPENMP
 #include <omp.h>
+#endif //_OPENMP
+#include <mpi.h>
 #include <libnf.h>
 #include <dirent.h> //list directory
 #include <sys/stat.h> //stat()
