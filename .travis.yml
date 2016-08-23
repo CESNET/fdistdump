@@ -17,6 +17,8 @@ env:
         matrix:
                 - MPI=openmpi
                 - MPI=mpich
+                - OPENMP="--enable-openmp"
+                - OPENMP="--disable-openmp"
 
 
 before_install:
@@ -34,7 +36,7 @@ before_install:
 
 install:
         - autoreconf -i
-        - ./configure --enable-basic-tests
+        - ./configure "$OPENMP"
         - make
 
 #before_script:
