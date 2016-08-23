@@ -32,10 +32,10 @@ ADVANCED_TESTS=tests/advanced/create_test_data.test \
 if ENABLE_BASIC_TESTS
 TESTS+=$(BASIC_TESTS)
 check_PROGRAMS+=test_mpi_init \
-	       test_create_mpi_struct \
-	       test_arguments \
-	       test_mem_init \
-	       test_mem_setup
+		test_create_mpi_struct \
+		test_arguments \
+		test_mem_init \
+		test_mem_setup
 
 test_mpi_init_SOURCES=tests/mpi_init.c \
 		      tests/test_common.c tests/test_common.h
