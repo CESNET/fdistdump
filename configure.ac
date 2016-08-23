@@ -123,3 +123,4 @@ echo "Optional Features:"
 test -n "${OPENMP_CFLAGS}" && echo "  OpenMP"
 test -n "${enable_basic_tests}" && echo "  Basic tests"
 test -n "${enable_advanced_tests}" && echo "  Advanced tests"
+true #return success
