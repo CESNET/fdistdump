@@ -30,3 +30,6 @@ Makefile
 
 #object files
 *.o
+
+#ctags
+tags

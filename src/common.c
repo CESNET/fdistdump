@@ -395,8 +395,9 @@ time_t mktime_utc(struct tm *tm)
         /* Save current time zone environment variable. */
         tz = getenv("TZ");
         if (tz != NULL) {
-                assert(strlen(tz) < 128);
-                strncpy(orig_tz, tz, 128);
+                assert(strlen(tz) < sizeof (orig_tz));
+                strncpy(orig_tz, tz, sizeof (orig_tz) - 1);
+                orig_tz[sizeof (orig_tz) - 1] = '\0';
         }
 
         /* Set time zone to UTC. mktime() would be affected by daylight saving
@@ -409,9 +410,9 @@ time_t mktime_utc(struct tm *tm)
 
         /* Restore time zone to stored value. */
         if (tz != NULL) {
-                setenv("TZ", orig_tz, 1);
+                assert(setenv("TZ", orig_tz, 1) == 0);
         } else {
-                unsetenv("TZ");
+                assert(unsetenv("TZ") == 0);
         }
         tzset();
 

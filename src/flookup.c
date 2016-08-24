@@ -195,10 +195,8 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
 static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
 {
         error_code_t primary_errno = E_OK;
-
         DIR *dir;
         struct dirent *entry;
-
         struct stat stat_buff;
 
 
@@ -210,11 +208,12 @@ static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
                 return E_PATH;
         }
 
-        if (!S_ISDIR(stat_buff.st_mode)) { //path is everything but direcotry
+        if (!S_ISDIR(stat_buff.st_mode)) {
+                /* Path is not a directory. */
                 return f_array_add(fa, path, stat_buff.st_size);
         }
 
-        /* Path is directory. */
+        /* Path is a directory. */
         dir = opendir(path);
         if (dir == NULL) {
                 secondary_errno = errno;
@@ -238,6 +237,7 @@ static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
 
                 primary_errno = f_array_fill_from_path(fa, new_path);
                 if (primary_errno != E_OK) {
+                        closedir(dir);
                         return primary_errno;
                 }
         }
@@ -273,6 +273,12 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
         char *last_path = tmp;
         char *perc_sign;
 
+
+        if (strlen(format) >= PATH_MAX) {
+                print_warn(E_PATH, 0, "conversion specifier too long, "
+                                "skipping \"%s\"", format);
+                return false;
+        }
 
         strcpy(tmp, format); //copy all except initial conversion specification
 
