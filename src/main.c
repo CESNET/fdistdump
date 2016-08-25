@@ -69,8 +69,7 @@ int main(int argc, char **argv)
         /*
          * Initialize MPI and check supported thread level. We need at least
          * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
-         * Open MPI doc says: "It is only lightly tested and likely does not
-         * work for thread-intensive applications."
+         * its not common amongst MPI implementations.
          */
         MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
         if (thread_provided != MPI_THREAD_SERIALIZED &&
@@ -85,20 +84,19 @@ int main(int argc, char **argv)
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
+        if (world_size <= 1) {
+                print_err(E_MPI, 0, "%s requires at least 2 copies of the "
+                                "program to run. Did you use MPI process "
+                                "manager, e.g. mpiexec(1)?", PACKAGE_NAME);
+                MPI_Finalize();
+                return EXIT_FAILURE;
+        }
+
         if (world_rank == ROOT_PROC) {
                 primary_errno = arg_parse(&args, argc, argv);
                 if (primary_errno != E_OK) {
                         args.working_mode = MODE_PASS;
                 }
-        }
-
-        if (world_size <= 1) {
-                printf("%s requires at least 2 copies of the program to run. "
-                                "Did you use MPI process manager, e.g. mpiexec(1)? "
-                                "Try to run program again with --help.\n",
-                                PACKAGE_NAME);
-                MPI_Finalize();
-                return EXIT_FAILURE;
         }
 
         /* Create MPI data types (global variables). */

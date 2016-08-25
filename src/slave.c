@@ -1051,7 +1051,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
         for (size_t i = 0; i < paths_cnt; ++i) {
                 /* Error on one of the threads. */
                 if (primary_errno != E_OK) {
-                        continue; //OpenMP cannot break from for loop
+                        goto my_continue; //OpenMP cannot break from for loop
                 }
 
                 /* Open a flow file. */
@@ -1059,7 +1059,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 if (secondary_errno != LNF_OK) {
                         print_warn(E_LNF, secondary_errno,
                                         "unable to open file \"%s\"", paths[i]);
-                        continue;
+                        goto my_continue;
                 }
 
                 /* Increment the private metadata summary counters. */
@@ -1101,6 +1101,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
 
                 lnf_close(tc.file);
 
+my_continue:
                 /* Report that another file has been processed. */
                 progress_report_next();
         } //don't wait for other threads and start merging memory immediately
@@ -1132,8 +1133,8 @@ error_code_t slave(int world_size)
 {
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
-        char **paths;
-        size_t paths_cnt;
+        char **paths = NULL;
+        size_t paths_cnt = 0;
 
 
         memset(&stc, 0, sizeof (stc));

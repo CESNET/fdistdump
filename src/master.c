@@ -329,11 +329,13 @@ static void progress_bar_finish(void)
 {
         struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
 
+
         free(pbc->files_slave_cur);
         free(pbc->files_slave_sum);
 
         /* Close output stream only if it's file. */
         if (pbc->out_stream != stdout && pbc->out_stream != stderr &&
+                        pbc->out_stream != NULL &&
                         fclose(pbc->out_stream) == EOF) {
                 print_warn(E_INTERNAL, 0, "progress bar: %s", strerror(errno));
         }
