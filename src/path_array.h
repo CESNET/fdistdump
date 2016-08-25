@@ -1,9 +1,9 @@
 /**
- * \file flookup.h
+ * \file path_array.h
  * \brief
- * \author Tomas Podermanski
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+ * \author Jan Wrona, <wrona@cesnet.cz>
+ * \date 2016
  */
 
 /*
@@ -43,38 +43,18 @@
  *
  */
 
-#ifndef FLOOKUP_H
-#define FLOOKUP_H
+#ifndef PATH_ARRAY_H
+#define PATH_ARRAY_H
 
-
-#include "common.h"
 
 #include <stddef.h> //size_t
 
 
-/* linked list of file names */
-typedef struct {
-        char *f_name;
-        off_t f_size;
-} f_item_t;
-
-typedef struct {
-        f_item_t *f_items;
-        size_t f_cnt;
-        size_t a_size;
-} f_array_t;
+/* Generate array of paths from paths string and optional time range. */
+char ** path_array_gen(char *paths, const struct tm begin,
+                const struct tm end, size_t *cnt);
+/* Free all file names and array. */
+void path_array_free(char **names, size_t names_cnt);
 
 
-/* file list operations */
-void f_array_init(f_array_t *fa);
-void f_array_free(f_array_t *fa);
-error_code_t f_array_resize(f_array_t *fa);
-error_code_t f_array_add(f_array_t *fa, const char *f_name, off_t f_size);
-
-size_t f_array_get_count(const f_array_t *fa);
-off_t f_array_get_size_sum(const f_array_t *fa);
-
-
-error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
-                struct tm end);
-#endif
+#endif //PATH_ARRAY_H

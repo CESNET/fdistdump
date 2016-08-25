@@ -5,7 +5,7 @@ fdistdump_SOURCES=src/main.c \
 		  src/slave.c src/slave.h \
 		  src/common.c src/common.h \
 		  src/arg_parse.c src/arg_parse.h \
-		  src/flookup.c src/flookup.h \
+		  src/path_array.c src/path_array.h \
 		  src/output.c src/output.h
 
 

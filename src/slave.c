@@ -45,7 +45,7 @@
 
 #include "common.h"
 #include "slave.h"
-#include "flookup.h"
+#include "path_array.h"
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -1011,8 +1011,8 @@ static void progress_report_next(void)
  * buffers are switched and the whole process repeats until all data are
  * sent.
  */
-static error_code_t process_parallel(struct slave_task_ctx *stc,
-                const f_array_t *files)
+static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
+                size_t paths_cnt)
 {
         error_code_t primary_errno = E_OK;
         int secondary_errno;
@@ -1048,20 +1048,17 @@ static error_code_t process_parallel(struct slave_task_ctx *stc,
 
         /* Parallel loop through all the files. */
         #pragma omp for schedule(guided) nowait
-        for (size_t i = 0; i < files->f_cnt; ++i) {
-                const char *path = files->f_items[i].f_name;
-
-
+        for (size_t i = 0; i < paths_cnt; ++i) {
                 /* Error on one of the threads. */
                 if (primary_errno != E_OK) {
                         continue; //OpenMP cannot break from for loop
                 }
 
                 /* Open a flow file. */
-                secondary_errno = lnf_open(&tc.file, path, LNF_READ, NULL);
+                secondary_errno = lnf_open(&tc.file, paths[i], LNF_READ, NULL);
                 if (secondary_errno != LNF_OK) {
                         print_warn(E_LNF, secondary_errno,
-                                        "unable to open file \"%s\"", path);
+                                        "unable to open file \"%s\"", paths[i]);
                         continue;
                 }
 
@@ -1135,12 +1132,11 @@ error_code_t slave(int world_size)
 {
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
-        f_array_t files;
+        char **paths;
+        size_t paths_cnt;
 
 
         memset(&stc, 0, sizeof (stc));
-        f_array_init(&files);
-
         stc.slave_cnt = world_size - 1; //all nodes without master
 
         /* Allocate two data buffers for records storage. */
@@ -1166,25 +1162,27 @@ error_code_t slave(int world_size)
         }
 
         /* Data source specific initialization. */
-        primary_errno = f_array_fill(&files, stc.path_str,
-                        stc.shared.time_begin, stc.shared.time_end);
-        if (primary_errno != E_OK) {
+        paths = path_array_gen(stc.path_str, stc.shared.time_begin,
+                        stc.shared.time_end, &paths_cnt);
+        if (paths == NULL) {
+                primary_errno = E_PATH;
                 goto free_buffers;
         }
 
         /* Report number of files to be processed. */
-        progress_report_init(files.f_cnt);
+        progress_report_init(paths_cnt);
+
 
 #ifdef _OPENMP
         /* Spawn at most files count threads. */
-        if (files.f_cnt < (size_t)omp_get_max_threads()) {
-                omp_set_num_threads(files.f_cnt);
+        if (paths_cnt < (size_t)omp_get_max_threads()) {
+                omp_set_num_threads(paths_cnt);
         }
 #endif //_OPENMP
 
         #pragma omp parallel reduction(max:primary_errno)
         {
-                primary_errno = process_parallel(&stc, &files);
+                primary_errno = process_parallel(&stc, paths, paths_cnt);
         } //impicit barrier
         if (primary_errno != E_OK) {
                 goto free_buffers;
@@ -1207,7 +1205,7 @@ free_buffers:
         free(stc.buff[0]);
 
 finalize_task:
-        f_array_free(&files);
+        path_array_free(paths, paths_cnt);
         task_free(&stc);
 
         return primary_errno;

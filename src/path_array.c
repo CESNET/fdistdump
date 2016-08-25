@@ -1,9 +1,9 @@
 /**
- * \file flookup.c
+ * \file path_array.c
  * \brief
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
  * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+ * \date 2016
  */
 
 /*
@@ -44,7 +44,7 @@
  */
 
 #include "common.h"
-#include "flookup.h"
+#include "path_array.h"
 
 #include <stdlib.h>
 #include <errno.h>
@@ -62,96 +62,49 @@
 #include <mpi.h>
 
 
-#define F_ARRAY_INIT_SIZE 50
+#define PATH_ARRAY_INIT_SIZE 50
 
 
-extern int secondary_errno;
+struct path_array_ctx {
+        char **names;
+        size_t names_cnt;
+        size_t names_size;
+};
 
 
-/* initialize filenames-array */
-void f_array_init(f_array_t *fa)
+/* Add path into the path array. */
+static error_code_t add_file(struct path_array_ctx *pac, const char *name)
 {
-        fa->f_items = NULL;
-        fa->f_cnt = 0;
-        fa->a_size = 0;
-}
+        /* Is there a free space in the array for another file? */
+        if (pac->names_cnt == pac->names_size) { //no, ask for another space
+                char **new_names;
 
-/* free all allocated filenames-array memory*/
-void f_array_free(f_array_t *fa)
-{
-        for (size_t i = 0; i < fa->f_cnt; ++i) {
-                free(fa->f_items[i].f_name);
-        }
-
-        free(fa->f_items);
-
-        fa->f_cnt = 0;
-        fa->a_size = 0;
-}
-
-/* resize filenames-array */
-error_code_t f_array_resize(f_array_t *fa)
-{
-        f_item_t *new_array;
-        const size_t new_size = (fa->a_size == 0) ?
-                F_ARRAY_INIT_SIZE : fa->a_size * 2;
-
-        new_array = realloc(fa->f_items, new_size * sizeof (f_item_t));
-        if (new_array == NULL) {
-                print_err(E_MEM, 0, "realloc()");
-                return E_MEM;
-        }
-
-        fa->f_items = new_array;
-        fa->a_size = new_size;
-
-        return E_OK;
-}
-
-/* add filename-item into filename-array */
-error_code_t f_array_add(f_array_t *fa, const char *f_name, off_t f_size)
-{
-        if (fa->f_cnt == fa->a_size) {
-                error_code_t ret = f_array_resize(fa);
-                if (ret != E_OK) {
-                        return ret;
+                new_names = realloc(pac->names,
+                                pac->names_size * 2 * sizeof (*pac->names));
+                if (new_names == NULL) { //failure
+                        print_err(E_MEM, 0, "realloc()");
+                        return E_MEM;
+                } else { //success
+                        pac->names = new_names;
+                        pac->names_size *= 2;
                 }
         }
 
-        fa->f_items[fa->f_cnt].f_name = strdup(f_name);
-        if (fa->f_items[fa->f_cnt].f_name == NULL) {
+        /* Allocate space for the name and copy it there. */
+        pac->names[pac->names_cnt] = strdup(name);
+        if (pac->names[pac->names_cnt] == NULL) {
                 print_err(E_MEM, 0, "strdup()");
                 return E_MEM;
+        } else {
+                pac->names_cnt++;
+                return E_OK;
         }
-
-        fa->f_items[fa->f_cnt].f_size = f_size;
-        fa->f_cnt++;
-
-        return E_OK;
 }
 
 
-/* return number of files in file array */
-size_t f_array_get_count(const f_array_t *fa)
-{
-        return fa->f_cnt;
-}
-
-/* return sum of sizes of all files in file array */
-off_t f_array_get_size_sum(const f_array_t *fa)
-{
-        off_t size_sum = 0;
-
-        for (size_t i = 0; i < fa->f_cnt; ++i) {
-                size_sum += fa->f_items[i].f_size;
-        }
-
-        return size_sum;
-}
-
-
-static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
-                struct tm begin, struct tm end)
+static error_code_t fill_from_time(struct path_array_ctx *pac,
+                char path[PATH_MAX], const struct tm begin,
+                const struct tm end)
 {
         error_code_t primary_errno = E_OK;
         size_t offset = strlen(path);
@@ -159,6 +112,7 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
         struct stat stat_buff;
 
 
+        /* Make sure there is a terminating slash. */
         if (path[offset - 1] != '/') {
                 path[offset++] = '/';
         }
@@ -168,7 +122,10 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
                 /* Construct path string from time. */
                 if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
                                         &ctx) == 0) {
-                        return E_PATH;
+                        errno = ENAMETOOLONG;
+                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                                        path);
+                        continue;
                 }
 
                 /* Increment context by rotation interval and normalize. */
@@ -177,11 +134,10 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
 
                 /* Check file existence. */
                 if (stat(path, &stat_buff) != 0) {
-                        secondary_errno = errno;
-                        print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                        strerror(errno), path);
+                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                                        path);
                 } else {
-                        primary_errno = f_array_add(fa, path, stat_buff.st_size);
+                        primary_errno = add_file(pac, path);
                         if (primary_errno != E_OK) {
                                 return primary_errno;
                         }
@@ -192,7 +148,8 @@ static error_code_t f_array_fill_from_time(f_array_t *fa, char path[PATH_MAX],
         return E_OK;
 }
 
-static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
+static error_code_t fill_from_path(struct path_array_ctx *pac,
+                const char path[PATH_MAX])
 {
         error_code_t primary_errno = E_OK;
         DIR *dir;
@@ -202,46 +159,47 @@ static error_code_t f_array_fill_from_path(f_array_t *fa, char path[PATH_MAX])
 
         /* Detect file type. */
         if (stat(path, &stat_buff) != 0) {
-                secondary_errno = errno;
-                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                strerror(errno), path);
-                return E_PATH;
+                print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
+                return E_OK; //not a fatal error
         }
 
         if (!S_ISDIR(stat_buff.st_mode)) {
                 /* Path is not a directory. */
-                return f_array_add(fa, path, stat_buff.st_size);
+                return add_file(pac, path);
         }
 
-        /* Path is a directory. */
         dir = opendir(path);
         if (dir == NULL) {
-                secondary_errno = errno;
-                print_err(E_PATH, secondary_errno, "%s \"%s\"", strerror(errno),
-                                path);
-                return E_PATH;
+                print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
+                return E_OK; //not a fatal error
         }
 
-        /* Get all filenames, dot starting filenames are ignored. */
+        /* Loop through all the files. */
         while ((entry = readdir(dir)) != NULL) {
                 char new_path[PATH_MAX];
 
+                /* Dot starting filenames are ignored. */
                 if (entry->d_name[0] == '.') {
                         continue;
                 }
+                /* Too long filenames are ignored. */
+                if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
+                        errno = ENAMETOOLONG;
+                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                                        path);
+                        continue;
+                }
 
-                assert(strlen(path) + strlen(entry->d_name) + 2 <= PATH_MAX);
+                /* Construct new path: append child to the parent. */
                 strcpy(new_path, path);
                 strcat(new_path, "/");
                 strcat(new_path, entry->d_name);
 
-                primary_errno = f_array_fill_from_path(fa, new_path);
+                primary_errno = fill_from_path(pac, new_path);
                 if (primary_errno != E_OK) {
-                        closedir(dir);
-                        return primary_errno;
+                        break;
                 }
         }
-
         closedir(dir);
 
 
@@ -314,7 +272,7 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
                                         PATH_MAX - strlen(path));
                         if (errno != 0) {
                                 errno = ENAMETOOLONG;
-                                print_warn(E_PATH, secondary_errno, "%s \"%s\"",
+                                print_warn(E_PATH, errno, "%s \"%s\"",
                                                 strerror(errno), format);
                                 return false;
                         }
@@ -336,49 +294,72 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
         return true;
 }
 
-
-error_code_t f_array_fill(f_array_t *fa, char *paths, struct tm begin,
-                struct tm end)
+/* Generate array of paths from paths string and optional time range. */
+char ** path_array_gen(char *paths, const struct tm begin,
+                const struct tm end, size_t *cnt)
 {
         error_code_t primary_errno = E_OK;
-
-        struct stat stat_buff;
+        struct path_array_ctx pac = { 0 };
         const bool have_time_range = tm_diff(end, begin) > 0;
-
         char *token;
         char *saveptr;
 
 
+        pac.names = malloc(PATH_ARRAY_INIT_SIZE * sizeof (*pac.names));
+        if (pac.names == NULL) {
+                print_err(E_MEM, 0, "malloc()");
+                return NULL;
+        } else {
+                pac.names_size = PATH_ARRAY_INIT_SIZE;
+        }
+
+        /* Split paths string into particular paths. */
         for (token = strtok_r(paths, "\x1C", &saveptr); //first token
                         token != NULL;
                         token = strtok_r(NULL, "\x1C", &saveptr)) //next
         {
                 char path[PATH_MAX] = { 0 };
+                struct stat stat_buff;
 
+                /* Apply preprocessor rules and continue or skip path. */
                 if (!path_preprocessor(token, path)) {
-                        continue;
+                        continue; //skip path
                 }
 
-                /* Detect file type. */
+                /* Check for file existence and other errors. */
                 if (stat(path, &stat_buff) != 0) {
-                        secondary_errno = errno;
-                        print_warn(E_PATH, secondary_errno, "%s \"%s\"",
-                                        strerror(errno), path);
-                        continue;
+                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                                        path);
+                        continue; //skip path
                 }
 
+                /*
+                 * Generate filenames from time range if time range is available
+                 * and path is a directory. Use path as a filename otherwise.
+                 */
                 if (have_time_range && S_ISDIR(stat_buff.st_mode)) {
-                        primary_errno = f_array_fill_from_time(fa, path, begin,
-                                        end);
+                        primary_errno = fill_from_time(&pac, path, begin, end);
                 } else {
-                        primary_errno = f_array_fill_from_path(fa, path);
+                        primary_errno = fill_from_path(&pac, path);
                 }
-
                 if (primary_errno != E_OK) {
-                        break;
+                        path_array_free(pac.names, pac.names_cnt);
+                        return NULL;
                 }
         }
 
 
-        return primary_errno;
+        *cnt = pac.names_cnt;
+        return pac.names;
+}
+
+/* Free all file names and array. */
+void path_array_free(char **names, size_t names_cnt)
+{
+        if (names != NULL) {
+                for (size_t i = 0; i < names_cnt; ++i) {
+                        free(names[i]);
+                }
+                free(names);
+        }
 }
