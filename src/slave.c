@@ -551,9 +551,6 @@ static error_code_t task_init_mode(struct slave_task_ctx *stc)
                 /* Nothing to do. */
                 return E_OK;
 
-        case MODE_PASS:
-                return E_PASS;
-
         default:
                 assert(!"unknown working mode");
         }
@@ -972,9 +969,6 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
                 /* Nothing to do. */
                 break;
 
-        case MODE_PASS:
-                assert(!"invalid working mode");
-
         default:
                 assert(!"unknown working mode");
         }
@@ -1091,9 +1085,6 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 case MODE_META:
                         /* Metadata already read. */
                         break;
-
-                case MODE_PASS:
-                        assert(!"invalid working mode");
 
                 default:
                         assert(!"unknown working mode");

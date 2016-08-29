@@ -58,13 +58,15 @@
 MPI_Datatype mpi_struct_shared_task_ctx;
 int secondary_errno;
 
+
 int main(int argc, char **argv)
 {
         error_code_t primary_errno = E_OK;
         int world_rank;
         int world_size;
-        int thread_provided; //thread safety provided by MPI
-        struct cmdline_args args = {0};
+        int thread_provided; //thread safety provided by the MPI
+        struct cmdline_args args = { 0 };
+
 
         /*
          * Initialize MPI and check supported thread level. We need at least
@@ -77,26 +79,27 @@ int main(int argc, char **argv)
                 print_err(E_MPI, thread_provided,
                                 "an insufficient level of thread support. "
                                 "At least MPI_THREAD_SERIALIZED required.");
-                MPI_Finalize();
-                return EXIT_FAILURE;
+                primary_errno = E_MPI;
+                goto finalize;
         }
 
+        /* Find out processes rank and total number of proecesses. */
         MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
+        /* Check if there are at least two processes. */
         if (world_size <= 1) {
                 print_err(E_MPI, 0, "%s requires at least 2 copies of the "
                                 "program to run. Did you use MPI process "
                                 "manager, e.g. mpiexec(1)?", PACKAGE_NAME);
-                MPI_Finalize();
-                return EXIT_FAILURE;
+                primary_errno = E_MPI;
+                goto finalize;
         }
 
-        if (world_rank == ROOT_PROC) {
-                primary_errno = arg_parse(&args, argc, argv);
-                if (primary_errno != E_OK) {
-                        args.working_mode = MODE_PASS;
-                }
+        /* Parse command line arguments by all processes. */
+        primary_errno = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
+        if (primary_errno != E_OK) {
+                goto finalize;
         }
 
         /* Create MPI data types (global variables). */
@@ -113,11 +116,12 @@ int main(int argc, char **argv)
         free_mpi_struct_shared_task_ctx();
 
         /* Free arguments structure. */
-        free_args(&args);
+        arg_free(&args);
 
 
+finalize:
         MPI_Finalize();
-        if (primary_errno == E_OK || primary_errno == E_PASS) {
+        if (primary_errno == E_OK || primary_errno == E_HELP) {
                 return EXIT_SUCCESS;
         } else {
                 return EXIT_FAILURE;

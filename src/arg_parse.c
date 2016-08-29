@@ -975,7 +975,8 @@ static error_code_t set_progress_bar_type(progress_bar_type_t *type,
 }
 
 
-error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
+error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
+                bool root_proc)
 {
         error_code_t primary_errno = E_OK;
         int opt;
@@ -1030,6 +1031,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
         args->use_fast_topn = true;
         args->rec_limit = SIZE_MAX; //SIZE_MAX means record limit is unset
 
+        /* Prevent all non-root processes from printing getopt() errors. */
+        if (!root_proc) {
+                opterr = 0;
+        }
 
         /* Loop through all the command-line arguments. */
         while (true) {
@@ -1142,13 +1147,17 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 
 
                 case OPT_HELP: //help
-                        printf("%s\n\n", usage_string);
-                        printf("%s", help_string);
-                        return E_PASS;
+                        if (root_proc) {
+                                printf("%s\n\n", usage_string);
+                                printf("%s", help_string);
+                        }
+                        return E_HELP;
 
                 case OPT_VERSION: //version
-                        printf("%s\n", PACKAGE_STRING);
-                        return E_PASS;
+                        if (root_proc) {
+                                printf("%s\n", PACKAGE_STRING);
+                        }
+                        return E_HELP;
 
 
                 default: /* '?' or '0' */
@@ -1261,9 +1270,6 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
                 break;
 
         case MODE_META:
-                break;
-
-        case MODE_PASS:
                 break;
 
         default:
@@ -1431,7 +1437,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv)
 }
 
 
-void free_args(struct cmdline_args *args)
+void arg_free(struct cmdline_args *args)
 {
         free(args->path_str);
 }

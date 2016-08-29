@@ -751,12 +751,10 @@ error_code_t master(int world_size, const struct cmdline_args *args)
         }
 
 
-        if (mtc.shared.working_mode != MODE_PASS) {
-                primary_errno = progress_bar_init(args->progress_bar_type,
-                                args->progress_bar_dest, mtc.slave_cnt);
-                if (primary_errno != E_OK) {
-                        goto finalize;
-                }
+        primary_errno = progress_bar_init(args->progress_bar_type,
+                        args->progress_bar_dest, mtc.slave_cnt);
+        if (primary_errno != E_OK) {
+                goto finalize;
         }
 
 
@@ -779,17 +777,12 @@ error_code_t master(int world_size, const struct cmdline_args *args)
                 progress_bar_loop();
                 break;
 
-        case MODE_PASS:
-                goto finalize;
-
         default:
                 assert(!"unknown working mode");
         }
 
 
-        if (mtc.shared.working_mode != MODE_PASS) {
-                progress_bar_finish();
-        }
+        progress_bar_finish();
 
         /* Reduce statistics from each slave. */
         MPI_Reduce(MPI_IN_PLACE, &processed_summ, 3, MPI_UINT64_T, MPI_SUM,

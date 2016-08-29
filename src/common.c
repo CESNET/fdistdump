@@ -104,7 +104,6 @@ static char * error_code_to_str(error_code_t prim_errno)
 
         switch (prim_errno) {
         case E_OK:
-        case E_PASS:
         case E_EOF:
                 sprintf(msg, "no error");
                 break;
@@ -159,10 +158,6 @@ char * working_mode_to_str(working_mode_t working_mode)
 
         case MODE_META:
                 snprintf(msg, MAX_STR_LEN, "metadata only");
-                break;
-
-        case MODE_PASS:
-                snprintf(msg, MAX_STR_LEN, "pass");
                 break;
 
         default:

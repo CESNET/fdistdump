@@ -72,7 +72,7 @@
  */
 typedef enum { //error return codes
         E_OK, //no error, continue processing
-        E_PASS, //no error, no action required
+        E_HELP, //no error, print help/version and exit
         E_EOF, //no error, end of file
 
         E_MEM, //memory
@@ -88,7 +88,6 @@ typedef enum { //working modes
         MODE_SORT, //list ordered flow records
         MODE_AGGR, //aggregation and statistic
         MODE_META, //read only metadata
-        MODE_PASS, //do nothing
 } working_mode_t;
 
 enum { //tags

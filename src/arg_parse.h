@@ -76,7 +76,7 @@ struct cmdline_args {
 /** \brief Parse command line arguments and fill parameters structure.
  *
  * If all arguments are successfully parsed and stored, E_OK is returned.
- * If help or version was required, help string is printed and E_PASS is
+ * If help or version was required, help string is printed and E_HELP is
  * returned.
  * On error (invalid options or arguments, ...), error string is printed and
  * E_ARG is returned.
@@ -85,10 +85,17 @@ struct cmdline_args {
  *                   program settings.
  * \param[in] argc Argument count.
  * \param[in] argv Command line argument strings.
- * \return Error code. E_OK, E_PASS or E_ARG.
+ * \param[in] root_proc True if process is root, false otherwise.
+ * \return Error code. E_OK, E_HELP or E_ARG.
  */
-error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv);
+error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
+                bool root_proc);
 
-void free_args(struct cmdline_args *args);
+/** \brief Free parameters structure allocated by arg_parse().
+ *
+ * \param[in] params Structure with parsed command line parameters and other
+ *                   program settings.
+ */
+void arg_free(struct cmdline_args *args);
 
 #endif //ARG_PARSE_H
