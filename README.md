@@ -1,4 +1,10 @@
 # fdistdump - distributed IP flow files processing tool
+
+| Branch  | Travis CI | Coverity |
+|---------|-----------|----------|
+| master  | [![Build Status](https://travis-ci.org/CESNET/fdistdump.svg?branch=master)](https://travis-ci.org/CESNET/fdistdump) | [![Coverity Scan Status](https://scan.coverity.com/projects/5969/badge.svg)](https://scan.coverity.com/projects/5969 "Coverity Scan Status") |
+| develop | [![Build Status](https://travis-ci.org/CESNET/fdistdump.svg?branch=develop)](https://travis-ci.org/CESNET/fdistdump) | [![Coverity Scan Status](https://scan.coverity.com/projects/5969/badge.svg)](https://scan.coverity.com/projects/5969 "Coverity Scan Status") |
+
 fdistdump is a fast, scalable and distributed tool to query Internet Protocol
 flow files. The master/slave communication model allows it to run jobs on
 unlimited number of nodes, including a single local node. Among other features,
@@ -20,8 +26,8 @@ or newer (Open MPI, MPICH2, MPICH3, MVAPICH2, Intel® MPI Library, ...).
 fdistdump is built with GNU build system (Autotools). You can obtain source
 code either from a git repository or from a package.
 
-### From git
-``` sh
+### From the git
+```Shell
 git clone https://github.com/CESNET/fdistdump.git
 cd fdistdump/
 autoreconf -i
@@ -30,18 +36,32 @@ make
 sudo make install
 ```
 
-### From package
-``` sh
+### From the tarball
+```Shell
 ./configure
 make
 sudo make install
+```
+
+### From the repository
+We are using the openSUSE Build Service to build our RPM and DEB packages for
+several distributions and architectures. Check out the [project page](https://build.opensuse.org/project/show/home:jwrona)
+or go directly to the [repository download page](http://download.opensuse.org/repositories/home:/jwrona/).
+
+Example for CentOS 7:
+```Shell
+curl http://download.opensuse.org/repositories/home:/jwrona/CentOS_7/home:jwrona.repo > /etc/yum.repos.d/jwrona.repo
+yum install fdistdump-openmpi  #version compiled against Open MPI
+yum install fdistdump-mpich    #version compiled against MPICH
+module load mpi/openmpi-x86_64 #load environment for the Open MPI version
+module load mpi/mpich-x86_64   #load environment for the MPICH version
 ```
 
 ### Building tests
 Several tests are included in the tests directory. Test run will query the same
 data using both fdistdump and nfdump, results should match. Therefore, nfdump
 is required to be installed to run tests.
-``` sh
+```Shell
 ./configure --enable-basic-tests --enable-advanced-tests
 make
 make check
@@ -57,13 +77,13 @@ cluster) is configured correctly and ready to launch applications using MPI.
 This can be tested for example by starting program *hostname* using MPI
 launcher. Following should launch two instances of *hostname* on the local
 node, therefore local node's DNS name should be printed twice:
-``` sh
+```Shell
 mpiexec -n 2 hostname
 ```
 
 Following should launch *hostname* on every specified node. Therefore DNS name
 of every specified node should be printed to your local console:
-``` sh
+```Shell
 mpiexec -host node1,node2,... hostname
 ```
 
@@ -85,7 +105,7 @@ one, the master, is necessary to manage the slave, print progress and results.
 The second one, the slave, is there to do all the hard work. It will read and
 process all the flow files and send the results back to the master. Following
 example command will print statistic about the source ports in flow_file:
-``` sh
+```Shell
 mpiexec -n 2 fdistdump -s srcport flow_file
 ```
 
@@ -96,17 +116,12 @@ node, where no flow data is stored, but it can also share node with slave
 process. Following example command will launch dedicated master on *m_node* and
 slaves on *sl1_node* and *sl2_node*. Both slaves will read flow_file and send
 results back to master:
-``` sh
+```Shell
 mpiexec -host m_node,sl1_node,sl2_node fdistdump -s srcport flow_file
 ```
 
 ## Documentation
 For complete documentation and more examples see fdistdump manual page:
-``` sh
+```Shell
 man fdistdump
 ```
-
-## Build status
-Travis CI: [![Travis-CI Build Status](https://travis-ci.org/CESNET/fdistdump.svg)](https://travis-ci.org/CESNET/fdistdump "Travis-CI Build Status")
-
-Coverity scan: [![Coverity Scan Status](https://scan.coverity.com/projects/5969/badge.svg)](https://scan.coverity.com/projects/5969 "Coverity Scan Status")

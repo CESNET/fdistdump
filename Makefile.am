@@ -69,7 +69,7 @@ endif #ENABLE_ADVANCED_TESTS
 
 #add some files to the distribution package
 ##manual page
-dist_man_MANS = doc/man/fdistdump.1
+dist_man_MANS=doc/man/fdistdump.1
 ##README.md, licence
 EXTRA_DIST=README.md LICENSE
 ##test scripts
