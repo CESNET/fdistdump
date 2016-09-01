@@ -1,15 +1,15 @@
 # define a replacement macro for calling ../configure instead of ./configure
-%global dconfigure %(printf %%s '%configure' | sed 's!\./configure!../configure!g')
+%global mpi_configure %(printf %%s '%configure' | sed 's!\./configure!../configure!g')
 
 # preamble #####################################################################
 # shared
 Name:           fdistdump
 Version:        0.1.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Distributed IP flow files processing tool
 
 License:        GPLv2+
-URL:            https://github.com/CESNET/fdistdump
+URL:            https://github.com/CESNET/${name}
 Source0:        %{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 
 Group:          Applications/Databases
@@ -79,7 +79,7 @@ to apply powerful record filter. This package is compiled against MPICH.
 %define mpi_build() \
 mkdir "${MPI_COMPILER}"; \
 cd "${MPI_COMPILER}"; \
-%dconfigure --program-suffix="${MPI_SUFFIX}" ;\
+%mpi_configure --bindir="${MPI_BIN}" --program-suffix="${MPI_SUFFIX}" ;\
 make %{?_smp_mflags} ; \
 cd ..
 
@@ -121,16 +121,20 @@ make --directory="${MPI_COMPILER}" install uninstall-man DESTDIR=%{buildroot}
 # files section ################################################################
 %files common
 %doc README.md TODO
-%{_mandir}/man1/fdistdump.1.gz
+%{_mandir}/man1/%{name}.1.gz
 
 %files openmpi
-%{_bindir}/fdistdump_openmpi
+%{_libdir}/openmpi/bin/%{name}_openmpi
 
 %files mpich
-%{_bindir}/fdistdump_mpich
+%{_libdir}/mpich/bin/%{name}_mpich
 
 
 # changelog section ############################################################
 %changelog
+* Thu Sep 1 2016 Jan Wrona <wrona@cesnet.cz> - 0.1.0-2
+- Change install paths, because MPI implementation specific files MUST be
+  installed in the directories used by the used MPI compiler.
+
 * Tue Aug 30 2016 Jan Wrona <wrona@cesnet.cz> - 0.1.0-1
 - First vesrion of the specfile.
