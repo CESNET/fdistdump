@@ -1,5 +1,4 @@
 Bugfixes:
-        -fix coverity bugs
 
 Features:
         -try and test new libnf versions (> 1.16), check and reflect changes
@@ -11,6 +10,7 @@ Optimizations:
          read further records. Similar optimization is possible for descending
          sort.
         -OpenMP reduction for summaries (needs OpenMP 4.0, GCC 4.9)
+        -minimize lnf_rec_read() calls for summaries
 
 Tests:
         -add tests for reading multiple input files at once to test
@@ -22,6 +22,7 @@ Tests:
 
 Documentation:
         -clarify repeating options
+        -create a ChangeLog
 
 Others:
         -create and use more MPI tags
