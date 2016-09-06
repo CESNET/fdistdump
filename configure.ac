@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.68])
-AC_INIT([fdistdump], [0.1.0], [wrona@cesnet.cz], [],
+AC_INIT([fdistdump], [0.2.0], [wrona@cesnet.cz], [],
         [https://github.com/CESNET/fdistdump])
 AM_INIT_AUTOMAKE([foreign -Wall -Werror subdir-objects])
 AC_CONFIG_SRCDIR([tests/test_common.h])

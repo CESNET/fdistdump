@@ -4,8 +4,8 @@
 # preamble #####################################################################
 # shared
 Name:           fdistdump
-Version:        0.1.0
-Release:        2%{?dist}
+Version:        0.2.0
+Release:        1%{?dist}
 Summary:        Distributed IP flow files processing tool
 
 License:        GPLv2+
@@ -132,8 +132,11 @@ make --directory="${MPI_COMPILER}" install uninstall-man DESTDIR=%{buildroot}
 
 # changelog section ############################################################
 %changelog
+* Tue Sep 6 2016 Jan Wrona <wrona@cesnet.cz> - 0.2.0-1
+- Changed the version number.
+
 * Thu Sep 1 2016 Jan Wrona <wrona@cesnet.cz> - 0.1.0-2
-- Change install paths, because MPI implementation specific files MUST be
+- Changed install paths, because MPI implementation specific files MUST be
   installed in the directories used by the used MPI compiler.
 
 * Tue Aug 30 2016 Jan Wrona <wrona@cesnet.cz> - 0.1.0-1
