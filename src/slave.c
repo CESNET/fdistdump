@@ -468,8 +468,8 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
 
         /* Initialize filter. */
         //TODO: try new filter
-        secondary_errno = lnf_filter_init(filter, filter_str);
-        //secondary_errno = lnf_filter_init_v2(filter, filter_str);
+//        secondary_errno = lnf_filter_init(filter, filter_str);
+        secondary_errno = lnf_filter_init_v2(filter, filter_str);
         if (secondary_errno != LNF_OK) {
                 print_err(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
