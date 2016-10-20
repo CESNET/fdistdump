@@ -3,8 +3,8 @@
 #install libnf
 sudo apt-get install -qq flex bison libbz2-dev
 
-git clone "https://github.com/VUTBR/nf-tools.git"
-cd nf-tools/libnf/c/
+git clone --recursive "https://github.com/VUTBR/libnf.git"
+cd libnf/
 
 ./prepare-nfdump.sh
 autoreconf -i
