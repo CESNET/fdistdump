@@ -16,7 +16,7 @@ an underlying communication protocol. It is currently developed on Linux, other
 operating systems are not tested.
 
 ## Prerequisites
-* [libnf](https://github.com/VUTBR/nf-tools/tree/master/libnf/c "libnf GitHub")
+* [libnf](https://github.com/VUTBR/libnf "libnf GitHub page")
 \- C interface for processing nfdump files.
 * [MPI](http://www.mpi-forum.org/ "Message Passing Interface Forum") - Message
 Passing Interface. fdistdump requires implementation supporting standard MPI-2.0
