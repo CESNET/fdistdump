@@ -467,9 +467,8 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
         assert(filter != NULL && filter_str != NULL && strlen(filter_str) != 0);
 
         /* Initialize filter. */
-        //TODO: try new filter
-//        secondary_errno = lnf_filter_init(filter, filter_str);
-        secondary_errno = lnf_filter_init_v2(filter, filter_str);
+        //secondary_errno = lnf_filter_init(filter, filter_str); //old filter
+        secondary_errno = lnf_filter_init_v2(filter, filter_str); //new filter
         if (secondary_errno != LNF_OK) {
                 print_err(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
@@ -1061,8 +1060,10 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
 
                 /* Process the file according to the working mode. */
                 switch (stc->shared.working_mode) {
+                //According to GCC, #pragma omp flush may only be used in
+                //compound statements before #pragma.
+                #pragma omp flush //for stc->rec_limit_reached
                 case MODE_LIST:
-                        #pragma omp flush
                         if (!stc->rec_limit_reached) {
                                 primary_errno = task_send_file(stc, &tc);
                         }
