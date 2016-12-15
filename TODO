@@ -28,5 +28,8 @@ Documentation:
 Others:
         -create and use more MPI tags
         -suppress printing command-line error messages on all nodes
-        -runtime debugging output
         -add possibility to print record to string
+
+Coding style:
+        -join multiline string
+        -check 80 characters per line

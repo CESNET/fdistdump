@@ -2,8 +2,7 @@
  * \file common.c
  * \brief Implementation of common fdistdump functionality.
  * \author Jan Wrona, <wrona@cesnet.cz>
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+ * \date 2016
  */
 
 /*
@@ -43,7 +42,9 @@
  *
  */
 
+
 #include "common.h"
+#include "print.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -53,8 +54,9 @@
 
 #include <mpi.h>
 
-#define MAX_PROC_INFO_NAME (MPI_MAX_PROCESSOR_NAME + 100)
+
 #define TM_YEAR_BASE 1900
+
 
 /**
  * \defgroup glob_var Global variables
@@ -71,74 +73,6 @@ extern int secondary_errno;
  * \defgroup to_str_func Various elements to string converting functions
  * @{
  */
-/** \brief Convert processor name and role to string.
- *
- * Return static string containing MPI processor name, role (master or slave)
- * and MPI rank.
- *
- * \return Static string at most MAX_PROC_INFO_NAME long.
- */
-static char * proc_info_to_str(void)
-{
-        static char msg[MAX_PROC_INFO_NAME];
-        char proc_name[MPI_MAX_PROCESSOR_NAME];
-        int world_rank, world_size, result_len;
-
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-        MPI_Get_processor_name(proc_name, &result_len);
-
-        snprintf(msg, MAX_PROC_INFO_NAME, "%d/%d, %s", world_rank, world_size,
-                        proc_name);
-
-        return msg;
-}
-
-/** \brief Convert error_code_t error code to human-readable string.
- *
- * \return Static string at most MAX_STR_LEN long.
- */
-static char * error_code_to_str(error_code_t prim_errno)
-{
-        static char msg[MAX_STR_LEN];
-
-        switch (prim_errno) {
-        case E_OK:
-        case E_EOF:
-                sprintf(msg, "no error");
-                break;
-
-        case E_MEM:
-                sprintf(msg, "memory");
-                break;
-
-        case E_MPI:
-                sprintf(msg, "MPI");
-                break;
-
-        case E_LNF:
-                sprintf(msg, "LNF");
-                break;
-
-        case E_INTERNAL:
-                sprintf(msg, "internal");
-                break;
-
-        case E_ARG:
-                sprintf(msg, "command line argument");
-                break;
-
-        case E_PATH:
-                sprintf(msg, "path");
-                break;
-
-        default:
-                assert(!"unknown error code");
-        };
-
-        return msg;
-}
-
 char * working_mode_to_str(working_mode_t working_mode)
 {
         static char msg[MAX_STR_LEN];
@@ -169,67 +103,6 @@ char * working_mode_to_str(working_mode_t working_mode)
 /**
  * @}
  */ //to_str_func
-
-
-/**
- * \defgroup print_func Error/warning/debug printing functions
- * @{
- */
-void print_err(error_code_t prim_errno, int sec_errno,
-                const char *format, ...)
-{
-        (void)sec_errno; //TODO
-        va_list arg_list;
-        va_start(arg_list, format);
-        char lnf_error_str[LNF_MAX_STRING];
-
-        fprintf(stderr, "Error on %s caused by %s: ", proc_info_to_str(),
-                        error_code_to_str(prim_errno));
-        vfprintf(stderr, format, arg_list);
-
-        if (prim_errno == E_LNF && secondary_errno == LNF_ERR_OTHER_MSG) {
-                lnf_error(lnf_error_str, LNF_MAX_STRING);
-                fprintf(stderr, "\nLNF error string: %s", lnf_error_str);
-        }
-
-        fprintf(stderr, "\n");
-
-        va_end(arg_list);
-}
-
-void print_warn(error_code_t prim_errno, int sec_errno,
-                const char *format, ...)
-{
-        (void)sec_errno; //TODO
-        va_list arg_list;
-        va_start(arg_list, format);
-
-        fprintf(stderr, "Warning on %s caused by %s: ", proc_info_to_str(),
-                        error_code_to_str(prim_errno));
-        vfprintf(stderr, format, arg_list);
-        fprintf(stderr, "\n");
-
-        va_end(arg_list);
-}
-
-void print_debug(const char *format, ...)
-{
-#ifdef DEBUG
-        va_list arg_list;
-        va_start(arg_list, format);
-
-        fprintf(stderr, "DEBUG on %s: ", proc_info_to_str());
-        vfprintf(stderr, format, arg_list);
-        fprintf(stderr, "\n");
-
-        va_end(arg_list);
-#else //DEBUG
-        (void)format;
-#endif //DEBUG
-}
-/**
- * @}
- */ //print_func
 
 
 /**
@@ -295,7 +168,7 @@ error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields)
 {
         secondary_errno = lnf_mem_init(mem);
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_init()");
+                PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_init()");
                 return E_LNF;
         }
 
@@ -318,7 +191,7 @@ error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields)
         {
                 secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
+                        PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
                         free_aggr_mem(*mem);
                         *mem = NULL;
                         return E_LNF;
@@ -340,7 +213,7 @@ error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields)
                                 fields[i].flags, fields[i].ipv4_bits,
                                 fields[i].ipv6_bits);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno,
+                        PRINT_ERROR(E_LNF, secondary_errno,
                                         "lnf_mem_fadd()");
                         free_aggr_mem(*mem);
                         *mem = NULL;

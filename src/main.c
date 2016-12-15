@@ -46,6 +46,7 @@
 #include "master.h"
 #include "slave.h"
 #include "arg_parse.h"
+#include "print.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,7 +77,7 @@ int main(int argc, char **argv)
         MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
         if (thread_provided != MPI_THREAD_SERIALIZED &&
                         thread_provided != MPI_THREAD_MULTIPLE) {
-                print_err(E_MPI, thread_provided,
+                PRINT_ERROR(E_MPI, thread_provided,
                                 "an insufficient level of thread support. "
                                 "At least MPI_THREAD_SERIALIZED required.");
                 primary_errno = E_MPI;
@@ -89,7 +90,7 @@ int main(int argc, char **argv)
 
         /* Check if there are at least two processes. */
         if (world_size <= 1) {
-                print_err(E_MPI, 0, "%s requires at least 2 copies of the "
+                PRINT_ERROR(E_MPI, 0, "%s requires at least 2 copies of the "
                                 "program to run. Did you use MPI process "
                                 "manager, e.g. mpiexec(1)?", PACKAGE_NAME);
                 primary_errno = E_MPI;

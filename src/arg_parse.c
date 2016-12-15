@@ -42,10 +42,13 @@
  *
  */
 
+
 #define _XOPEN_SOURCE //strptime()
+
 
 #include "common.h"
 #include "arg_parse.h"
+#include "print.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,7 +79,7 @@
 static const char *usage_string =
 "Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
 "       [-l limit] [-o field[#direction]] [-s statistic] [-t time_spec]\n"
-"       [-T begin[#end]] path ...";
+"       [-T begin[#end]] [-v level] path ...";
 
 static const char *help_string =
 "MPI_options\n"
@@ -98,6 +101,8 @@ static const char *help_string =
 "            Process only single flow file, the one which includes given time.\n"
 "     -T, --time-range=begin[#end]\n"
 "            Process only flow files from begin to the end time range.\n"
+"     -v, --verbosity=level\n"
+"            Set verbosity level.\n"
 "\n"
 "Controlling output\n"
 "     --output-items= item_list\n"
@@ -248,7 +253,7 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
                         }
                 }
 
-                print_err(E_ARG, 0, "invalid time specifier \"%s\"", token);
+                PRINT_ERROR(E_ARG, 0, "invalid time specifier \"%s\"", token);
                 return E_ARG; //conversion failure
 next_token:
                 token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
@@ -353,14 +358,14 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
         /* Split time range string. */
         begin_str = strtok_r(range_str, TIME_RANGE_DELIM, &saveptr);
         if (begin_str == NULL) {
-                print_err(E_ARG, 0, "invalid time range string \"%s\"\n",
+                PRINT_ERROR(E_ARG, 0, "invalid time range string \"%s\"\n",
                                 range_str);
                 return E_ARG;
         }
         end_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr); //NULL is valid
         trailing_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr);
         if (trailing_str != NULL) {
-                print_err(E_ARG, 0, "time range trailing string \"%s\"\n",
+                PRINT_ERROR(E_ARG, 0, "time range trailing string \"%s\"\n",
                                 trailing_str);
                 return E_ARG;
         }
@@ -414,8 +419,8 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
                 strftime(begin, sizeof(begin), "%c", &args->time_begin);
                 strftime(end, sizeof(end), "%c", &args->time_end);
 
-                print_err(E_ARG, 0, "zero or negative time range duration");
-                print_err(E_ARG, 0, "time range (after the alignment): %s - %s",
+                PRINT_ERROR(E_ARG, 0, "zero or negative time range duration");
+                PRINT_ERROR(E_ARG, 0, "time range (after the alignment): %s - %s",
                                 begin, end);
 
                 return E_ARG;
@@ -564,15 +569,15 @@ static error_code_t add_fields_from_str(struct field_info *fields,
 
                 fld = lnf_fld_parse(token, &ipv4_bits, &ipv6_bits);
                 if (fld == LNF_FLD_ZERO_ || fld == LNF_ERR_OTHER) {
-                        print_err(E_ARG, 0, "unknown LNF field \"%s\"", token);
+                        PRINT_ERROR(E_ARG, 0, "unknown LNF field \"%s\"", token);
                         return E_ARG;
                 }
                 if (ipv4_bits < 0 || ipv4_bits > 32) {
-                        print_err(E_ARG, 0, "bad number of IPv4 bits: %d",
+                        PRINT_ERROR(E_ARG, 0, "bad number of IPv4 bits: %d",
                                         ipv4_bits);
                         return E_ARG;
                 } else if (ipv6_bits < 0 || ipv6_bits > 128) {
-                        print_err(E_ARG, 0, "bad number of IPv6 bits: %d",
+                        PRINT_ERROR(E_ARG, 0, "bad number of IPv6 bits: %d",
                                         ipv6_bits);
                         return E_ARG;
                 }
@@ -582,12 +587,12 @@ static error_code_t add_fields_from_str(struct field_info *fields,
                         if (fld >= LNF_FLD_CALC_BPS &&
                                         fld <= LNF_FLD_CALC_BPP) {
                                 //aggregation using LNF_DOUBLE is unimplemented
-                                print_err(E_ARG, 0, "LNF field \"%s\" cannot be"
+                                PRINT_ERROR(E_ARG, 0, "LNF field \"%s\" cannot be"
                                                 " set as aggregation key",
                                                 token);
                                 return E_ARG;
                         } else if (fld == LNF_FLD_BREC1) {
-                                print_err(E_ARG, 0, "LNF field \"%s\" cannot be"
+                                PRINT_ERROR(E_ARG, 0, "LNF field \"%s\" cannot be"
                                                 " set as aggregation key",
                                                 token);
                                 //doesn't make sense
@@ -615,21 +620,21 @@ static error_code_t set_sort_field(struct field_info *fields, char *sort_str)
         /* Parse fields. */
         field_str = strtok_r(sort_str, SORT_DELIM, &saveptr);
         if (field_str == NULL) {
-                print_err(E_ARG, 0, "invalid sort string \"%s\"\n", sort_str);
+                PRINT_ERROR(E_ARG, 0, "invalid sort string \"%s\"\n", sort_str);
                 return E_ARG;
         }
 
         fld = lnf_fld_parse(field_str, &ipv4_bits, &ipv6_bits);
         if (fld == LNF_FLD_ZERO_ || fld == LNF_ERR_OTHER) {
-                print_err(E_ARG, 0, "unknown LNF field \"%s\"", field_str);
+                PRINT_ERROR(E_ARG, 0, "unknown LNF field \"%s\"", field_str);
                 return E_ARG;
         }
         if (ipv4_bits < 0 || ipv4_bits > 32) {
-                print_err(E_ARG, 0, "bad number of IPv4 bits: %d",
+                PRINT_ERROR(E_ARG, 0, "bad number of IPv4 bits: %d",
                                 ipv4_bits);
                 return E_ARG;
         } else if (ipv6_bits < 0 || ipv6_bits > 128) {
-                print_err(E_ARG, 0, "bad number of IPv6 bits: %d",
+                PRINT_ERROR(E_ARG, 0, "bad number of IPv6 bits: %d",
                                 ipv6_bits);
                 return E_ARG;
         }
@@ -644,7 +649,7 @@ static error_code_t set_sort_field(struct field_info *fields, char *sort_str)
         } else if (strcmp(sort_direction_str, "desc") == 0) { //descending dir
                 sort_direction = LNF_SORT_DESC;
         } else { //unknown sort direction
-                print_err(E_ARG, 0, "invalid sort type \"%s\"",
+                PRINT_ERROR(E_ARG, 0, "invalid sort type \"%s\"",
                                 sort_direction_str);
                 return E_ARG;
         }
@@ -652,7 +657,7 @@ static error_code_t set_sort_field(struct field_info *fields, char *sort_str)
         /* Check for undesirable remaining characters. */
         trailing_str = strtok_r(NULL, SORT_DELIM, &saveptr);
         if (trailing_str != NULL) {
-                print_err(E_ARG, 0, "trailing sort string \"%s\"\n",
+                PRINT_ERROR(E_ARG, 0, "trailing sort string \"%s\"\n",
                                 trailing_str);
                 return E_ARG;
         }
@@ -699,7 +704,7 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_str)
 
         fields_str = strtok_r(stat_str, STAT_DELIM, &saveptr);
         if (fields_str == NULL) {
-                print_err(E_ARG, 0, "invalid statistic string \"%s\"\n",
+                PRINT_ERROR(E_ARG, 0, "invalid statistic string \"%s\"\n",
                                 stat_str);
                 return E_ARG;
         }
@@ -722,7 +727,7 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_str)
 
         trailing_str = strtok_r(NULL, STAT_DELIM, &saveptr);
         if (trailing_str != NULL) {
-                print_err(E_ARG, 0, "statistic trailing string \"%s\"\n",
+                PRINT_ERROR(E_ARG, 0, "statistic trailing string \"%s\"\n",
                                 trailing_str);
                 return E_ARG;
         }
@@ -757,7 +762,7 @@ static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
         //TODO: try new filter
         secondary_errno = lnf_filter_init(&filter, filter_str);
         if (secondary_errno != LNF_OK) {
-                print_err(E_ARG, secondary_errno,
+                PRINT_ERROR(E_ARG, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
                 return E_ARG;
         }
@@ -791,16 +796,16 @@ static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
 
         /* Check for various possible errors. */
         if (errno != 0) {
-                print_err(E_ARG, 0, "invalid limit \"%s\": %s", limit_str,
+                PRINT_ERROR(E_ARG, 0, "invalid limit \"%s\": %s", limit_str,
                                 strerror(errno));
                 return E_ARG;
         }
         if (*endptr != '\0') { //remaining characters
-                print_err(E_ARG, 0, "invalid limit \"%s\"", limit_str);
+                PRINT_ERROR(E_ARG, 0, "invalid limit \"%s\"", limit_str);
                 return E_ARG;
         }
         if (limit < 0) { //negatve limit
-                print_err(E_ARG, 0, "negative limit \"%s\"", limit_str);
+                PRINT_ERROR(E_ARG, 0, "negative limit \"%s\"", limit_str);
                 return E_ARG;
         }
 
@@ -834,7 +839,7 @@ static error_code_t set_output_items(struct output_params *op, char *items_str)
                                 strcmp(token, "m") == 0) {
                         op->print_metadata_summ = OUTPUT_ITEM_YES;
                 } else {
-                        print_err(E_ARG, 0, "unknown output item \"%s\"", token);
+                        PRINT_ERROR(E_ARG, 0, "unknown output item \"%s\"", token);
                         return E_ARG;
                 }
         }
@@ -851,7 +856,7 @@ static error_code_t set_output_format(struct output_params *op,
         } else if (strcmp(format_str, "pretty") == 0) {
                 op->format = OUTPUT_FORMAT_PRETTY;
         } else {
-                print_err(E_ARG, 0, "unknown output format string \"%s\"",
+                PRINT_ERROR(E_ARG, 0, "unknown output format string \"%s\"",
                                 format_str);
                 return E_ARG;
         }
@@ -882,7 +887,7 @@ static error_code_t set_output_volume_conv(struct output_params *op,
         } else if (strcmp(volume_conv_str, "binary-prefix") == 0) {
                 op->volume_conv = OUTPUT_VOLUME_CONV_BINARY_PREFIX;
         } else {
-                print_err(E_ARG, 0, "unknown output volume conversion "
+                PRINT_ERROR(E_ARG, 0, "unknown output volume conversion "
                                 "string \"%s\"", volume_conv_str);
                 return E_ARG;
         }
@@ -898,7 +903,7 @@ static error_code_t set_output_tcp_flags_conv(struct output_params *op,
         } else if (strcmp(tcp_flags_conv_str, "str") == 0) {
                 op->tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_STR;
         } else {
-                print_err(E_ARG, 0, "unknown tcp flags conversion string "
+                PRINT_ERROR(E_ARG, 0, "unknown tcp flags conversion string "
                                 "\"%s\"", tcp_flags_conv_str);
                 return E_ARG;
         }
@@ -914,7 +919,7 @@ static error_code_t set_output_ip_addr_conv(struct output_params *op,
         } else if (strcmp(ip_addr_conv_str, "str") == 0) {
                 op->ip_addr_conv = OUTPUT_IP_ADDR_CONV_STR;
         } else {
-                print_err(E_ARG, 0, "unknown IP address conversion string "
+                PRINT_ERROR(E_ARG, 0, "unknown IP address conversion string "
                                 "\"%s\"", ip_addr_conv_str);
                 return E_ARG;
         }
@@ -930,7 +935,7 @@ static error_code_t set_output_ip_proto_conv(struct output_params *op,
         } else if (strcmp(ip_proto_conv_str, "str") == 0) {
                 op->ip_proto_conv = OUTPUT_IP_PROTO_CONV_STR;
         } else {
-                print_err(E_ARG, 0, "unknown internet protocol conversion "
+                PRINT_ERROR(E_ARG, 0, "unknown internet protocol conversion "
                                 "string \"%s\"", ip_proto_conv_str);
                 return E_ARG;
         }
@@ -946,7 +951,7 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         } else if (strcmp(duration_conv_str, "str") == 0) {
                 op->duration_conv = OUTPUT_DURATION_CONV_STR;
         } else {
-                print_err(E_ARG, 0, "unknown duration conversion string \"%s\"",
+                PRINT_ERROR(E_ARG, 0, "unknown duration conversion string \"%s\"",
                                 duration_conv_str);
                 return E_ARG;
         }
@@ -966,10 +971,31 @@ static error_code_t set_progress_bar_type(progress_bar_type_t *type,
         } else if (strcmp(progress_bar_type_str, "json") == 0) {
                 *type = PROGRESS_BAR_JSON;
         } else {
-                print_err(E_ARG, 0, "unknown progress bar type \"%s\"",
+                PRINT_ERROR(E_ARG, 0, "unknown progress bar type \"%s\"",
                                 progress_bar_type_str);
                 return E_ARG;
         }
+
+        return E_OK;
+}
+
+static error_code_t set_verbosity(char *level_str)
+{
+        char *endptr;
+        long int level;
+
+        errno = 0; //erase possible previous error number
+        level = strtol(level_str, &endptr, 0);
+
+        /* Check for various possible errors. */
+        if (errno != 0 || *endptr != '\0' || level < VERBOSITY_QUIET ||
+                        level > VERBOSITY_DEBUG) {
+                PRINT_ERROR(E_ARG, 0, "invalid verbosity level \"%s\", valid values are from range [%d,%d]",
+                                level_str, VERBOSITY_QUIET, VERBOSITY_DEBUG);
+                return E_ARG;
+        }
+
+        verbosity = level;
 
         return E_OK;
 }
@@ -984,7 +1010,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
         size_t path_str_len = 0;
         bool have_fields = false; //LNF fields are specified
 
-        const char *short_opts = "a:f:l:o:s:t:T:";
+        const char *short_opts = "a:f:l:o:s:t:T:v:";
         const struct option long_opts[] = {
                 /* Long and short. */
                 {"aggregation", required_argument, NULL, 'a'},
@@ -994,6 +1020,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
                 {"statistic", required_argument, NULL, 's'},
                 {"time-point", required_argument, NULL, 't'},
                 {"time-range", required_argument, NULL, 'T'},
+                {"verbosity", required_argument, NULL, 'v'},
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
@@ -1077,6 +1104,10 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
 
                 case 'T': //time range
                         primary_errno = set_time_range(args, optarg);
+                        break;
+
+                case 'v': //verbosity
+                        primary_errno = set_verbosity(optarg);
                         break;
 
 
@@ -1176,13 +1207,13 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
          * handling.
          */
         if (optind == argc) { //at least one path is mandatory
-                print_err(E_ARG, 0, "missing path");
+                PRINT_ERROR(E_ARG, 0, "missing path");
                 return E_ARG;
         }
 
         for (int i = optind; i < argc; ++i) { //loop through all non-option args
                 if (strchr(argv[i], 0x1C) != NULL) {
-                        print_err(E_ARG, 0, "file separator character (0x1C) is"
+                        PRINT_ERROR(E_ARG, 0, "file separator character (0x1C) is"
                                         " forbidden in path string", argv[i]);
                         return E_ARG;
                 }
@@ -1191,7 +1222,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
 
         args->path_str = calloc(path_str_len, sizeof (char)); //implicit null
         if (args->path_str == NULL) {
-                print_err(E_MEM, 0, "calloc()");
+                PRINT_ERROR(E_MEM, 0, "calloc()");
                 return E_MEM;
         }
 
@@ -1379,58 +1410,55 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
         }
 
 
-#ifdef DEBUG
-        {
-        static char fld_name_buff[LNF_INFO_BUFSIZE];
-        int field;
-        char begin[255], end[255];
-        char *path = args->path_str;
-        int c;
+        if (verbosity >= VERBOSITY_DEBUG) {
+                static char fld_name_buff[LNF_INFO_BUFSIZE];
+                char begin[255], end[255];
+                char *path = args->path_str;
+                int c;
 
-        printf("------------------------------------------------------\n");
-        printf("mode: %s\n", working_mode_to_str(args->working_mode));
-        if (args->working_mode == MODE_AGGR && args->use_fast_topn) {
-                printf("flags: using fast top-N algorithm\n");
-        }
-
-        printf("fields:\n");
-        printf("\t%-15s%-12s%-12s%-11s%s\n", "name", "aggr flags",
-                        "sort flags", "IPv4 bits", "IPv6 bits");
-        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
-                if (args->fields[i].id == 0) {
-                        continue;
+                printf("------------------------------------------------------\n");
+                printf("mode: %s\n", working_mode_to_str(args->working_mode));
+                if (args->working_mode == MODE_AGGR && args->use_fast_topn) {
+                        printf("flags: using fast top-N algorithm\n");
                 }
 
-                lnf_fld_info(args->fields[i].id, LNF_FLD_INFO_NAME,
-                                fld_name_buff, LNF_INFO_BUFSIZE);
-                printf("\t%-15s0x%-10x0x%-10x%-11d%d\n", fld_name_buff,
-                                args->fields[i].flags & LNF_AGGR_FLAGS,
-                                args->fields[i].flags & LNF_SORT_FLAGS,
-                                args->fields[i].ipv4_bits,
-                                args->fields[i].ipv6_bits);
-        }
+                printf("fields:\n");
+                printf("\t%-15s%-12s%-12s%-11s%s\n", "name", "aggr flags",
+                                "sort flags", "IPv4 bits", "IPv6 bits");
+                for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+                        if (args->fields[i].id == 0) {
+                                continue;
+                        }
 
-        if(args->filter_str != NULL) {
-                printf("filter: %s\n", args->filter_str);
-        }
-
-        printf("paths:\n\t");
-        while ((c = *path++)) {
-                if (c == 0x1C) { //substitute separator with end of line
-                        putchar('\n');
-                        putchar('\t');
-                } else {
-                        putchar(c);
+                        lnf_fld_info(args->fields[i].id, LNF_FLD_INFO_NAME,
+                                        fld_name_buff, LNF_INFO_BUFSIZE);
+                        printf("\t%-15s0x%-10x0x%-10x%-11d%d\n", fld_name_buff,
+                                        args->fields[i].flags & LNF_AGGR_FLAGS,
+                                        args->fields[i].flags & LNF_SORT_FLAGS,
+                                        args->fields[i].ipv4_bits,
+                                        args->fields[i].ipv6_bits);
                 }
-        }
-        putchar('\n');
 
-        strftime(begin, sizeof(begin), "%c", &args->time_begin);
-        strftime(end, sizeof(end), "%c", &args->time_end);
-        printf("time range: %s - %s\n", begin, end);
-        printf("------------------------------------------------------\n\n");
+                if(args->filter_str != NULL) {
+                        printf("filter: %s\n", args->filter_str);
+                }
+
+                printf("paths:\n\t");
+                while ((c = *path++)) {
+                        if (c == 0x1C) { //substitute separator with end of line
+                                putchar('\n');
+                                putchar('\t');
+                        } else {
+                                putchar(c);
+                        }
+                }
+                putchar('\n');
+
+                strftime(begin, sizeof(begin), "%c", &args->time_begin);
+                strftime(end, sizeof(end), "%c", &args->time_end);
+                printf("time range: %s - %s\n", begin, end);
+                printf("------------------------------------------------------\n\n");
         }
-#endif //DEBUG
 
 
         return E_OK;

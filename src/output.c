@@ -44,6 +44,7 @@
 
 #include "common.h"
 #include "output.h"
+#include "print.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -866,7 +867,7 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_rec_init()");
+                PRINT_ERROR(E_LNF, secondary_errno, "lnf_rec_init()");
                 return E_LNF;
         }
 
