@@ -480,3 +480,53 @@ size_t field_get_size(int field)
 /**
  * @}
  */ //lnf_fields_func
+
+
+/**
+ * \defgroup mem Memory allocation wrappers
+ * @{
+ */
+void * malloc_or_abort(size_t nmemb, size_t size)
+{
+        void *tmp = malloc(nmemb * size);
+
+        if (tmp == NULL) {
+                print_err(E_MEM, 0, "malloc(): out of memory");
+                MPI_Abort(MPI_COMM_WORLD, E_MEM);
+                return NULL;
+        }
+
+        //printf("MALLOCATED %zu * %zu = %zu\n", nmemb, size, nmemb * size);
+        return tmp;
+}
+
+void * calloc_or_abort(size_t nmemb, size_t size)
+{
+        void *tmp = calloc(nmemb, size);
+
+        if (tmp == NULL) {
+                print_err(E_MEM, 0, "calloc(): out of memory");
+                MPI_Abort(MPI_COMM_WORLD, E_MEM);
+                return NULL;
+        }
+
+        //printf("CALLOCATED %zu * %zu = %zu\n", nmemb, size, nmemb * size);
+        return tmp;
+}
+
+void * realloc_or_abort(void *ptr, size_t nmemb, size_t size)
+{
+        void *tmp = realloc(ptr, nmemb * size);
+
+        if (tmp == NULL) {
+                print_err(E_MEM, 0, "realloc(): out of memory");
+                MPI_Abort(MPI_COMM_WORLD, E_MEM);
+                return NULL;
+        }
+
+        //printf("REALLOCATED %zu * %zu = %zu\n", nmemb, size, nmemb * size);
+        return tmp;
+}
+/**
+ * @}
+ */ //mem

@@ -1,0 +1,669 @@
+/**
+ * \file clustering.c
+ * \brief
+ * \author Jan Wrona, <wrona@cesnet.cz>
+ * \date 2016
+ */
+
+/*
+ * Copyright (C) 2016 CESNET
+ *
+ * LICENSE TERMS
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name of the Company nor the names of its contributors
+ *    may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
+ *
+ * ALTERNATIVELY, provided that this notice is retained in full, this
+ * product may be distributed under the terms of the GNU General Public
+ * License (GPL) version 2 or later, in which case the provisions
+ * of the GPL apply INSTEAD OF those given above.
+ *
+ * This software is provided ``as is'', and any express or implied
+ * warranties, including, but not limited to, the implied warranties of
+ * merchantability and fitness for a particular purpose are disclaimed.
+ * In no event shall the company or contributors be liable for any
+ * direct, indirect, incidental, special, exemplary, or consequential
+ * damages (including, but not limited to, procurement of substitute
+ * goods or services; loss of use, data, or profits; or business
+ * interruption) however caused and on any theory of liability, whether
+ * in contract, strict liability, or tort (including negligence or
+ * otherwise) arising in any way out of the use of this software, even
+ * if advised of the possibility of such damage.
+ *
+ */
+
+#include "common.h"
+#include "clustering.h"
+#include "slave.h"
+#include "path_array.h"
+#include "vector.h"
+#include "output.h"
+
+#include <string.h> //strlen()
+#include <assert.h>
+#include <stdbool.h>
+#include <time.h>
+#include <errno.h>
+#include <limits.h> //PATH_MAX
+#include <unistd.h> //access
+#include <time.h>
+#include <arpa/inet.h>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif //_OPENMP
+#include <mpi.h>
+#include <libnf.h>
+
+
+#define EPS 0.6
+#define MIN_PTS 10
+
+
+/* Global variables. */
+extern MPI_Datatype mpi_struct_shared_task_ctx;
+
+
+/* Thread shared. */
+struct slave_task_ctx {
+        /* Master and slave shared task context. Received from master. */
+        struct shared_task_ctx shared; //master-slave shared
+
+        /* Slave specific task context. */
+        lnf_filter_t *filter; //LNF compiled filter expression
+
+        struct processed_summ processed_summ; //processed data statistics
+        struct metadata_summ metadata_summ; //metadata statistics
+        char *path_str; //file/directory/profile(s) path string
+        size_t proc_rec_cntr; //processed record counter
+        bool rec_limit_reached; //true if rec_limit records read
+        size_t slave_cnt; //slave count
+
+        lnf_file_t *file; //LNF file
+        lnf_rec_t *rec; //LNF record
+};
+
+
+#define CLUSTER_UNVISITED 0 //point wasn't visited by the algorithm yet
+#define CLUSTER_NOISE     1 //point doesn't belong to any cluster yet
+#define CLUSTER_FIRST     2 //first no-noise cluster
+struct rec {
+        size_t id; //point ID
+        size_t cluster_id; //ID of cluster the point belongs to
+
+        /* Feature vector. */
+        uint16_t srcport;
+        uint16_t dstport;
+        uint8_t proto;
+        lnf_ip_t srcaddr;
+        lnf_ip_t dstaddr;
+} __attribute__((packed));
+
+
+double distance_function(const struct rec *point1, const struct rec *point2)
+{
+        double distance = 5.0;
+
+        /* After the logical negation, 0 means different, 1 means same. */
+        distance -= !memcmp(&point1->srcaddr, &point2->srcaddr,
+                        sizeof (point1->srcaddr));
+        distance -= !memcmp(&point1->dstaddr, &point2->dstaddr,
+                        sizeof (point1->dstaddr));
+        distance -= (point1->srcport == point2->srcport);
+        distance -= (point1->dstport == point2->dstport);
+        distance -= (point1->proto == point2->proto);
+
+        //printf("\n");
+        //print_rec((const uint8_t *)&point1->srcport);
+        //print_rec((const uint8_t *)&point2->srcport);
+        //printf("%f\n", distance / 5.0);
+
+        return distance / 5.0;
+}
+
+double distance_function_rand(const struct rec *rec1, const struct rec *rec2)
+{
+        (void)rec1;
+        (void)rec2;
+        //srand(time(NULL));
+        return (double)rand() / RAND_MAX;
+}
+
+
+/*
+ * Distance matrix:
+ * -the entries on the main diagonal are all zero           x[i][i] == 0
+ * -all the off-diagonal entries are positive     if i != j, x[i][j] > 0
+ * -the matrix is a symmetric matrix                  x[i][j] == x[j][i]
+ * -the triangle inequality)      for all k x[i][j] <= x[i][k] + x[k][j]
+ */
+static double ** distance_matrix_init(size_t size)
+{
+        /* Allocate full matrix (better eps-neigborhood query performance). */
+        double **dm = malloc_or_abort(size, sizeof (double *));
+
+        for (size_t row = 0; row < size; ++row) {
+                dm[row] = malloc_or_abort(size, sizeof (double));
+        }
+
+        return dm;
+}
+
+/* Fill the distance matrix. */
+static void distance_matrix_fill(double **dm, size_t size,
+                const struct rec *rec_data)
+{
+        if (dm == NULL) {
+                return;
+        }
+
+        #pragma omp parallel for
+        for (size_t row = 0; row < size; ++row) {
+                dm[row][row] = 0.0; //zero on diagonal
+
+                for (size_t col = 0; col < row; ++col) {
+                        const double distance = distance_function(
+                                        rec_data + row, rec_data + col);
+
+                        dm[row][col] = distance;
+                        dm[col][row] = distance;
+                }
+        }
+
+        /* Print. */
+        //for (size_t row = 0; row < size; ++row) {
+        //        for (size_t col = 0; col < size; ++col) {
+        //                printf("%.1f ", dm[row][col]);
+        //        }
+        //        putchar('\n');
+        //}
+}
+
+/* Free the distance matrix. */
+void distance_matrix_free(double **dm, size_t size)
+{
+        if (dm == NULL) {
+                return;
+        }
+
+        for (size_t row = 0; row < size; ++row) {
+                free(dm[row]);
+        }
+        free(dm);
+}
+
+
+/*
+ * Return all points within a point's epsilon-neighborhood (including the
+ * point). Epsilon-neighborhood is an open set (i.e. <, not <=).
+ */
+static void eps_get_neigh(const struct rec *point,
+                const double * const* distance_matrix,
+                const struct vector *rec_vec, struct vector *eps_vec)
+{
+        const struct rec *rec_data = (const struct rec *)rec_vec->data;
+        const double *distance_vec = distance_matrix[point->id];
+
+        /* Clear the result vector. */
+        vector_clear(eps_vec);
+
+        /* Loop through the distance vector and store epsilon neighbors. */
+        for (size_t i = 0; i < rec_vec->size; ++i) {
+                double distance;
+
+                /* If there is no distance matrix, compute distance now. */
+                if (distance_matrix == NULL) {
+                        distance = distance_function(rec_data + point->id,
+                                        rec_data + i);
+                } else { //otherwise use precomputed distance
+                        distance = distance_vec[i];
+                }
+
+                if (distance < EPS) {
+                        struct rec *neigbor = vector_get_ptr(rec_vec, i);
+
+                        vector_add(eps_vec, &neigbor); //store only the pointer
+                }
+        }
+}
+
+
+/*
+ * Comparing addresses is fine because struct vector uses continuous memory.
+ * Destination vector consist 1 to N non-descending sequences.
+ */
+static bool eps_merge(struct vector *dest_vec, const struct vector *new_vec)
+{
+        /* Iterators. */
+        const struct rec **dest_it = (const struct rec **)dest_vec->data;
+        const struct rec **dest_it_end = dest_it + dest_vec->size;
+
+        //printf("\n\nNEW EPS MERGE\n");
+        /* Loop through destination vector. */
+        while (dest_it < dest_it_end) {
+                const struct rec **new_it = (const struct rec **)new_vec->data;
+                const struct rec **new_it_end = new_it + new_vec->size;
+                const struct rec *dest_last = *dest_it;
+
+                //printf("BEF_SEQ: dest = %d, new = %d, seq = %d\n",
+                //                dest_it < dest_it_end,  //dest didn't read end
+                //                new_it < new_it_end,    //new didn't reach end
+                //                dest_last <= *dest_it); //seq didn't reach end
+
+                while (dest_it < dest_it_end && //dest didn't reach end
+                                new_it < new_it_end && //new didn't reach end
+                                dest_last <= *dest_it) //seq didn't reach end
+                {
+                        dest_last = *dest_it;
+
+                        /* TODO: possible optimization when whole new is NULL
+                         * (dest = 1, new = 0, seq = 1)
+                         */
+                        if (*new_it == NULL) {
+                                new_it++;
+                                continue;
+                        }
+
+                        if (*dest_it == *new_it) {
+                                *new_it = NULL; //new is in this seq, move both
+                                dest_it++;
+                                new_it++;
+                        } else if (*dest_it < *new_it) {
+                                dest_it++; //new isn't this seq yet, move dest
+                        } else /* (*dest_it > *new_it) */ {
+                                new_it++; //new isn't in this seq, move new
+                        }
+                        //printf("SEQ: dest_it = %lx, *dest_it = %lx, dest_it_end = %lx\n",
+                        //                dest_it, *dest_it, dest_it_end);
+                }
+
+                //printf("FFD: dest = %d, new = %d, seq = %d\n",
+                //                dest_it < dest_it_end,  //dest didn't reach end
+                //                new_it < new_it_end,    //new didn't reach end
+                //                dest_last <= *dest_it); //seq didn't reach end
+
+                /* Fast forward dest_it to the beginning of the next sequence.*/
+                while (dest_it < dest_it_end && //dest didn't reach end
+                                dest_last <= *dest_it) //seq didn't reach end
+                {
+                        dest_last = *dest_it;
+                        dest_it++;
+                        //printf("FFD: dest_it = %lx, *dest_it = %lx, dest_it_end = %lx\n",
+                        //                dest_it, *dest_it, dest_it_end);
+                }
+                //printf("ALL: dest_it = %lx, *dest_it = %lx, dest_it_end = %lx\n",
+                //                dest_it, *dest_it, dest_it_end);
+        }
+
+        /* Add remaining elements from new to the dest. */
+        for (size_t i = 0; i < new_vec->size; ++i) {
+                struct rec *point = ((struct rec **)new_vec->data)[i];
+                if (point != NULL) {
+                        vector_add(dest_vec, &point);
+                }
+        }
+
+        return true;
+}
+
+
+void dbscan(const struct vector *rec_vec, const double * const* distance_matrix)
+{
+        size_t cluster_id = CLUSTER_FIRST;
+
+        struct vector eps_vec; //vectors of pointers to the record storage
+        struct vector new_eps_vec;
+
+        vector_init(&eps_vec, sizeof (struct rec *));
+        vector_init(&new_eps_vec, sizeof (struct rec *));
+
+
+        /* Loop through all the points. */
+        for (size_t i = 0; i < rec_vec->size; ++i) {
+                struct rec *point = (struct rec *)rec_vec->data + i;
+
+                //printf("point %lx: \n", point);
+                if (point->cluster_id != CLUSTER_UNVISITED) {
+                        //printf("already part of the cluster %zu\n", point->cluster_id);
+                        continue; //point is a noise or already in some cluster
+                }
+
+                eps_get_neigh(point, distance_matrix, rec_vec, &eps_vec);
+                //for (size_t j = 0; j < eps_vec.size; ++j) {
+                //        struct rec *new_point = ((struct rec **)eps_vec.data)[j];
+                //        printf("point %zu: %lx\n", j, new_point);
+                //}
+
+                if (eps_vec.size < MIN_PTS) { //just a noise
+                        //printf("noise with %zu eps-neighbors\n", eps_vec.size);
+                        point->cluster_id = CLUSTER_NOISE; //may be chaged later
+                        vector_clear(&eps_vec);
+                        continue;
+                }
+
+                /*
+                 * The point is a core point, expand the cluster around it.
+                 * There is no need to remove the point from the eps_vec,
+                 * because it already is assigned to a cluster and such points
+                 * are skipped.
+                 */
+                //printf("new cluster %zu, core point with %zu eps-neighbors\n", cluster_id, eps_vec.size);
+                point->cluster_id = cluster_id;
+
+                /* Loop through the whole (growing) epsilon-neighborhood. */
+                for (size_t j = 0; j < eps_vec.size; ++j) {
+                        struct rec *new_point =
+                                ((struct rec **)eps_vec.data)[j];
+
+                        //printf("\tnew point %lx: \n", new_point);
+                        if (new_point->cluster_id == CLUSTER_UNVISITED) {
+                                new_point->cluster_id = cluster_id;
+                                eps_get_neigh(new_point, distance_matrix,
+                                                rec_vec, &new_eps_vec);
+
+                                if (new_eps_vec.size >= MIN_PTS) { //core point
+                                        //printf("core point with %zu eps-neighbors\n", new_eps_vec.size);
+                                        /* Append new_eps_vec to the eps_vec. */
+                                        vector_concat(&eps_vec, &new_eps_vec);
+                                        //eps_merge(&eps_vec, &new_eps_vec);
+                                } else {
+                                        //printf("border point with %zu eps-neighbors\n", new_eps_vec.size);
+                                }
+
+                        } else if (new_point->cluster_id == CLUSTER_NOISE) {
+                                //printf("changing from noise\n");
+                                new_point->cluster_id = cluster_id;
+                        } else {
+                                //printf("already part of the cluster %zu\n", new_point->cluster_id);
+                        }
+                }
+
+                cluster_id++;
+                //printf("length of the eps_vec = %zu\n", eps_vec.size);
+        }
+
+        vector_free(&new_eps_vec);
+        vector_free(&eps_vec);
+}
+
+
+static error_code_t clusterize(struct slave_task_ctx *stc)
+{
+        error_code_t primary_errno = E_OK;
+        int secondary_errno;
+
+        size_t file_rec_cntr = 0;
+        size_t file_proc_rec_cntr = 0;
+        size_t flows_cnt_meta;
+
+        struct rec rec; //data point
+        struct vector rec_vec; //set of data points
+
+        double **distance_matrix = NULL;
+
+        struct output_params op;
+        struct field_info fi[LNF_FLD_TERM_];
+
+        op.print_records = OUTPUT_ITEM_YES;
+        op.format = OUTPUT_FORMAT_PRETTY;
+        op.tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_STR;
+        op.ip_addr_conv = OUTPUT_IP_ADDR_CONV_STR;
+
+        memset(fi, 0, sizeof (fi));
+        fi[LNF_FLD_SRCADDR].id = LNF_FLD_SRCADDR;
+        fi[LNF_FLD_DSTADDR].id = LNF_FLD_DSTADDR;
+        fi[LNF_FLD_SRCPORT].id = LNF_FLD_SRCPORT;
+        fi[LNF_FLD_DSTPORT].id = LNF_FLD_DSTPORT;
+        fi[LNF_FLD_TCP_FLAGS].id = LNF_FLD_TCP_FLAGS;
+
+        output_setup(op, fi);
+
+
+        vector_init(&rec_vec, sizeof (struct rec));
+        assert(lnf_info(stc->file, LNF_INFO_FLOWS, &flows_cnt_meta,
+                                sizeof (flows_cnt_meta)) == LNF_OK);
+        vector_reserve(&rec_vec, flows_cnt_meta);
+
+
+        /**********************************************************************/
+        /* Read all records from the file. */
+        while ((secondary_errno = lnf_read(stc->file, stc->rec)) == LNF_OK) {
+                file_rec_cntr++;
+
+                /* Apply filter (if there is any). */
+                if (stc->filter && !lnf_filter_match(stc->filter, stc->rec)) {
+                        continue;
+                }
+                file_proc_rec_cntr++;
+
+                rec.id = file_rec_cntr - 1;
+                rec.cluster_id = CLUSTER_UNVISITED;
+
+                lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &rec.srcaddr);
+                lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &rec.dstaddr);
+                lnf_rec_fget(stc->rec, LNF_FLD_SRCPORT, &rec.srcport);
+                lnf_rec_fget(stc->rec, LNF_FLD_DSTPORT, &rec.dstport);
+                lnf_rec_fget(stc->rec, LNF_FLD_PROT, &rec.proto);
+
+                vector_add(&rec_vec, &rec);
+        }
+        /* Check if we reach end of the file. */
+        if (secondary_errno != LNF_EOF) {
+                print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
+        }
+
+        /**********************************************************************/
+        /* Create and fill distance matrix. */
+        distance_matrix = distance_matrix_init(rec_vec.size);
+        distance_matrix_fill(distance_matrix, rec_vec.size,
+                        (struct rec *)rec_vec.data);
+
+        /**********************************************************************/
+        /* DBSCAN */
+        dbscan(&rec_vec, (const double * const*)distance_matrix);
+
+        /**********************************************************************/
+        /* Print results. */
+
+        putchar('\n');
+        for (size_t i = 0; i < rec_vec.size; ++i) {
+                struct rec *point = (struct rec *)rec_vec.data + i;
+
+                printf("%lu: %lu\n", point->id, point->cluster_id);
+        }
+        putchar('\n');
+
+
+
+        /**********************************************************************/
+        /* Free the memory. */
+        distance_matrix_free(distance_matrix, rec_vec.size);
+        vector_free(&rec_vec);
+
+        printf("%zu records processed\n", file_proc_rec_cntr);
+
+        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
+        print_debug("<task_store_file> read %zu, processed %zu", file_rec_cntr,
+                        file_proc_rec_cntr);
+
+        return primary_errno;
+}
+
+static void task_free(struct slave_task_ctx *stc)
+{
+        if (stc->filter) {
+                lnf_filter_free(stc->filter);
+        }
+        free(stc->path_str);
+}
+
+
+static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
+{
+        int secondary_errno;
+
+
+        assert(filter != NULL && filter_str != NULL && strlen(filter_str) != 0);
+
+        /* Initialize filter. */
+        //secondary_errno = lnf_filter_init(filter, filter_str); //old filter
+        secondary_errno = lnf_filter_init_v2(filter, filter_str); //new filter
+        if (secondary_errno != LNF_OK) {
+                print_err(E_LNF, secondary_errno,
+                                "cannot initialise filter \"%s\"", filter_str);
+                return E_LNF;
+        }
+
+        return E_OK;
+}
+
+
+static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
+{
+        error_code_t primary_errno = E_OK;
+
+
+        assert(stc != NULL);
+
+        /* Receive task context, path string and optional filter string. */
+        MPI_Bcast(&stc->shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
+        stc->path_str = calloc_or_abort(stc->shared.path_str_len + 1,
+                        sizeof (char));
+        MPI_Bcast(stc->path_str, stc->shared.path_str_len, MPI_CHAR, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
+        if (stc->shared.filter_str_len > 0) {
+                char filter_str[stc->shared.filter_str_len + 1];
+
+                MPI_Bcast(filter_str, stc->shared.filter_str_len, MPI_CHAR,
+                                ROOT_PROC, MPI_COMM_WORLD);
+
+                filter_str[stc->shared.filter_str_len] = '\0'; //termination
+                primary_errno = task_init_filter(&stc->filter, filter_str);
+                //it is OK not to chech primary_errno
+        }
+
+
+        return primary_errno;
+}
+
+
+static void progress_report_init(size_t files_cnt)
+{
+        MPI_Gather(&files_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0, MPI_UNSIGNED_LONG,
+                        ROOT_PROC, MPI_COMM_WORLD);
+}
+
+static void progress_report_next(void)
+{
+        MPI_Request request = MPI_REQUEST_NULL;
+
+
+        MPI_Isend(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
+                        MPI_COMM_WORLD, &request);
+        MPI_Request_free(&request);
+}
+
+
+static error_code_t process(struct slave_task_ctx *stc, char **paths,
+                size_t paths_cnt)
+{
+        error_code_t primary_errno = E_OK;
+        int secondary_errno;
+
+
+        /* Initialize LNF record only once. */
+        secondary_errno = lnf_rec_init(&stc->rec);
+        if (secondary_errno != LNF_OK) {
+                primary_errno = E_LNF;
+                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                goto err;
+        }
+
+
+        /* Loop through all the files. */
+        for (size_t i = 0; i < paths_cnt; ++i) {
+                if (primary_errno != E_OK) {
+                        continue;
+                }
+
+                /* Open a flow file. */
+                secondary_errno = lnf_open(&stc->file, paths[i], LNF_READ, NULL);
+                if (secondary_errno != LNF_OK) {
+                        print_warn(E_LNF, secondary_errno,
+                                        "unable to open file \"%s\"", paths[i]);
+                        continue;
+                }
+
+                primary_errno = clusterize(stc);
+
+                lnf_close(stc->file);
+
+                /* Report that another file has been processed. */
+                progress_report_next();
+        }
+
+        /* Free LNF record. */
+        lnf_rec_free(stc->rec);
+err:
+
+        return primary_errno;
+}
+
+error_code_t clustering(int world_size)
+{
+        error_code_t primary_errno = E_OK;
+        struct slave_task_ctx stc;
+        char **paths = NULL;
+        size_t paths_cnt = 0;
+
+
+        memset(&stc, 0, sizeof (stc));
+        stc.slave_cnt = world_size - 1; //all nodes without master
+
+        /* Wait for reception of task context from master. */
+        primary_errno = task_receive_ctx(&stc);
+        if (primary_errno != E_OK) {
+                goto finalize_task;
+        }
+
+        /* Data source specific initialization. */
+        paths = path_array_gen(stc.path_str, stc.shared.time_begin,
+                        stc.shared.time_end, &paths_cnt);
+        if (paths == NULL) {
+                primary_errno = E_PATH;
+                goto finalize_task;
+        }
+
+        /* Report number of files to be processed. */
+        progress_report_init(paths_cnt);
+
+
+        primary_errno = process(&stc, paths, paths_cnt);
+
+
+        /* Reduce statistics to the master. */
+        MPI_Reduce(&stc.processed_summ, NULL, 3, MPI_UINT64_T, MPI_SUM,
+                        ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Reduce(&stc.metadata_summ, NULL, 15, MPI_UINT64_T, MPI_SUM,
+                        ROOT_PROC, MPI_COMM_WORLD);
+
+
+finalize_task:
+        path_array_free(paths, paths_cnt);
+        task_free(&stc);
+
+        return primary_errno;
+}

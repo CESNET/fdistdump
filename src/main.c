@@ -2,7 +2,7 @@
  * \file main.c
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+ * \date 2016
  */
 
 /*
@@ -45,6 +45,7 @@
 #include "common.h"
 #include "master.h"
 #include "slave.h"
+#include "clustering.h"
 #include "arg_parse.h"
 
 #include <stdio.h>
@@ -109,7 +110,8 @@ int main(int argc, char **argv)
         if (world_rank == ROOT_PROC) {
                 primary_errno = master(world_size, &args);
         } else {
-                primary_errno = slave(world_size);
+                //primary_errno = slave(world_size);
+                primary_errno = clustering(world_size);
         }
 
         /* Free MPI data types (global variables). */

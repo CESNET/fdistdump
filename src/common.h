@@ -317,4 +317,9 @@ time_t mktime_utc(struct tm *tm);
 int field_get_type(int field);
 size_t field_get_size(int field);
 
+
+void * malloc_or_abort(size_t nmemb, size_t size);
+void * calloc_or_abort(size_t nmemb, size_t size);
+void * realloc_or_abort(void *ptr, size_t nmemb, size_t size);
+
 #endif //COMMON_H

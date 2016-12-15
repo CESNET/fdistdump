@@ -6,7 +6,9 @@ fdistdump_SOURCES=src/main.c \
 		  src/common.c src/common.h \
 		  src/arg_parse.c src/arg_parse.h \
 		  src/path_array.c src/path_array.h \
-		  src/output.c src/output.h
+		  src/output.c src/output.h \
+		  src/clustering.c src/clustering.h \
+		  src/vector.h
 
 
 #define variables for tests
