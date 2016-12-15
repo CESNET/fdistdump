@@ -49,13 +49,14 @@
 #include <stdarg.h> //variable argument list
 #include <assert.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif //_OPENMP
 #include <mpi.h>
 
 
-#define MAX_PROC_INFO_NAME (MPI_MAX_PROCESSOR_NAME + 100)
-
-
-verbosity_t verbosity = VERBOSITY_ERROR;
+/* Default verbosity levele is warning. */
+verbosity_t verbosity = VERBOSITY_WARNING;
 
 
 /**
@@ -111,7 +112,7 @@ static char * error_code_to_str(error_code_t e1)
         return msg;
 }
 
-//TODO: add OpenMP
+
 void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
                 const char *func, const int line, ...)
 {
@@ -122,30 +123,30 @@ void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
         size_t off = 0;
 
         /* Add prefix for every verbosity. */
-        off += snprintf(res + off, MAX_STR_LEN - off, "%s:", prefix);
+        off += snprintf(res + off, MAX_STR_LEN - off, "%s: ", prefix);
 
         /* Add fdistdump error info. */
         if (e1 != E_OK) {
-                off += snprintf(res + off, MAX_STR_LEN - off, " %s: ",
-                                error_code_to_str(e1));
-        }
-
-        /* Add external (libnf) error info. */
-        if (e1 == E_LNF && e2 == LNF_ERR_OTHER_MSG) {
-                char lnf_error_str[LNF_MAX_STRING];
-
-                lnf_error(lnf_error_str, LNF_MAX_STRING);
                 off += snprintf(res + off, MAX_STR_LEN - off, "%s: ",
                                 error_code_to_str(e1));
+
+                /* Add external (libnf) error info. */
+                if (e1 == E_LNF && e2 == LNF_ERR_OTHER_MSG) {
+                        char lnf_error_str[LNF_MAX_STRING];
+
+                        lnf_error(lnf_error_str, LNF_MAX_STRING);
+                        off += snprintf(res + off, MAX_STR_LEN - off, "%s: ",
+                                        lnf_error_str);
+                }
         }
 
-        /* Add additional string from format and varargs. */
+        /* Add additional string from format (first in arg_list) and varargs. */
         va_start(arg_list, line);
         off += vsnprintf(res + off, MAX_STR_LEN - off,
                         va_arg(arg_list, const char *), arg_list);
         va_end(arg_list);
 
-        /* Add location and MPI info only for debug verbosity. */
+        /* Add location MPI and OpenMP info only for debug verbosity. */
         if (verbosity >= VERBOSITY_DEBUG) {
                 char mpi_processor_name[MPI_MAX_PROCESSOR_NAME + 1];
                 int mpi_processor_name_len;
@@ -159,10 +160,18 @@ void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
                 mpi_processor_name[mpi_processor_name_len] = '\0';
 
                 off += snprintf(res + off, MAX_STR_LEN - off,
-                                " [location: %s:%s():%d]", file, func, line);
+                                "\t[location: %s:%s():%d]", file, func, line);
                 off += snprintf(res + off, MAX_STR_LEN - off,
                                 " [MPI: %d/%d %s]", mpi_world_rank,
                                 mpi_world_size, mpi_processor_name);
+#ifdef _OPENMP
+                if (omp_in_parallel()) {
+                        off += snprintf(res + off, MAX_STR_LEN - off,
+                                        " [OpenMP: %d/%d]",
+                                        omp_get_thread_num(),
+                                        omp_get_num_threads());
+                }
+#endif //_OPENMP
         }
 
         off += snprintf(res + off, MAX_STR_LEN - off, "\n");

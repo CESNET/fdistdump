@@ -63,6 +63,12 @@ typedef enum {
 extern verbosity_t verbosity;
 
 
+/** \breif Print error/warning/info/debug macros.
+ *
+ * \param[in] e1     fdistdump error code.
+ * \param[in] e2     External error code (e.g. code returned by libnf).
+ * \param[in] ...    Additional arguments beginning with a format string.
+ */
 #define PRINT_ERROR(e1, e2, ...) \
         do { \
                 if (verbosity >= VERBOSITY_ERROR) { \
