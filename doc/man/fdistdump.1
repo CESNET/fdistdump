@@ -23,6 +23,8 @@ fdistdump \- a tool to query IP flow files using single or distributed system
 .IR time_spec ]
 .RB [ -T
 .IR begin [# end ]]
+.RB [ -v
+.IR level ]
 .IR path \ ...
 .\" DESCRIPTION section --------------------------------------------------------
 .SH DESCRIPTION
@@ -129,7 +131,7 @@ Conversion specifiers:
 .TP
 .B h
 The conversion specifier is converted into the hostname of the node.
-This is often used to read different files by each slave from a shared storage.
+This may be used to read different files by each slave from a shared storage.
 
 .\" General options subsection ---------------------
 .SS General options
@@ -248,6 +250,13 @@ Beginning time is aligned to the beginning of the rotation interval, ending time
        begin  end                           begin        end
 .RE
 .fi
+.TP
+.BR -v , \ --verbosity=\fIlevel
+Set verbosity level to \fIlevel\fR.
+The higher the number, the more information is printed.
+Level 0 shows no messages (quite mode), level 1 shows errors, level 2 shows warnings, level 3 shows info messages and level 4 shows debug messages.
+All messages of this kind are printed to the \fBstderr\fR stream.
+Default level is 2, i.e. show errors and warnings.
 .\" Controlling the output subsection ---------------------
 .SS Controlling the output
 .TP
