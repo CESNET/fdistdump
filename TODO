@@ -2,6 +2,7 @@ Bugfixes:
 
 Features:
         -try and test new libnf versions (> 1.16), check and reflect changes
+        -add output alignment options: none, expanding, absolute
 
 Optimizations:
         -optimization for ascending sort, there is possibility to vastly reduce
@@ -27,4 +28,8 @@ Documentation:
 Others:
         -create and use more MPI tags
         -suppress printing command-line error messages on all nodes
-        -runtime debugging output
+        -add possibility to print record to string
+
+Coding style:
+        -join multiline string
+        -check 80 characters per line

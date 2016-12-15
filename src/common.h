@@ -2,8 +2,7 @@
  * \file common.h
  * \brief Common fdistdump prototypes, macros, data types, enumerations, etc.
  * \author Jan Wrona, <wrona@cesnet.cz>
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+ * \date 2016
  */
 
 /*
@@ -43,6 +42,7 @@
  *
  */
 
+
 #ifndef COMMON_H
 #define COMMON_H
 
@@ -54,6 +54,7 @@
 #include <inttypes.h> //exact width integer types
 
 #include <libnf.h>
+
 
 #define ROOT_PROC 0 //MPI root processor number
 #define MAX_STR_LEN 1024 //maximum length of a general string
@@ -215,44 +216,6 @@ struct shared_task_ctx {
 char * working_mode_to_str(working_mode_t working_mode);
 
 
-/** \brief Print error message.
- *
- * Print detailed error information to stderr. Provided format is prefixed by
- * error cause and MPI process info.
- *
- * \param[in] prim_errno Primary errno.
- * \param[in] sec_errno Secondary errno.
- * \param[in] format Format string passed to vfprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_err(error_code_t prim_errno, int sec_errno,
-                const char *format, ...);
-
-/** \brief Print warning message.
- *
- * Print detailed warning information to stderr. Provided format is prefixed by
- * warning cause and MPI process info.
- *
- * \param[in] prim_errno Primary errno.
- * \param[in] sec_errno Secondary errno.
- * \param[in] format Format string passed to vfprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_warn(error_code_t prim_errno, int sec_errno,
-                const char *format, ...);
-
-/** \brief Print debug message.
- *
- * If DEBUG is defined, print provided debug string to stdout. Format is
- * prefixed by MPI process info. If DEBUG is not defined, function will do
- * nothing.
- *
- * \param[in] format Format string passed to vfprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_debug(const char *format, ...);
-
-
 /** \brief Construct MPI structure mpi_struct_shared_task_ctx.
  *
  * Global variable MPI_Datatype mpi_struct_shared_task_ctx is constructed as
@@ -321,5 +284,6 @@ size_t field_get_size(int field);
 void * malloc_or_abort(size_t nmemb, size_t size);
 void * calloc_or_abort(size_t nmemb, size_t size);
 void * realloc_or_abort(void *ptr, size_t nmemb, size_t size);
+
 
 #endif //COMMON_H

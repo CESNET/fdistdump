@@ -46,6 +46,7 @@
 #include "common.h"
 #include "slave.h"
 #include "path_array.h"
+#include "print.h"
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -167,7 +168,7 @@ static void metadata_summ_update(struct metadata_summ *private, lnf_file_t *file
 
         if (tmp.flows != tmp.flows_tcp + tmp.flows_udp + tmp.flows_icmp +
                         tmp.flows_other) {
-                print_warn(E_LNF, 0, "metadata flow count mismatch "
+                PRINT_WARNING(E_LNF, 0, "metadata flow count mismatch "
                                 "(total != TCP + UDP + ICMP + other)");
         }
 
@@ -191,7 +192,7 @@ static void metadata_summ_update(struct metadata_summ *private, lnf_file_t *file
 
         if (tmp.pkts != tmp.pkts_tcp + tmp.pkts_udp + tmp.pkts_icmp +
                         tmp.pkts_other) {
-                print_warn(E_LNF, 0, "metadata packet count mismatch "
+                PRINT_WARNING(E_LNF, 0, "metadata packet count mismatch "
                                 "(total != TCP + UDP + ICMP + other)");
         }
 
@@ -215,7 +216,7 @@ static void metadata_summ_update(struct metadata_summ *private, lnf_file_t *file
 
         if (tmp.bytes != tmp.bytes_tcp + tmp.bytes_udp + tmp.bytes_icmp +
                         tmp.bytes_other) {
-                print_warn(E_LNF, 0, "metadata bytes count mismatch "
+                PRINT_WARNING(E_LNF, 0, "metadata bytes count mismatch "
                                 "(total != TCP + UDP + ICMP + other)");
         }
 
@@ -373,7 +374,7 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 stc->rec_limit_reached = true;
                 #pragma omp flush
         } else if (secondary_errno != LNF_EOF) {
-                print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
+                PRINT_WARNING(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
         /* Buffers will be invalid after return, wait for send to complete. */
@@ -382,15 +383,8 @@ static error_code_t task_send_file(struct slave_task_ctx *stc,
                 MPI_Wait(&request, MPI_STATUS_IGNORE);
         }
 
-#ifdef _OPENMP
-        print_debug("<task_send_file> thread %d, read %zu, processed %zu, "
-                        "sent %zu B", omp_get_thread_num(), file_rec_cntr,
+        PRINT_DEBUG("read %zu, processed %zu, sent %zu B", file_rec_cntr,
                         file_proc_rec_cntr, file_sent_bytes);
-#else
-        print_debug("<task_send_file> read %zu, processed %zu, sent %zu B",
-                        file_rec_cntr, file_proc_rec_cntr, file_sent_bytes);
-#endif //_OPENMP
-
 
         return E_OK;
 }
@@ -425,7 +419,7 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
                 secondary_errno = lnf_mem_write(stc->aggr_mem, tc->rec);
                 if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
+                        PRINT_ERROR(primary_errno, secondary_errno,
                                         "lnf_mem_write()");
                         break;
                 }
@@ -433,16 +427,11 @@ static error_code_t task_store_file(struct slave_task_ctx *stc,
 
         /* Check if we reach end of file. */
         if (secondary_errno != LNF_EOF) {
-                print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
+                PRINT_WARNING(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
-#ifdef _OPENMP
-        print_debug("<task_store_file> thread %d, read %zu, processed %zu",
-                       omp_get_thread_num(), file_rec_cntr, file_proc_rec_cntr);
-#else
-        print_debug("<task_store_file> read %zu, processed %zu", file_rec_cntr,
+        PRINT_DEBUG("read %zu, processed %zu", file_rec_cntr,
                         file_proc_rec_cntr);
-#endif //_OPENMP
 
         return primary_errno;
 }
@@ -470,7 +459,7 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
         //secondary_errno = lnf_filter_init(filter, filter_str); //old filter
         secondary_errno = lnf_filter_init_v2(filter, filter_str); //new filter
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno,
+                PRINT_ERROR(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
                 return E_LNF;
         }
@@ -492,7 +481,7 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
 
         stc->path_str = calloc(stc->shared.path_str_len + 1, sizeof (char));
         if (stc->path_str == NULL) {
-                print_err(E_MEM, 0, "calloc()");
+                PRINT_ERROR(E_MEM, 0, "calloc()");
                 return E_MEM;
         }
         MPI_Bcast(stc->path_str, stc->shared.path_str_len, MPI_CHAR, ROOT_PROC,
@@ -614,7 +603,7 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
         }
         if (secondary_errno != LNF_EOF) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno,
+                PRINT_ERROR(primary_errno, secondary_errno,
                                 "lnf_mem_next_c() or lnf_mem_first_c()");
         }
 
@@ -630,7 +619,7 @@ static error_code_t isend_loop(struct slave_task_ctx *stc)
         /* Buffers will be invalid after return, wait for send to complete. */
         MPI_Wait(&request, MPI_STATUS_IGNORE);
 
-        print_debug("<isend_loop> read %zu, sent %zu B", rec_cntr, byte_cntr);
+        PRINT_DEBUG("read %zu, sent %zu B", rec_cntr, byte_cntr);
 
         return primary_errno;
 }
@@ -663,7 +652,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         secondary_errno = lnf_rec_init(&rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                PRINT_ERROR(primary_errno, secondary_errno, "lnf_rec_init()");
                 goto send_terminator;
         }
 
@@ -710,7 +699,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                 goto send_remaining; //no records in memory or all records read
         } else if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno,
+                PRINT_ERROR(primary_errno, secondary_errno,
                                 "lnf_mem_next_c() or lnf_mem_first_c()");
                 goto free_lnf_rec;
         }
@@ -737,7 +726,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         assert(secondary_errno != LNF_EOF);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_read_c()");
+                PRINT_ERROR(primary_errno, secondary_errno, "lnf_mem_read_c()");
                 goto free_lnf_rec;
         }
 
@@ -763,7 +752,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
                 assert(secondary_errno != LNF_EOF);
                 if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
+                        PRINT_ERROR(primary_errno, secondary_errno,
                                         "lnf_mem_read_c()");
                         goto free_lnf_rec;
                 }
@@ -810,7 +799,7 @@ static error_code_t fast_topn_isend_loop(struct slave_task_ctx *stc)
         }
         if (secondary_errno != LNF_OK && secondary_errno != LNF_EOF) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_mem_next_c()");
+                PRINT_ERROR(primary_errno, secondary_errno, "lnf_mem_next_c()");
                 goto free_lnf_rec;
         }
 
@@ -834,8 +823,7 @@ send_terminator:
         /* Buffers will be invalid after return, wait for send to complete. */
         MPI_Wait(&request, MPI_STATUS_IGNORE);
 
-        print_debug("<fast_topn_isend_loop> read %zu, sent %zu B", rec_cntr,
-                        byte_cntr);
+        PRINT_DEBUG("read %zu, sent %zu B", rec_cntr, byte_cntr);
 
         return primary_errno;
 }
@@ -859,7 +847,7 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
                         sizeof (lnf_mem_cursor_t *));
         if (lookup_cursors == NULL) {
                 secondary_errno = 0;
-                print_err(E_MEM, secondary_errno, "malloc()");
+                PRINT_ERROR(E_MEM, secondary_errno, "malloc()");
                 return E_MEM;
         }
 
@@ -880,7 +868,7 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
                         continue; //record not found, nevermind
                 } else if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
+                        PRINT_ERROR(primary_errno, secondary_errno,
                                         "lnf_mem_lookup_raw_c()");
                         goto free_lookup_cursors;
                 }
@@ -896,7 +884,7 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
                         if (tmp == NULL) {
                                 primary_errno = E_MEM;
                                 secondary_errno = 0;
-                                print_err(primary_errno, secondary_errno,
+                                PRINT_ERROR(primary_errno, secondary_errno,
                                                 "realloc()");
                                 goto free_lookup_cursors;
                         }
@@ -913,7 +901,7 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
                 assert(secondary_errno != LNF_EOF);
                 if (secondary_errno != LNF_OK) {
                         primary_errno = E_LNF;
-                        print_err(primary_errno, secondary_errno,
+                        PRINT_ERROR(primary_errno, secondary_errno,
                                         "lnf_mem_read_raw_c()");
                         goto free_lookup_cursors;
                 }
@@ -925,8 +913,9 @@ static error_code_t fast_topn_recv_lookup_send(struct slave_task_ctx *stc)
 free_lookup_cursors:
         free(lookup_cursors);
 
-        print_debug("<fast_topn_recv_lookup_send> received %zu, "
-                        "found and sent %zu", received_cnt, lookup_cursors_idx);
+        PRINT_DEBUG("received %zu, found and sent %zu", received_cnt,
+                        lookup_cursors_idx);
+
         return primary_errno;
 }
 
@@ -972,7 +961,8 @@ static error_code_t task_postprocess(struct slave_task_ctx *stc)
                 assert(!"unknown working mode");
         }
 
-        print_debug("<task_postprocess> done");
+        PRINT_DEBUG("done");
+
         return primary_errno;
 }
 
@@ -1016,7 +1006,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
         secondary_errno = lnf_rec_init(&tc.rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                PRINT_ERROR(primary_errno, secondary_errno, "lnf_rec_init()");
                 goto merge_mem;
         }
 
@@ -1034,7 +1024,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 tc.buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (**tc.buff));
                 if (tc.buff[0] == NULL || tc.buff[1] == NULL) {
                         primary_errno = E_MEM;
-                        print_err(E_MEM, 0, "malloc()");
+                        PRINT_ERROR(E_MEM, 0, "malloc()");
                         goto free_lnf_rec;
                 }
         }
@@ -1050,7 +1040,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 /* Open a flow file. */
                 secondary_errno = lnf_open(&tc.file, paths[i], LNF_READ, NULL);
                 if (secondary_errno != LNF_OK) {
-                        print_warn(E_LNF, secondary_errno,
+                        PRINT_WARNING(E_LNF, secondary_errno,
                                         "unable to open file \"%s\"", paths[i]);
                         goto my_continue;
                 }
@@ -1137,7 +1127,7 @@ error_code_t slave(int world_size)
         stc.buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (**stc.buff));
         if (stc.buff[0] == NULL || stc.buff[1] == NULL) {
                 primary_errno = E_MEM;
-                print_err(E_MEM, 0, "malloc()");
+                PRINT_ERROR(E_MEM, 0, "malloc()");
                 goto finalize_task;
         }
 
