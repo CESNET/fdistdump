@@ -42,12 +42,14 @@
  *
  */
 
+
 #include "common.h"
 #include "clustering.h"
 #include "slave.h"
 #include "path_array.h"
 #include "vector.h"
 #include "output.h"
+#include "print.h"
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -459,7 +461,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         }
         /* Check if we reach end of the file. */
         if (secondary_errno != LNF_EOF) {
-                print_warn(E_LNF, secondary_errno, "EOF wasn't reached");
+                PRINT_WARNING(E_LNF, secondary_errno, "EOF wasn't reached");
         }
 
         /**********************************************************************/
@@ -490,10 +492,8 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         distance_matrix_free(distance_matrix, rec_vec.size);
         vector_free(&rec_vec);
 
-        printf("%zu records processed\n", file_proc_rec_cntr);
-
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
-        print_debug("<task_store_file> read %zu, processed %zu", file_rec_cntr,
+        PRINT_DEBUG("read %zu, processed %zu", file_rec_cntr,
                         file_proc_rec_cntr);
 
         return primary_errno;
@@ -519,7 +519,7 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
         //secondary_errno = lnf_filter_init(filter, filter_str); //old filter
         secondary_errno = lnf_filter_init_v2(filter, filter_str); //new filter
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno,
+                PRINT_ERROR(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
                 return E_LNF;
         }
@@ -588,7 +588,7 @@ static error_code_t process(struct slave_task_ctx *stc, char **paths,
         secondary_errno = lnf_rec_init(&stc->rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                PRINT_ERROR(primary_errno, secondary_errno, "lnf_rec_init()");
                 goto err;
         }
 
@@ -602,7 +602,7 @@ static error_code_t process(struct slave_task_ctx *stc, char **paths,
                 /* Open a flow file. */
                 secondary_errno = lnf_open(&stc->file, paths[i], LNF_READ, NULL);
                 if (secondary_errno != LNF_OK) {
-                        print_warn(E_LNF, secondary_errno,
+                        PRINT_WARNING(E_LNF, secondary_errno,
                                         "unable to open file \"%s\"", paths[i]);
                         continue;
                 }
