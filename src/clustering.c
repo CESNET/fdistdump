@@ -103,6 +103,7 @@ struct slave_task_ctx {
 struct rec {
         size_t id; //point ID
         size_t cluster_id; //ID of cluster the point belongs to
+        //bool spec_core; //specific core-point flag
 
         /* Feature vector. */
         uint16_t srcport;
@@ -219,11 +220,10 @@ double distance_function_rand(const struct rec *rec1, const struct rec *rec2)
 
 
 /*
- * Distance matrix:
- * -the entries on the main diagonal are all zero           x[i][i] == 0
- * -all the off-diagonal entries are positive     if i != j, x[i][j] > 0
- * -the matrix is a symmetric matrix                  x[i][j] == x[j][i]
- * -the triangle inequality)      for all k x[i][j] <= x[i][k] + x[k][j]
+ * Distance matrix with a following properties:
+ * 1. the entries on the main diagonal are all zero                 x[i][i] == 0
+ * 2. the matrix is a symmetric matrix                        x[i][j] == x[j][i]
+ * 3. the triangle inequality             for all k x[i][j] <= x[i][k] + x[k][j]
  */
 static double ** distance_matrix_init(size_t size)
 {
@@ -260,16 +260,16 @@ static void distance_matrix_fill(double **dm, size_t size,
                 return;
         }
 
-        #pragma omp parallel for
+        #pragma omp parallel for firstprivate(dm, size, rec_data)
         for (size_t row = 0; row < size; ++row) {
-                dm[row][row] = 0.0; //zero on diagonal
+                dm[row][row] = 0.0; //property 1: zero on the main diagonal
 
                 for (size_t col = 0; col < row; ++col) {
                         const double distance = distance_function(
                                         rec_data + row, rec_data + col);
 
                         dm[row][col] = distance;
-                        dm[col][row] = distance;
+                        dm[col][row] = distance; //property 2: symmetry
                 }
         }
 
@@ -282,9 +282,55 @@ static void distance_matrix_fill(double **dm, size_t size,
         //}
 }
 
+/*
+ * Check if the distance matrix properties are true:
+ * 1. the entries on the main diagonal are all zero                 x[i][i] == 0
+ * 2. the matrix is a symmetric matrix                        x[i][j] == x[j][i]
+ * 3. the triangle inequality             for all k x[i][j] <= x[i][k] + x[k][j]
+ */
+static bool distance_matrix_check(double **dm, size_t size)
+{
+        bool ret = true;
+
+        #pragma omp parallel for firstprivate(dm, size)
+        for (size_t i = 0; i < size; ++i) {
+openmp_break:
+                if (!ret) {
+                        continue; //cannot break from OpenMP for
+                }
+
+                if (dm[i][i] != 0.0) { //1. zero on the diagonal
+                        PRINT_INFO("distance matrix check: "
+                                        "non-zero entry on the main diagonal");
+                        ret = false;
+                        goto openmp_break;
+                }
+
+                for (size_t j = 0; j < size; ++j) {
+                        if (dm[i][j] != dm[i][j]) { //2. symmety
+                                PRINT_INFO("distance matrix check: "
+                                                "matrix is not symmetric");
+                                ret = false;
+                                goto openmp_break;
+                        }
+
+                        for (size_t k = 0; k < size; ++k) {
+                                if (dm[i][j] > dm[i][k] + dm[k][j]) { //3. TI
+                                        PRINT_INFO("distance matrix check: "
+                                                        "triangle inequality property is not satisfied");
+                                        ret = false;
+                                        goto openmp_break;
+                                }
+                        }
+                }
+        }
+
+        return ret;
+}
+
 
 /*
- * Return all points within a point's epsilon-neighborhood (including the
+ * Return all points within a point's eps-neighborhood (including the
  * point). Epsilon-neighborhood is an open set (i.e. <, not <=).
  */
 static void eps_get_neigh(const struct rec *point, double **distance_matrix,
@@ -306,7 +352,7 @@ static void eps_get_neigh(const struct rec *point, double **distance_matrix,
                 distance_vec = (double *)distance_matrix + 1;
 
                 thread_num_start();
-                #pragma omp parallel for
+                #pragma omp parallel for firstprivate(distance_vec, rec_data)
                 for (size_t i = 0; i < rec_vec->size; ++i) {
                         distance_vec[i] = distance_function(
                                         rec_data + point->id, rec_data + i);
@@ -316,7 +362,7 @@ static void eps_get_neigh(const struct rec *point, double **distance_matrix,
                 distance_vec = distance_matrix[point->id];
         }
 
-        /* Find and store epsilon neighbors of a certain point. */
+        /* Find and store eps-neighbors of a certain point. */
         for (size_t i = 0; i < rec_vec->size; ++i) {
                 if (distance_vec[i] < EPS) {
                         struct rec *neigbor = vector_get_ptr(rec_vec, i);
@@ -421,64 +467,49 @@ void dbscan(const struct vector *rec_vec, double **distance_matrix)
         for (size_t i = 0; i < rec_vec->size; ++i) {
                 struct rec *point = (struct rec *)rec_vec->data + i;
 
-                //printf("point %lx: \n", point);
                 if (point->cluster_id != CLUSTER_UNVISITED) {
-                        //printf("already part of the cluster %zu\n", point->cluster_id);
-                        continue; //point is a noise or already in some cluster
+                        /* The point is a noise or already in some cluster. */
+                        continue;
                 }
 
                 eps_get_neigh(point, distance_matrix, rec_vec, &eps_vec);
-                //for (size_t j = 0; j < eps_vec.size; ++j) {
-                //        struct rec *new_point = ((struct rec **)eps_vec.data)[j];
-                //        printf("point %zu: %lx\n", j, new_point);
-                //}
 
-                if (eps_vec.size < MIN_PTS) { //just a noise
-                        //printf("noise with %zu eps-neighbors\n", eps_vec.size);
-                        point->cluster_id = CLUSTER_NOISE; //may be chaged later
+                if (eps_vec.size < MIN_PTS) {
+                        /* The point is a noise, this may be chaged later. */
+                        point->cluster_id = CLUSTER_NOISE;
                         vector_clear(&eps_vec);
                         continue;
                 }
 
-                /*
-                 * The point is a core point, expand the cluster around it.
-                 * There is no need to remove the point from the eps_vec,
-                 * because it already is assigned to a cluster and such points
-                 * are skipped.
-                 */
-                //printf("new cluster %zu, core point with %zu eps-neighbors\n", cluster_id, eps_vec.size);
+                /* The point is a core point of a new cluster, expand it. */
                 point->cluster_id = cluster_id;
 
-                /* Loop through the whole (growing) epsilon-neighborhood. */
+                /* Loop through the whole (growing) eps-neighborhood. */
                 for (size_t j = 0; j < eps_vec.size; ++j) {
-                        struct rec *new_point =
-                                ((struct rec **)eps_vec.data)[j];
+                        struct rec *new_point = ((struct rec **)eps_vec.data)[j];
 
-                        //printf("\tnew point %lx: \n", new_point);
                         if (new_point->cluster_id == CLUSTER_UNVISITED) {
+                                /*
+                                 * The point is either a core point (then add
+                                 * its eps-neighborhood to the current
+                                 * eps-neighborhood) or a border point.
+                                 */
                                 new_point->cluster_id = cluster_id;
                                 eps_get_neigh(new_point, distance_matrix,
                                                 rec_vec, &new_eps_vec);
 
                                 if (new_eps_vec.size >= MIN_PTS) { //core point
-                                        //printf("core point with %zu eps-neighbors\n", new_eps_vec.size);
-                                        /* Append new_eps_vec to the eps_vec. */
                                         vector_concat(&eps_vec, &new_eps_vec);
                                         //eps_merge(&eps_vec, &new_eps_vec);
-                                } else {
-                                        //printf("border point with %zu eps-neighbors\n", new_eps_vec.size);
-                                }
+                                } //else the point is a borer point
 
                         } else if (new_point->cluster_id == CLUSTER_NOISE) {
-                                //printf("changing from noise\n");
+                                /* The point was a noise, but isn't anymore. */
                                 new_point->cluster_id = cluster_id;
-                        } else {
-                                //printf("already part of the cluster %zu\n", new_point->cluster_id);
-                        }
+                        } //else the point was already part of some cluster
                 }
 
-                cluster_id++;
-                //printf("length of the eps_vec = %zu\n", eps_vec.size);
+                cluster_id++; //cluster finished, move to the next one
         }
 
         vector_free(&new_eps_vec);
@@ -537,6 +568,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
 
                 rec.id = file_rec_cntr - 1;
                 rec.cluster_id = CLUSTER_UNVISITED;
+                //rec.spec_core = false;
 
                 lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &rec.srcaddr);
                 lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &rec.dstaddr);
@@ -556,6 +588,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         distance_matrix = distance_matrix_init(rec_vec.size);
         distance_matrix_fill(distance_matrix, rec_vec.size,
                         (struct rec *)rec_vec.data);
+        //distance_matrix_check(distance_matrix, rec_vec.size);
 
         /**********************************************************************/
         /* DBSCAN */
