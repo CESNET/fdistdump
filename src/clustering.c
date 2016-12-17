@@ -60,6 +60,7 @@
 #include <unistd.h> //access
 #include <time.h>
 #include <arpa/inet.h>
+#include <float.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -112,6 +113,81 @@ struct rec {
 } __attribute__((packed));
 
 
+static struct {
+        double wtime_sum_cur;
+        double wtime_sum_prev;
+
+        int num_threads;
+        size_t measurement_cnt;
+        bool finished;
+} thread_num_ctx;
+
+static void thread_num_init(void)
+{
+        thread_num_ctx.wtime_sum_cur = 0.0;
+        thread_num_ctx.wtime_sum_prev = DBL_MAX;
+
+        thread_num_ctx.num_threads = omp_get_max_threads();
+        thread_num_ctx.measurement_cnt = 0;
+        thread_num_ctx.finished = false;
+}
+
+static void thread_num_start(void)
+{
+        if (thread_num_ctx.finished) {
+                return;
+        }
+
+        /* Set number of threads and start measuring time. */
+        omp_set_num_threads(thread_num_ctx.num_threads);
+        thread_num_ctx.wtime_sum_cur = -omp_get_wtime();
+}
+
+static void thread_num_stop(void)
+{
+        if (thread_num_ctx.finished) {
+                return;
+        }
+
+        /* Stop measuring time. */
+        thread_num_ctx.wtime_sum_cur += omp_get_wtime();
+
+        if (++thread_num_ctx.measurement_cnt == 10) {
+                PRINT_DEBUG("wtime for %d threads and %zu runs was %f s",
+                                thread_num_ctx.num_threads,
+                                thread_num_ctx.measurement_cnt,
+                                thread_num_ctx.wtime_sum_cur);
+
+                /*
+                 * If wtime rose, revert number threads to the previous value
+                 * and stop furthe measurement.
+                 * If wtime fell, decrese number of threads and prepare for
+                 * next measurement.
+                 */
+                if (thread_num_ctx.wtime_sum_cur >
+                                thread_num_ctx.wtime_sum_prev) {
+                        thread_num_ctx.num_threads++; //revert to the prev. val.
+                        thread_num_ctx.finished = true;
+
+                        PRINT_DEBUG("found %d as a fastest threads count",
+                                        thread_num_ctx.num_threads);
+                } else {
+                        thread_num_ctx.num_threads--; //try less threads
+                        thread_num_ctx.measurement_cnt = 0;
+                        thread_num_ctx.wtime_sum_prev = thread_num_ctx.wtime_sum_cur;
+                        thread_num_ctx.wtime_sum_cur = 0.0;
+                }
+
+                if (thread_num_ctx.num_threads == 1) {
+                        thread_num_ctx.finished = true;
+
+                        PRINT_DEBUG("found %d as a fastest threads count",
+                                        thread_num_ctx.num_threads);
+                }
+        }
+}
+
+
 double distance_function(const struct rec *point1, const struct rec *point2)
 {
         double distance = 5.0;
@@ -151,21 +227,36 @@ double distance_function_rand(const struct rec *rec1, const struct rec *rec2)
  */
 static double ** distance_matrix_init(size_t size)
 {
-        /* Allocate full matrix (better eps-neigborhood query performance). */
-        double **dm = malloc_or_abort(size, sizeof (double *));
+        /* Allocate space for one row of pointers plus row * row dist matrix. */
+        double **dm = malloc_wr(size * sizeof (*dm) +
+                        (size * size * sizeof (**dm)), 1, false);
 
-        for (size_t row = 0; row < size; ++row) {
-                dm[row] = malloc_or_abort(size, sizeof (double));
+        if (dm == NULL) {
+                PRINT_WARNING(E_MEM, 0, "not enough memory for distance matrix");
+
+                /* Allocate only one row for distance vector. */
+                dm = malloc_wr(sizeof (*dm) + (size * sizeof (**dm)), 1, true);
+                dm[0] = NULL;
+        } else {
+                for (size_t row = 0; row < size; ++row) {
+                        dm[row] = (double *)(dm + size + (row * size));
+                }
         }
 
         return dm;
+}
+
+/* Free the distance matrix. */
+void distance_matrix_free(double **dm)
+{
+        free(dm);
 }
 
 /* Fill the distance matrix. */
 static void distance_matrix_fill(double **dm, size_t size,
                 const struct rec *rec_data)
 {
-        if (dm == NULL) {
+        if (dm[0] == NULL) { //no distance matrix, only distance vector
                 return;
         }
 
@@ -191,47 +282,43 @@ static void distance_matrix_fill(double **dm, size_t size,
         //}
 }
 
-/* Free the distance matrix. */
-void distance_matrix_free(double **dm, size_t size)
-{
-        if (dm == NULL) {
-                return;
-        }
-
-        for (size_t row = 0; row < size; ++row) {
-                free(dm[row]);
-        }
-        free(dm);
-}
-
 
 /*
  * Return all points within a point's epsilon-neighborhood (including the
  * point). Epsilon-neighborhood is an open set (i.e. <, not <=).
  */
-static void eps_get_neigh(const struct rec *point,
-                const double * const* distance_matrix,
+static void eps_get_neigh(const struct rec *point, double **distance_matrix,
                 const struct vector *rec_vec, struct vector *eps_vec)
 {
         const struct rec *rec_data = (const struct rec *)rec_vec->data;
-        const double *distance_vec = distance_matrix[point->id];
+        double *distance_vec;
+        static bool thread_num_initialized = false;
 
         /* Clear the result vector. */
         vector_clear(eps_vec);
 
-        /* Loop through the distance vector and store epsilon neighbors. */
-        for (size_t i = 0; i < rec_vec->size; ++i) {
-                double distance;
-
-                /* If there is no distance matrix, compute distance now. */
-                if (distance_matrix == NULL) {
-                        distance = distance_function(rec_data + point->id,
-                                        rec_data + i);
-                } else { //otherwise use precomputed distance
-                        distance = distance_vec[i];
+        if (distance_matrix[0] == NULL) {
+                if (!thread_num_initialized) {
+                        thread_num_init();
+                        thread_num_initialized = true;
                 }
 
-                if (distance < EPS) {
+                distance_vec = (double *)distance_matrix + 1;
+
+                thread_num_start();
+                #pragma omp parallel for
+                for (size_t i = 0; i < rec_vec->size; ++i) {
+                        distance_vec[i] = distance_function(
+                                        rec_data + point->id, rec_data + i);
+                }
+                thread_num_stop();
+        } else {
+                distance_vec = distance_matrix[point->id];
+        }
+
+        /* Find and store epsilon neighbors of a certain point. */
+        for (size_t i = 0; i < rec_vec->size; ++i) {
+                if (distance_vec[i] < EPS) {
                         struct rec *neigbor = vector_get_ptr(rec_vec, i);
 
                         vector_add(eps_vec, &neigbor); //store only the pointer
@@ -319,7 +406,7 @@ static bool eps_merge(struct vector *dest_vec, const struct vector *new_vec)
 }
 
 
-void dbscan(const struct vector *rec_vec, const double * const* distance_matrix)
+void dbscan(const struct vector *rec_vec, double **distance_matrix)
 {
         size_t cluster_id = CLUSTER_FIRST;
 
@@ -472,11 +559,10 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
 
         /**********************************************************************/
         /* DBSCAN */
-        dbscan(&rec_vec, (const double * const*)distance_matrix);
+        dbscan(&rec_vec, distance_matrix);
 
         /**********************************************************************/
         /* Print results. */
-
         putchar('\n');
         for (size_t i = 0; i < rec_vec.size; ++i) {
                 struct rec *point = (struct rec *)rec_vec.data + i;
@@ -489,7 +575,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
 
         /**********************************************************************/
         /* Free the memory. */
-        distance_matrix_free(distance_matrix, rec_vec.size);
+        distance_matrix_free(distance_matrix);
         vector_free(&rec_vec);
 
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
@@ -539,8 +625,8 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
         MPI_Bcast(&stc->shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
                         MPI_COMM_WORLD);
 
-        stc->path_str = calloc_or_abort(stc->shared.path_str_len + 1,
-                        sizeof (char));
+        stc->path_str = calloc_wr(stc->shared.path_str_len + 1, sizeof (char),
+                        true);
         MPI_Bcast(stc->path_str, stc->shared.path_str_len, MPI_CHAR, ROOT_PROC,
                         MPI_COMM_WORLD);
 

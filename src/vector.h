@@ -85,7 +85,7 @@ static void vector_reserve(struct vector *v, size_t capacity)
                 return; //nothing to do
         }
 
-        v->data = realloc_or_abort(v->data, capacity, v->element_size);
+        v->data = realloc_wr(v->data, capacity, v->element_size, true);
         v->capacity = capacity;
 }
 
@@ -112,8 +112,8 @@ static bool vector_add(struct vector *v, const void *element)
                 const size_t alloc_size = (v->capacity == 0) ?
                         VECTOR_INIT_CAPACITY : v->capacity * 2;
 
-                v->data = realloc_or_abort(v->data, alloc_size,
-                                v->element_size);
+                v->data = realloc_wr(v->data, alloc_size, v->element_size,
+                                true);
                 v->capacity = alloc_size;
         }
 

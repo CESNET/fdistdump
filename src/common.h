@@ -281,9 +281,9 @@ int field_get_type(int field);
 size_t field_get_size(int field);
 
 
-void * malloc_or_abort(size_t nmemb, size_t size);
-void * calloc_or_abort(size_t nmemb, size_t size);
-void * realloc_or_abort(void *ptr, size_t nmemb, size_t size);
+void * malloc_wr(size_t nmemb, size_t size, bool abort);
+void * calloc_wr(size_t nmemb, size_t size, bool abort);
+void * realloc_wr(void *ptr, size_t nmemb, size_t size, bool abort);
 
 
 #endif //COMMON_H

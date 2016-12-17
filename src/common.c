@@ -359,14 +359,18 @@ size_t field_get_size(int field)
  * \defgroup mem Memory allocation wrappers
  * @{
  */
-void * malloc_or_abort(size_t nmemb, size_t size)
+void * malloc_wr(size_t nmemb, size_t size, bool abort)
 {
         void *tmp = malloc(nmemb * size);
 
         if (tmp == NULL) {
-                PRINT_ERROR(E_MEM, 0, "malloc()");
-                MPI_Abort(MPI_COMM_WORLD, E_MEM);
-                return NULL;
+
+                if (abort) {
+                        PRINT_ERROR(E_MEM, 0, "malloc()");
+                        MPI_Abort(MPI_COMM_WORLD, E_MEM);
+                } else {
+                        return NULL;
+                }
         }
 
         PRINT_DEBUG("mallocated %zu elements, each %zu B = %zu B", nmemb, size,
@@ -374,14 +378,17 @@ void * malloc_or_abort(size_t nmemb, size_t size)
         return tmp;
 }
 
-void * calloc_or_abort(size_t nmemb, size_t size)
+void * calloc_wr(size_t nmemb, size_t size, bool abort)
 {
         void *tmp = calloc(nmemb, size);
 
         if (tmp == NULL) {
-                PRINT_ERROR(E_MEM, 0, "calloc()");
-                MPI_Abort(MPI_COMM_WORLD, E_MEM);
-                return NULL;
+                if (abort) {
+                        PRINT_ERROR(E_MEM, 0, "calloc()");
+                        MPI_Abort(MPI_COMM_WORLD, E_MEM);
+                } else {
+                        return NULL;
+                }
         }
 
         PRINT_DEBUG("callocated %zu elements, each %zu B = %zu B", nmemb, size,
@@ -389,14 +396,17 @@ void * calloc_or_abort(size_t nmemb, size_t size)
         return tmp;
 }
 
-void * realloc_or_abort(void *ptr, size_t nmemb, size_t size)
+void * realloc_wr(void *ptr, size_t nmemb, size_t size, bool abort)
 {
         void *tmp = realloc(ptr, nmemb * size);
 
         if (tmp == NULL) {
-                PRINT_ERROR(E_MEM, 0, "realloc()");
-                MPI_Abort(MPI_COMM_WORLD, E_MEM);
-                return NULL;
+                if (abort) {
+                        PRINT_ERROR(E_MEM, 0, "realloc()");
+                        MPI_Abort(MPI_COMM_WORLD, E_MEM);
+                } else {
+                        return NULL;
+                }
         }
 
         PRINT_DEBUG("reallocated %zu elements, each %zu B = %zu B", nmemb, size,
