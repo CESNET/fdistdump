@@ -73,10 +73,31 @@
 #define EPS 0.6
 #define MIN_PTS 10
 
+#define CLUSTER_UNVISITED 0 //point wasn't visited by the algorithm yet
+#define CLUSTER_NOISE     1 //point doesn't belong to any cluster yet
+#define CLUSTER_FIRST     2 //first no-noise cluster
+
 
 /* Global variables. */
 extern MPI_Datatype mpi_struct_shared_task_ctx;
+static struct {
+        double wtime_sum_cur;
+        double wtime_sum_prev;
 
+        int num_threads;
+        size_t measurement_cnt;
+        bool finished;
+} thread_num_ctx;
+
+
+struct master_task_ctx {
+        /* Master and slave shared task context. */
+        struct shared_task_ctx shared;
+
+        /* Master specific task context. */
+        size_t slave_cnt;
+        struct output_params output_params;
+};
 
 /* Thread shared. */
 struct slave_task_ctx {
@@ -97,26 +118,18 @@ struct slave_task_ctx {
         lnf_rec_t *rec; //LNF record
 };
 
-
-#define CLUSTER_UNVISITED 0 //point wasn't visited by the algorithm yet
-#define CLUSTER_NOISE     1 //point doesn't belong to any cluster yet
-#define CLUSTER_FIRST     2 //first no-noise cluster
-
-typedef enum {
-        SPEC_CORE_UNSET,
-        SPEC_CORE_YES,
-        SPEC_CORE_NO,
-} spec_core_t;
-
-struct rec {
-        size_t id; //point ID
-        size_t cluster_id; //ID of cluster the point belongs to
-        /* TODO: shrink into bit array. */
-        bool core; //core-point flag
-        spec_core_t spec_core; //specific core-point
+/* Point's metadata. */
+/* TODO: shrink into bit array. */
+struct point_metadata {
+        size_t id;             //point ID
+        size_t cluster_id;     //ID of cluster the point belongs to
+        bool core;             //core-point flag
+        tri_state_t spec_core; //specific core-point
         double spec_eps;
+} __attribute__((packed));
 
-        /* Feature vector. */
+/* Point's feature vector. */
+struct point_features {
         uint16_t srcport;
         uint16_t dstport;
         uint8_t proto;
@@ -124,16 +137,16 @@ struct rec {
         lnf_ip_t dstaddr;
 } __attribute__((packed));
 
+struct point {
+        struct point_metadata m;
+        struct point_features f;
+} __attribute__((packed));
 
-static struct {
-        double wtime_sum_cur;
-        double wtime_sum_prev;
 
-        int num_threads;
-        size_t measurement_cnt;
-        bool finished;
-} thread_num_ctx;
-
+/**
+ * \defgroup slave_fun Slave functions
+ * @{
+ */
 static void thread_num_init(void)
 {
         thread_num_ctx.wtime_sum_cur = 0.0;
@@ -200,31 +213,31 @@ static void thread_num_stop(void)
 }
 
 
-double distance_function(const struct rec *point1, const struct rec *point2)
+double distance_function(const struct point *point1, const struct point *point2)
 {
         double distance = 5.0;
 
         /* After the logical negation, 0 means different, 1 means same. */
-        distance -= !memcmp(&point1->srcaddr, &point2->srcaddr,
-                        sizeof (point1->srcaddr));
-        distance -= !memcmp(&point1->dstaddr, &point2->dstaddr,
-                        sizeof (point1->dstaddr));
-        distance -= (point1->srcport == point2->srcport);
-        distance -= (point1->dstport == point2->dstport);
-        distance -= (point1->proto == point2->proto);
+        distance -= !memcmp(&point1->f.srcaddr, &point2->f.srcaddr,
+                        sizeof (point1->f.srcaddr));
+        distance -= !memcmp(&point1->f.dstaddr, &point2->f.dstaddr,
+                        sizeof (point1->f.dstaddr));
+        distance -= (point1->f.srcport == point2->f.srcport);
+        distance -= (point1->f.dstport == point2->f.dstport);
+        distance -= (point1->f.proto == point2->f.proto);
 
         //printf("\n");
-        //print_rec((const uint8_t *)&point1->srcport);
-        //print_rec((const uint8_t *)&point2->srcport);
+        //print_rec((const uint8_t *)&point1->f);
+        //print_rec((const uint8_t *)&point2->f);
         //printf("%f\n", distance / 5.0);
 
         return distance / 5.0;
 }
 
-double distance_function_rand(const struct rec *rec1, const struct rec *rec2)
+double distance_function_rand(const struct point *point1, const struct point *point2)
 {
-        (void)rec1;
-        (void)rec2;
+        (void)point1;
+        (void)point2;
         //srand(time(NULL));
         return (double)rand() / RAND_MAX;
 }
@@ -265,19 +278,19 @@ void distance_matrix_free(double **dm)
 
 /* Fill the distance matrix. */
 static void distance_matrix_fill(double **dm, size_t size,
-                const struct rec *rec_data)
+                const struct point *point_data)
 {
         if (dm[0] == NULL) { //no distance matrix, only distance vector
                 return;
         }
 
-        #pragma omp parallel for firstprivate(dm, size, rec_data)
+        #pragma omp parallel for firstprivate(dm, size, point_data)
         for (size_t row = 0; row < size; ++row) {
                 dm[row][row] = 0.0; //property 1: zero on the main diagonal
 
                 for (size_t col = 0; col < row; ++col) {
                         const double distance = distance_function(
-                                        rec_data + row, rec_data + col);
+                                        point_data + row, point_data + col);
 
                         dm[row][col] = distance;
                         dm[col][row] = distance; //property 2: symmetry
@@ -344,11 +357,11 @@ openmp_break:
  * Return all points within a point's eps-neighborhood (including the
  * point). Eps-neighborhood is an open set (i.e. <, not <=).
  */
-static void eps_get_neigh(struct vector *eps_vec, const struct rec *point,
-                double **distance_matrix, const struct vector *rec_vec,
+static void eps_get_neigh(struct vector *eps_vec, const struct point *point,
+                double **distance_matrix, const struct vector *point_vec,
                 double *max_distance)
 {
-        const struct rec *rec_data = (const struct rec *)rec_vec->data;
+        const struct point *point_data = (const struct point *)point_vec->data;
         double *distance_vec;
         static bool thread_num_initialized = false;
 
@@ -365,22 +378,22 @@ static void eps_get_neigh(struct vector *eps_vec, const struct rec *point,
                 distance_vec = (double *)distance_matrix + 1;
 
                 thread_num_start();
-                #pragma omp parallel for firstprivate(distance_vec, rec_data)
-                for (size_t i = 0; i < rec_vec->size; ++i) {
+                #pragma omp parallel for firstprivate(distance_vec, point_data)
+                for (size_t i = 0; i < point_vec->size; ++i) {
                         distance_vec[i] = distance_function(
-                                        rec_data + point->id, rec_data + i);
+                                        point_data + point->m.id, point_data + i);
                 }
                 thread_num_stop();
         } else {
-                distance_vec = distance_matrix[point->id];
+                distance_vec = distance_matrix[point->m.id];
         }
 
         /* Find and store eps-neighbors of a certain point. */
-        for (size_t i = 0; i < rec_vec->size; ++i) {
+        for (size_t i = 0; i < point_vec->size; ++i) {
                 const double distance = distance_vec[i];
 
                 if (distance < EPS) {
-                        struct rec *neigbor = vector_get_ptr(rec_vec, i);
+                        struct point *neigbor = vector_get_ptr(point_vec, i);
 
                         vector_add(eps_vec, &neigbor); //store only the pointer
                         MAX_ASSIGN(*max_distance, distance);
@@ -392,11 +405,11 @@ static void eps_get_neigh(struct vector *eps_vec, const struct rec *point,
  * Set all points' specific core point attribute in the eps-neighborhood to
  * false.
  */
-static void eps_set_spec_core_no(struct vector *eps_vec)
+static void eps_set_spec_core_false(struct vector *eps_vec)
 {
         for (size_t i = 0; i < eps_vec->size; ++i) {
-                struct rec *point = ((struct rec **)eps_vec->data)[i];
-                point->spec_core = SPEC_CORE_NO;
+                struct point *point = ((struct point **)eps_vec->data)[i];
+                point->m.spec_core = TS_FALSE;
         }
 }
 
@@ -407,15 +420,15 @@ static void eps_set_spec_core_no(struct vector *eps_vec)
 static bool eps_merge(struct vector *dest_vec, const struct vector *new_vec)
 {
         /* Iterators. */
-        const struct rec **dest_it = (const struct rec **)dest_vec->data;
-        const struct rec **dest_it_end = dest_it + dest_vec->size;
+        const struct point **dest_it = (const struct point **)dest_vec->data;
+        const struct point **dest_it_end = dest_it + dest_vec->size;
 
         //printf("\n\nNEW EPS MERGE\n");
         /* Loop through destination vector. */
         while (dest_it < dest_it_end) {
-                const struct rec **new_it = (const struct rec **)new_vec->data;
-                const struct rec **new_it_end = new_it + new_vec->size;
-                const struct rec *dest_last = *dest_it;
+                const struct point **new_it = (const struct point **)new_vec->data;
+                const struct point **new_it_end = new_it + new_vec->size;
+                const struct point *dest_last = *dest_it;
 
                 //printf("BEF_SEQ: dest = %d, new = %d, seq = %d\n",
                 //                dest_it < dest_it_end,  //dest didn't read end
@@ -469,7 +482,7 @@ static bool eps_merge(struct vector *dest_vec, const struct vector *new_vec)
 
         /* Add remaining elements from new to the dest. */
         for (size_t i = 0; i < new_vec->size; ++i) {
-                struct rec *point = ((struct rec **)new_vec->data)[i];
+                struct point *point = ((struct point **)new_vec->data)[i];
                 if (point != NULL) {
                         vector_add(dest_vec, &point);
                 }
@@ -479,75 +492,75 @@ static bool eps_merge(struct vector *dest_vec, const struct vector *new_vec)
 }
 
 
-static size_t dbscan(const struct vector *rec_vec, double **distance_matrix)
+static size_t dbscan(const struct vector *point_vec, double **distance_matrix)
 {
         size_t cluster_id = CLUSTER_FIRST;
 
         struct vector eps_vec; //vectors of pointers to the record storage
         struct vector new_eps_vec;
 
-        vector_init(&eps_vec, sizeof (struct rec *));
-        vector_init(&new_eps_vec, sizeof (struct rec *));
+        vector_init(&eps_vec, sizeof (struct point *));
+        vector_init(&new_eps_vec, sizeof (struct point *));
 
 
         /* Loop through all the points. */
-        for (size_t i = 0; i < rec_vec->size; ++i) {
-                struct rec *point = (struct rec *)rec_vec->data + i;
+        for (size_t i = 0; i < point_vec->size; ++i) {
+                struct point *point = (struct point *)point_vec->data + i;
                 double max_distance;
 
-                if (point->cluster_id != CLUSTER_UNVISITED) {
+                if (point->m.cluster_id != CLUSTER_UNVISITED) {
                         /* The point is a noise or already in some cluster. */
                         continue;
                 }
 
-                eps_get_neigh(&eps_vec, point, distance_matrix, rec_vec,
+                eps_get_neigh(&eps_vec, point, distance_matrix, point_vec,
                                 &max_distance);
 
                 if (eps_vec.size < MIN_PTS) {
                         /* The point is a noise, this may be chaged later. */
-                        point->cluster_id = CLUSTER_NOISE;
+                        point->m.cluster_id = CLUSTER_NOISE;
                         vector_clear(&eps_vec);
                         continue;
                 }
 
                 /* The point is a core point of a new cluster, expand it. */
-                point->cluster_id = cluster_id;
-                point->core = true;
+                point->m.cluster_id = cluster_id;
+                point->m.core = true;
                 /* Determination of a local model. */
-                eps_set_spec_core_no(&eps_vec);
-                point->spec_core = SPEC_CORE_YES;
-                point->spec_eps = EPS + max_distance;
+                eps_set_spec_core_false(&eps_vec);
+                point->m.spec_core = TS_TRUE;
+                point->m.spec_eps = EPS + max_distance;
 
                 /* Loop through the whole (growing) eps-neighborhood. */
                 for (size_t j = 0; j < eps_vec.size; ++j) {
-                        struct rec *new_point = ((struct rec **)eps_vec.data)[j];
+                        struct point *new_point = ((struct point **)eps_vec.data)[j];
 
-                        if (new_point->cluster_id == CLUSTER_UNVISITED) {
+                        if (new_point->m.cluster_id == CLUSTER_UNVISITED) {
                                 /*
                                  * The point is either a core point (then add
                                  * its eps-neighborhood to the current
                                  * eps-neighborhood) or a border point.
                                  */
-                                new_point->cluster_id = cluster_id;
+                                new_point->m.cluster_id = cluster_id;
                                 eps_get_neigh(&new_eps_vec, new_point,
-                                                distance_matrix, rec_vec,
+                                                distance_matrix, point_vec,
                                                 &max_distance);
 
                                 if (new_eps_vec.size >= MIN_PTS) { //core point
-                                        new_point->core = true;
-                                        if (new_point->spec_core == SPEC_CORE_UNSET) {
-                                                eps_set_spec_core_no(&new_eps_vec);
-                                                new_point->spec_core = SPEC_CORE_YES;
-                                                new_point->spec_eps = EPS + max_distance;
+                                        new_point->m.core = true;
+                                        if (new_point->m.spec_core == TS_UNSET) {
+                                                eps_set_spec_core_false(&new_eps_vec);
+                                                new_point->m.spec_core = TS_TRUE;
+                                                new_point->m.spec_eps = EPS + max_distance;
                                         }
 
                                         vector_concat(&eps_vec, &new_eps_vec);
                                         //eps_merge(&eps_vec, &new_eps_vec);
                                 } //else the point is a border point
 
-                        } else if (new_point->cluster_id == CLUSTER_NOISE) {
+                        } else if (new_point->m.cluster_id == CLUSTER_NOISE) {
                                 /* The point was a noise, but isn't anymore. */
-                                new_point->cluster_id = cluster_id;
+                                new_point->m.cluster_id = cluster_id;
                         } //else the point was already part of some cluster
                 }
 
@@ -560,7 +573,7 @@ static size_t dbscan(const struct vector *rec_vec, double **distance_matrix)
         return cluster_id;
 }
 
-static void dbscan_local_model(const struct vector *rec_vec,
+static void dbscan_local_model_print(const struct vector *point_vec,
                 double **distance_matrix, size_t cluster_cnt)
 {
         size_t cluster_size = 0;
@@ -568,21 +581,22 @@ static void dbscan_local_model(const struct vector *rec_vec,
         size_t spec_core_size = 0;
 
         /* Loop through all the clusters. */
-        for (size_t cluster = CLUSTER_FIRST; cluster < cluster_cnt; ++cluster) {
-                printf("Cluster %zu:\n", cluster);
+        for (size_t cid = CLUSTER_FIRST; cid < cluster_cnt; ++cid) {
+                printf("Cluster %zu:\n", cid);
 
                 /* Loop through all the points. */
-                for (size_t i = 0; i < rec_vec->size; ++i) {
-                        struct rec *point = (struct rec *)rec_vec->data + i;
+                for (size_t i = 0; i < point_vec->size; ++i) {
+                        struct point *point = (struct point *)point_vec->data + i;
 
-                        if (point->cluster_id == cluster) {
+                        if (point->m.cluster_id == cid) {
                                 cluster_size++;
-                                core_size += point->core;
-                                spec_core_size += (point->spec_core == SPEC_CORE_YES);
+                                core_size += point->m.core;
+                                spec_core_size += (point->m.spec_core == TS_TRUE);
 
-                                printf("\tid = %zu, core = %d, spec_core = %d, spec_eps = %f\n",
-                                                point->id, point->core,
-                                                point->spec_core, point->spec_eps);
+                                printf("\t%s\tid = %zu, core = %d, spec_core = %d, spec_eps = %f\n",
+                                                sprint_rec((const uint8_t *)&point->f),
+                                                point->m.id, point->m.core,
+                                                point->m.spec_core, point->m.spec_eps);
                         }
                 }
 
@@ -592,43 +606,43 @@ static void dbscan_local_model(const struct vector *rec_vec,
         }
 }
 
-static bool dbscan_local_model_validate(const struct vector *rec_vec,
+static bool dbscan_local_model_validate(const struct vector *point_vec,
                 double **distance_matrix, size_t cluster_cnt)
 {
         /* Loop through all the clusters. */
-        for (size_t cluster = CLUSTER_FIRST; cluster < cluster_cnt; ++cluster) {
-                for (size_t i = 0; i < rec_vec->size; ++i) {
-                        struct rec *point = (struct rec *)rec_vec->data + i;
+        for (size_t cid = CLUSTER_FIRST; cid < cluster_cnt; ++cid) {
+                for (size_t i = 0; i < point_vec->size; ++i) {
+                        struct point *point = (struct point *)point_vec->data + i;
 
-                        if (point->cluster_id != cluster) {
+                        if (point->m.cluster_id != cid) {
                                 continue;
                         }
 
                         /* Property 1. */
-                        if (point->spec_core == SPEC_CORE_YES && !point->core) {
+                        if (point->m.spec_core == TS_TRUE && !point->m.core) {
                                 printf("\t1. invalid local model\n");
                                 return false;
                         }
 
-                        if (point->core) {
-                                const double *distance_vec = distance_matrix[point->id];
+                        if (point->m.core) {
+                                const double *distance_vec = distance_matrix[point->m.id];
                                 size_t spec_in_eps_cnt = 0;
 
-                                for (size_t j = 0; j < rec_vec->size; ++j) {
+                                for (size_t j = 0; j < point_vec->size; ++j) {
                                         const double distance = distance_vec[j];
-                                        struct rec *neigbor = vector_get_ptr(rec_vec, j);
+                                        struct point *neigbor = vector_get_ptr(point_vec, j);
 
                                         if (distance < EPS &&
-                                                        neigbor->cluster_id == cluster &&
-                                                        neigbor->spec_core == SPEC_CORE_YES) {
+                                                        neigbor->m.cluster_id == cid &&
+                                                        neigbor->m.spec_core == TS_TRUE) {
                                                 spec_in_eps_cnt++;
                                         }
                                 }
 
-                                if (point->spec_core == SPEC_CORE_YES && spec_in_eps_cnt != 1) {
+                                if (point->m.spec_core == TS_TRUE && spec_in_eps_cnt != 1) {
                                         printf("\t2. invalid local model\n");
                                         return false;
-                                } else if (point->spec_core != SPEC_CORE_YES && spec_in_eps_cnt < 1) {
+                                } else if (point->m.spec_core != TS_TRUE && spec_in_eps_cnt < 1) {
                                         printf("\t3. invalid local model\n");
                                         return false;
                                 }
@@ -637,6 +651,22 @@ static bool dbscan_local_model_validate(const struct vector *rec_vec,
         }
 
         return true;
+}
+
+static void dbscan_local_model_send(const struct vector *point_vec)
+{
+        for (size_t i = 0; i < point_vec->size; ++i) {
+                struct point *point = (struct point *)point_vec->data + i;
+
+                if (point->m.spec_core != TS_TRUE) {
+                        continue;
+                }
+
+                MPI_Send(&point->f, sizeof (point->f), MPI_BYTE, ROOT_PROC,
+                                TAG_DATA, MPI_COMM_WORLD);
+        }
+
+        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 }
 
 
@@ -649,8 +679,8 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         size_t file_proc_rec_cntr = 0;
         size_t flows_cnt_meta;
 
-        struct rec rec; //data point
-        struct vector rec_vec; //set of data points
+        struct point point; //data point
+        struct vector point_vec; //set of data points
 
         double **distance_matrix = NULL;
 
@@ -672,10 +702,10 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         output_setup(op, fi);
 
 
-        vector_init(&rec_vec, sizeof (struct rec));
+        vector_init(&point_vec, sizeof (struct point));
         assert(lnf_info(stc->file, LNF_INFO_FLOWS, &flows_cnt_meta,
                                 sizeof (flows_cnt_meta)) == LNF_OK);
-        vector_reserve(&rec_vec, flows_cnt_meta);
+        vector_reserve(&point_vec, flows_cnt_meta);
 
 
         /**********************************************************************/
@@ -689,19 +719,19 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
                 }
                 file_proc_rec_cntr++;
 
-                rec.id = file_rec_cntr - 1;
-                rec.cluster_id = CLUSTER_UNVISITED;
-                rec.core = false;
-                rec.spec_core = SPEC_CORE_UNSET;
-                rec.spec_eps = INFINITY;
+                point.m.id = file_rec_cntr - 1;
+                point.m.cluster_id = CLUSTER_UNVISITED;
+                point.m.core = false;
+                point.m.spec_core = TS_UNSET;
+                point.m.spec_eps = INFINITY;
 
-                lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &rec.srcaddr);
-                lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &rec.dstaddr);
-                lnf_rec_fget(stc->rec, LNF_FLD_SRCPORT, &rec.srcport);
-                lnf_rec_fget(stc->rec, LNF_FLD_DSTPORT, &rec.dstport);
-                lnf_rec_fget(stc->rec, LNF_FLD_PROT, &rec.proto);
+                lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &point.f.srcaddr);
+                lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &point.f.dstaddr);
+                lnf_rec_fget(stc->rec, LNF_FLD_SRCPORT, &point.f.srcport);
+                lnf_rec_fget(stc->rec, LNF_FLD_DSTPORT, &point.f.dstport);
+                lnf_rec_fget(stc->rec, LNF_FLD_PROT, &point.f.proto);
 
-                vector_add(&rec_vec, &rec);
+                vector_add(&point_vec, &point);
         }
         /* Check if we reach end of the file. */
         if (secondary_errno != LNF_EOF) {
@@ -710,24 +740,25 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
 
         /**********************************************************************/
         /* Create and fill distance matrix. */
-        distance_matrix = distance_matrix_init(rec_vec.size);
-        distance_matrix_fill(distance_matrix, rec_vec.size,
-                        (struct rec *)rec_vec.data);
-        //distance_matrix_validate(distance_matrix, rec_vec.size);
+        distance_matrix = distance_matrix_init(point_vec.size);
+        distance_matrix_fill(distance_matrix, point_vec.size,
+                        (struct point *)point_vec.data);
+        //distance_matrix_validate(distance_matrix, point_vec.size);
 
         /**********************************************************************/
         /* DBSCAN */
-        const size_t cluster_cnt = dbscan(&rec_vec, distance_matrix);
-        dbscan_local_model(&rec_vec, distance_matrix, cluster_cnt);
-        dbscan_local_model_validate(&rec_vec, distance_matrix, cluster_cnt);
+        const size_t cluster_cnt = dbscan(&point_vec, distance_matrix);
+        dbscan_local_model_print(&point_vec, distance_matrix, cluster_cnt);
+        dbscan_local_model_validate(&point_vec, distance_matrix, cluster_cnt);
+        dbscan_local_model_send(&point_vec);
 
         /**********************************************************************/
         /* Print results. */
         //putchar('\n');
-        //for (size_t i = 0; i < rec_vec.size; ++i) {
-        //        struct rec *point = (struct rec *)rec_vec.data + i;
+        //for (size_t i = 0; i < point_vec.size; ++i) {
+        //        struct point *p = (struct point *)point_vec.data + i;
 
-        //        printf("%lu: %lu\n", point->id, point->cluster_id);
+        //        printf("%lu: %lu\n", p->m.id, p->m.cluster_id);
         //}
         //putchar('\n');
 
@@ -736,7 +767,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         /**********************************************************************/
         /* Free the memory. */
         distance_matrix_free(distance_matrix);
-        vector_free(&rec_vec);
+        vector_free(&point_vec);
 
         MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
         PRINT_DEBUG("read %zu, processed %zu", file_rec_cntr,
@@ -883,3 +914,135 @@ finalize_task:
 
         return primary_errno;
 }
+/**
+ * @}
+ */ //slave_fun
+
+
+/**
+ * \defgroup master_fun Master functions
+ * @{
+ */
+static void construct_master_task_ctx(struct master_task_ctx *mtc,
+                const struct cmdline_args *args, int world_size)
+{
+        /* Fill shared content. */
+        mtc->shared.working_mode = args->working_mode;
+        memcpy(mtc->shared.fields, args->fields,
+                        MEMBER_SIZE(struct master_task_ctx, shared.fields));
+
+        mtc->shared.path_str_len =
+                (args->path_str == NULL) ? 0 : strlen(args->path_str);
+
+        mtc->shared.filter_str_len =
+                (args->filter_str == NULL) ? 0 : strlen(args->filter_str);
+
+        mtc->shared.rec_limit = args->rec_limit;
+
+        mtc->shared.time_begin = args->time_begin;
+        mtc->shared.time_end = args->time_end;
+
+        mtc->shared.use_fast_topn = args->use_fast_topn;
+
+
+        /* Fill master specific content. */
+        mtc->slave_cnt = world_size - 1; //all nodes without master
+        mtc->output_params = args->output_params;
+}
+static void recv_loop(size_t slave_cnt)
+{
+        size_t active_slaves = slave_cnt; //every slave is active
+        struct point_features point_features;
+        int rec_len = 0;
+        MPI_Status status;
+
+        struct vector feature_vec;
+        vector_init(&feature_vec, sizeof (struct point_features));
+
+        /* Data receiving loop. */
+        while (active_slaves) {
+                /* Receive a message from any slave. */
+                MPI_Recv(&point_features, sizeof (point_features), MPI_BYTE,
+                                MPI_ANY_SOURCE, TAG_DATA, MPI_COMM_WORLD,
+                                &status);
+
+                /* Determine actual size of the received message. */
+                MPI_Get_count(&status, MPI_BYTE, &rec_len);
+                if (rec_len == 0) {
+                        active_slaves--;
+                        continue; //empty message -> slave finished
+                }
+
+                vector_add(&feature_vec, &point_features);
+        }
+
+        /**********************************************************************/
+        struct output_params op;
+        struct field_info fi[LNF_FLD_TERM_];
+
+        op.print_records = OUTPUT_ITEM_YES;
+        op.format = OUTPUT_FORMAT_PRETTY;
+        op.tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_STR;
+        op.ip_addr_conv = OUTPUT_IP_ADDR_CONV_STR;
+
+        memset(fi, 0, sizeof (fi));
+        fi[LNF_FLD_SRCADDR].id = LNF_FLD_SRCADDR;
+        fi[LNF_FLD_DSTADDR].id = LNF_FLD_DSTADDR;
+        fi[LNF_FLD_SRCPORT].id = LNF_FLD_SRCPORT;
+        fi[LNF_FLD_DSTPORT].id = LNF_FLD_DSTPORT;
+        fi[LNF_FLD_TCP_FLAGS].id = LNF_FLD_TCP_FLAGS;
+
+        output_setup(op, fi);
+        /**********************************************************************/
+
+        putchar('\n');
+        for (size_t i = 0; i < feature_vec.size; ++i) {
+                struct point_features *pf =
+                        ((struct point_features *)feature_vec.data) + i;
+
+                print_rec((const uint8_t *)pf);
+        }
+        printf("summary: spec_core_size = %zu\n", feature_vec.size);
+
+        vector_free(&feature_vec);
+}
+
+
+error_code_t clustering_master(int world_size, const struct cmdline_args *args)
+{
+        error_code_t primary_errno = E_OK;
+        struct master_task_ctx mtc; //master task context
+        double duration = -MPI_Wtime(); //start time measurement
+
+
+        memset(&mtc, 0, sizeof (mtc));
+
+        /* Construct master_task_ctx struct from command-line arguments. */
+        construct_master_task_ctx(&mtc, args, world_size);
+        //output_setup(mtc.output_params, mtc.shared.fields);
+
+
+        /* Broadcast task context, path string and optional filter string. */
+        MPI_Bcast(&mtc.shared, 1, mpi_struct_shared_task_ctx, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
+        MPI_Bcast(args->path_str, mtc.shared.path_str_len, MPI_CHAR, ROOT_PROC,
+                        MPI_COMM_WORLD);
+
+        if (mtc.shared.filter_str_len > 0) {
+                MPI_Bcast(args->filter_str, mtc.shared.filter_str_len,
+                                MPI_CHAR, ROOT_PROC, MPI_COMM_WORLD);
+        }
+
+
+        /* Send, receive, process. */
+        recv_loop(mtc.slave_cnt);
+
+
+        duration += MPI_Wtime(); //end time measurement
+
+        return primary_errno;
+}
+/**
+ * @}
+ */ //master_fun

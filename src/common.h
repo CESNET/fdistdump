@@ -104,6 +104,21 @@ typedef enum { //progress bar type
         PROGRESS_BAR_PERSLAVE,
         PROGRESS_BAR_JSON,
 } progress_bar_type_t;
+
+/*
+ * Tri-state type with eficient check for any subset of possible values:
+ * (x < 0) : TS_UNSET
+ * (!x)    : TS_FALSE
+ * (x > 0) : TS_TRUE
+ * (x <= 0): TS_UNSET || TS_FALSE
+ * (x)     : TS_UNSET || TS_TRUE
+ * (x >= 0): TS_FALSE || TS_TRUE
+ */
+typedef enum {
+        TS_UNSET = -1,
+        TS_FALSE = 0,
+        TS_TRUE  = 1,
+} tri_state_t;
 /**
  * @}
  */ //common_enum

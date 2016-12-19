@@ -30,7 +30,7 @@ Documentation:
 Others:
         -create and use more MPI tags
         -suppress printing command-line error messages on all nodes
-        -add possibility to print record to string
+	-use MPI error handler
 
 Coding style:
         -join multiline string
