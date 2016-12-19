@@ -42,20 +42,35 @@
  *
  */
 
+
 #ifndef CLUSTERING_H
 #define CLUSTERING_H
 
+
 #include "common.h"
+#include "arg_parse.h"
 
 #include <stddef.h> //size_t
 
-/** \brief Slave program function.
+
+/** \brief Master clustering program function.
+ *
+ * Code executed by a master process, usually with rank == 0.
+ *
+ * \param[in] world_size MPI_COMM_WORLD size.
+ * \param[in] args       Command-line arguments.
+ * \return Error code.
+ */
+error_code_t clustering_master(int world_size, const struct cmdline_args *args);
+
+/** \brief Slave clustering program function.
  *
  * Code executed by slave processes, usually with rank != 0.
  *
  * \param[in] world_size MPI_COMM_WORLD size.
  * \return Error code.
  */
-error_code_t clustering(int world_size);
+error_code_t clustering_slave(int world_size);
+
 
 #endif //CLUSTERING_H

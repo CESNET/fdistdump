@@ -109,10 +109,11 @@ int main(int argc, char **argv)
 
         /* Split master and slave code. */
         if (world_rank == ROOT_PROC) {
-                primary_errno = master(world_size, &args);
+                //primary_errno = master(world_size, &args);
+                primary_errno = clustering_master(world_size, &args);
         } else {
                 //primary_errno = slave(world_size);
-                primary_errno = clustering(world_size);
+                primary_errno = clustering_slave(world_size);
         }
 
         /* Free MPI data types (global variables). */

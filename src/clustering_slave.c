@@ -61,6 +61,7 @@
 #include <time.h>
 #include <arpa/inet.h>
 #include <float.h>
+#include <math.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -100,10 +101,20 @@ struct slave_task_ctx {
 #define CLUSTER_UNVISITED 0 //point wasn't visited by the algorithm yet
 #define CLUSTER_NOISE     1 //point doesn't belong to any cluster yet
 #define CLUSTER_FIRST     2 //first no-noise cluster
+
+typedef enum {
+        SPEC_CORE_UNSET,
+        SPEC_CORE_YES,
+        SPEC_CORE_NO,
+} spec_core_t;
+
 struct rec {
         size_t id; //point ID
         size_t cluster_id; //ID of cluster the point belongs to
-        //bool spec_core; //specific core-point flag
+        /* TODO: shrink into bit array. */
+        bool core; //core-point flag
+        spec_core_t spec_core; //specific core-point
+        double spec_eps;
 
         /* Feature vector. */
         uint16_t srcport;
@@ -288,7 +299,7 @@ static void distance_matrix_fill(double **dm, size_t size,
  * 2. the matrix is a symmetric matrix                        x[i][j] == x[j][i]
  * 3. the triangle inequality             for all k x[i][j] <= x[i][k] + x[k][j]
  */
-static bool distance_matrix_check(double **dm, size_t size)
+static bool distance_matrix_validate(double **dm, size_t size)
 {
         bool ret = true;
 
@@ -331,10 +342,11 @@ openmp_break:
 
 /*
  * Return all points within a point's eps-neighborhood (including the
- * point). Epsilon-neighborhood is an open set (i.e. <, not <=).
+ * point). Eps-neighborhood is an open set (i.e. <, not <=).
  */
-static void eps_get_neigh(const struct rec *point, double **distance_matrix,
-                const struct vector *rec_vec, struct vector *eps_vec)
+static void eps_get_neigh(struct vector *eps_vec, const struct rec *point,
+                double **distance_matrix, const struct vector *rec_vec,
+                double *max_distance)
 {
         const struct rec *rec_data = (const struct rec *)rec_vec->data;
         double *distance_vec;
@@ -342,6 +354,7 @@ static void eps_get_neigh(const struct rec *point, double **distance_matrix,
 
         /* Clear the result vector. */
         vector_clear(eps_vec);
+        *max_distance = 0;
 
         if (distance_matrix[0] == NULL) {
                 if (!thread_num_initialized) {
@@ -364,14 +377,28 @@ static void eps_get_neigh(const struct rec *point, double **distance_matrix,
 
         /* Find and store eps-neighbors of a certain point. */
         for (size_t i = 0; i < rec_vec->size; ++i) {
-                if (distance_vec[i] < EPS) {
+                const double distance = distance_vec[i];
+
+                if (distance < EPS) {
                         struct rec *neigbor = vector_get_ptr(rec_vec, i);
 
                         vector_add(eps_vec, &neigbor); //store only the pointer
+                        MAX_ASSIGN(*max_distance, distance);
                 }
         }
 }
 
+/*
+ * Set all points' specific core point attribute in the eps-neighborhood to
+ * false.
+ */
+static void eps_set_spec_core_no(struct vector *eps_vec)
+{
+        for (size_t i = 0; i < eps_vec->size; ++i) {
+                struct rec *point = ((struct rec **)eps_vec->data)[i];
+                point->spec_core = SPEC_CORE_NO;
+        }
+}
 
 /*
  * Comparing addresses is fine because struct vector uses continuous memory.
@@ -452,7 +479,7 @@ static bool eps_merge(struct vector *dest_vec, const struct vector *new_vec)
 }
 
 
-void dbscan(const struct vector *rec_vec, double **distance_matrix)
+static size_t dbscan(const struct vector *rec_vec, double **distance_matrix)
 {
         size_t cluster_id = CLUSTER_FIRST;
 
@@ -466,13 +493,15 @@ void dbscan(const struct vector *rec_vec, double **distance_matrix)
         /* Loop through all the points. */
         for (size_t i = 0; i < rec_vec->size; ++i) {
                 struct rec *point = (struct rec *)rec_vec->data + i;
+                double max_distance;
 
                 if (point->cluster_id != CLUSTER_UNVISITED) {
                         /* The point is a noise or already in some cluster. */
                         continue;
                 }
 
-                eps_get_neigh(point, distance_matrix, rec_vec, &eps_vec);
+                eps_get_neigh(&eps_vec, point, distance_matrix, rec_vec,
+                                &max_distance);
 
                 if (eps_vec.size < MIN_PTS) {
                         /* The point is a noise, this may be chaged later. */
@@ -483,6 +512,11 @@ void dbscan(const struct vector *rec_vec, double **distance_matrix)
 
                 /* The point is a core point of a new cluster, expand it. */
                 point->cluster_id = cluster_id;
+                point->core = true;
+                /* Determination of a local model. */
+                eps_set_spec_core_no(&eps_vec);
+                point->spec_core = SPEC_CORE_YES;
+                point->spec_eps = EPS + max_distance;
 
                 /* Loop through the whole (growing) eps-neighborhood. */
                 for (size_t j = 0; j < eps_vec.size; ++j) {
@@ -495,13 +529,21 @@ void dbscan(const struct vector *rec_vec, double **distance_matrix)
                                  * eps-neighborhood) or a border point.
                                  */
                                 new_point->cluster_id = cluster_id;
-                                eps_get_neigh(new_point, distance_matrix,
-                                                rec_vec, &new_eps_vec);
+                                eps_get_neigh(&new_eps_vec, new_point,
+                                                distance_matrix, rec_vec,
+                                                &max_distance);
 
                                 if (new_eps_vec.size >= MIN_PTS) { //core point
+                                        new_point->core = true;
+                                        if (new_point->spec_core == SPEC_CORE_UNSET) {
+                                                eps_set_spec_core_no(&new_eps_vec);
+                                                new_point->spec_core = SPEC_CORE_YES;
+                                                new_point->spec_eps = EPS + max_distance;
+                                        }
+
                                         vector_concat(&eps_vec, &new_eps_vec);
                                         //eps_merge(&eps_vec, &new_eps_vec);
-                                } //else the point is a borer point
+                                } //else the point is a border point
 
                         } else if (new_point->cluster_id == CLUSTER_NOISE) {
                                 /* The point was a noise, but isn't anymore. */
@@ -514,6 +556,87 @@ void dbscan(const struct vector *rec_vec, double **distance_matrix)
 
         vector_free(&new_eps_vec);
         vector_free(&eps_vec);
+
+        return cluster_id;
+}
+
+static void dbscan_local_model(const struct vector *rec_vec,
+                double **distance_matrix, size_t cluster_cnt)
+{
+        size_t cluster_size = 0;
+        size_t core_size = 0;
+        size_t spec_core_size = 0;
+
+        /* Loop through all the clusters. */
+        for (size_t cluster = CLUSTER_FIRST; cluster < cluster_cnt; ++cluster) {
+                printf("Cluster %zu:\n", cluster);
+
+                /* Loop through all the points. */
+                for (size_t i = 0; i < rec_vec->size; ++i) {
+                        struct rec *point = (struct rec *)rec_vec->data + i;
+
+                        if (point->cluster_id == cluster) {
+                                cluster_size++;
+                                core_size += point->core;
+                                spec_core_size += (point->spec_core == SPEC_CORE_YES);
+
+                                printf("\tid = %zu, core = %d, spec_core = %d, spec_eps = %f\n",
+                                                point->id, point->core,
+                                                point->spec_core, point->spec_eps);
+                        }
+                }
+
+                printf("summary: cluster_size = %zu, core_size = %zu, spec_core_size = %zu\n",
+                                cluster_size, core_size, spec_core_size);
+                cluster_size = core_size = spec_core_size = 0;
+        }
+}
+
+static bool dbscan_local_model_validate(const struct vector *rec_vec,
+                double **distance_matrix, size_t cluster_cnt)
+{
+        /* Loop through all the clusters. */
+        for (size_t cluster = CLUSTER_FIRST; cluster < cluster_cnt; ++cluster) {
+                for (size_t i = 0; i < rec_vec->size; ++i) {
+                        struct rec *point = (struct rec *)rec_vec->data + i;
+
+                        if (point->cluster_id != cluster) {
+                                continue;
+                        }
+
+                        /* Property 1. */
+                        if (point->spec_core == SPEC_CORE_YES && !point->core) {
+                                printf("\t1. invalid local model\n");
+                                return false;
+                        }
+
+                        if (point->core) {
+                                const double *distance_vec = distance_matrix[point->id];
+                                size_t spec_in_eps_cnt = 0;
+
+                                for (size_t j = 0; j < rec_vec->size; ++j) {
+                                        const double distance = distance_vec[j];
+                                        struct rec *neigbor = vector_get_ptr(rec_vec, j);
+
+                                        if (distance < EPS &&
+                                                        neigbor->cluster_id == cluster &&
+                                                        neigbor->spec_core == SPEC_CORE_YES) {
+                                                spec_in_eps_cnt++;
+                                        }
+                                }
+
+                                if (point->spec_core == SPEC_CORE_YES && spec_in_eps_cnt != 1) {
+                                        printf("\t2. invalid local model\n");
+                                        return false;
+                                } else if (point->spec_core != SPEC_CORE_YES && spec_in_eps_cnt < 1) {
+                                        printf("\t3. invalid local model\n");
+                                        return false;
+                                }
+                        }
+                }
+        }
+
+        return true;
 }
 
 
@@ -568,7 +691,9 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
 
                 rec.id = file_rec_cntr - 1;
                 rec.cluster_id = CLUSTER_UNVISITED;
-                //rec.spec_core = false;
+                rec.core = false;
+                rec.spec_core = SPEC_CORE_UNSET;
+                rec.spec_eps = INFINITY;
 
                 lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &rec.srcaddr);
                 lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &rec.dstaddr);
@@ -588,21 +713,23 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         distance_matrix = distance_matrix_init(rec_vec.size);
         distance_matrix_fill(distance_matrix, rec_vec.size,
                         (struct rec *)rec_vec.data);
-        //distance_matrix_check(distance_matrix, rec_vec.size);
+        //distance_matrix_validate(distance_matrix, rec_vec.size);
 
         /**********************************************************************/
         /* DBSCAN */
-        dbscan(&rec_vec, distance_matrix);
+        const size_t cluster_cnt = dbscan(&rec_vec, distance_matrix);
+        dbscan_local_model(&rec_vec, distance_matrix, cluster_cnt);
+        dbscan_local_model_validate(&rec_vec, distance_matrix, cluster_cnt);
 
         /**********************************************************************/
         /* Print results. */
-        putchar('\n');
-        for (size_t i = 0; i < rec_vec.size; ++i) {
-                struct rec *point = (struct rec *)rec_vec.data + i;
+        //putchar('\n');
+        //for (size_t i = 0; i < rec_vec.size; ++i) {
+        //        struct rec *point = (struct rec *)rec_vec.data + i;
 
-                printf("%lu: %lu\n", point->id, point->cluster_id);
-        }
-        putchar('\n');
+        //        printf("%lu: %lu\n", point->id, point->cluster_id);
+        //}
+        //putchar('\n');
 
 
 
@@ -679,23 +806,6 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
 }
 
 
-static void progress_report_init(size_t files_cnt)
-{
-        MPI_Gather(&files_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0, MPI_UNSIGNED_LONG,
-                        ROOT_PROC, MPI_COMM_WORLD);
-}
-
-static void progress_report_next(void)
-{
-        MPI_Request request = MPI_REQUEST_NULL;
-
-
-        MPI_Isend(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
-                        MPI_COMM_WORLD, &request);
-        MPI_Request_free(&request);
-}
-
-
 static error_code_t process(struct slave_task_ctx *stc, char **paths,
                 size_t paths_cnt)
 {
@@ -729,9 +839,6 @@ static error_code_t process(struct slave_task_ctx *stc, char **paths,
                 primary_errno = clusterize(stc);
 
                 lnf_close(stc->file);
-
-                /* Report that another file has been processed. */
-                progress_report_next();
         }
 
         /* Free LNF record. */
@@ -741,7 +848,7 @@ err:
         return primary_errno;
 }
 
-error_code_t clustering(int world_size)
+error_code_t clustering_slave(int world_size)
 {
         error_code_t primary_errno = E_OK;
         struct slave_task_ctx stc;
@@ -766,18 +873,8 @@ error_code_t clustering(int world_size)
                 goto finalize_task;
         }
 
-        /* Report number of files to be processed. */
-        progress_report_init(paths_cnt);
-
 
         primary_errno = process(&stc, paths, paths_cnt);
-
-
-        /* Reduce statistics to the master. */
-        MPI_Reduce(&stc.processed_summ, NULL, 3, MPI_UINT64_T, MPI_SUM,
-                        ROOT_PROC, MPI_COMM_WORLD);
-        MPI_Reduce(&stc.metadata_summ, NULL, 15, MPI_UINT64_T, MPI_SUM,
-                        ROOT_PROC, MPI_COMM_WORLD);
 
 
 finalize_task:

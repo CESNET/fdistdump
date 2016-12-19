@@ -8,7 +8,7 @@ fdistdump_SOURCES=src/main.c \
 		  src/path_array.c src/path_array.h \
 		  src/output.c src/output.h \
 		  src/print.c src/print.h \
-		  src/clustering.c src/clustering.h \
+		  src/clustering_master.c src/clustering_slave.c src/clustering.h \
 		  src/vector.h
 
 
