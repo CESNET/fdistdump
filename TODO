@@ -2,6 +2,8 @@ Bugfixes:
 
 Features:
         -try and test new libnf versions (> 1.16), check and reflect changes
+        -add output printing in defined order
+        -add fields offsets for output printing
         -add output alignment options: none, expanding, absolute
 
 Optimizations:

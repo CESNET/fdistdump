@@ -42,6 +42,7 @@
  *
  */
 
+
 #include "common.h"
 #include "output.h"
 #include "print.h"
@@ -51,6 +52,7 @@
 #include <string.h>
 
 #include <arpa/inet.h> //inet_ntop(), ntohl()
+
 
 #define PRETTY_PRINT_SEP " "
 #define PRETTY_PRINT_COL_WIDTH 5
@@ -847,6 +849,28 @@ void print_rec(const uint8_t *data)
                                 i == (fields_cnt - 1));
                 off += fields[i].size;
         }
+}
+
+const char * sprint_rec(const uint8_t *data)
+{
+        static char string[MAX_STR_LEN];
+        size_t string_len = 0;
+        size_t off = 0;
+
+        string[0] = '\0';
+
+        /* Loop through the fields in one record. */
+        for (size_t i = 0; i < fields_cnt; ++i) {
+                field_to_str(fields[i].id, data + off);
+                off += fields[i].size;
+
+                strcpy(string + string_len, global_str);
+                string_len = strlen(string);
+                string[string_len++] = ' ';
+        }
+        string[string_len - 1] = '\0';
+
+        return string;
 }
 
 
