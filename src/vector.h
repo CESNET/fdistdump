@@ -61,6 +61,9 @@ struct vector {
 
         size_t capacity; //number of allocated data elements
         size_t element_size; //element size in bytes
+
+        //void *it_begin; //iterator begin
+        //void *it_end; //iterator end
 };
 
 
@@ -143,6 +146,13 @@ static void vector_clear(struct vector *v)
 {
         v->size = 0;
 }
+
+/* Clear the vector but don't free allocated memory. */
+//static void vector_iter_init(struct vector *v)
+//{
+//        v->it_begin = v->data;
+//        v->it_end = (uint8_t *)v->data + v->size * v->element_size;
+//}
 
 
 #endif //MASTER_H
