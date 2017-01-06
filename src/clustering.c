@@ -115,14 +115,15 @@ struct slave_task_ctx {
 /* Point's metadata. */
 struct point_metadata {
         size_t id;           //point ID
-        int cluster_id;   //ID of cluster the point belongs to
+        /* TODO: go back to size_t? */
+        int cluster_id;      //ID of cluster the point belongs to
+
         bool core;           //core point flag
-        bool covered;
+        size_t covered_by;      //ID of the representative covering this point
         double quality;
 
         bool representative; //representative point flag
-        size_t cov_cnt;      //number of covered points
-        double cov_rad;      //covered radius
+        size_t cov_cnt;      //number of point covered by this representative
 };
 
 /* Point's feature vector. */
@@ -334,26 +335,24 @@ static void point_metadata_clear(struct point_metadata *pm)
         //pm->id = 0;
         pm->cluster_id = CLUSTER_UNVISITED;
         //pm->core = false;
-        //pm->covered = false;
+        pm->covered_by = SIZE_MAX;
         //pm->quality = 0.0;
 
         //pm->representative = false;
         pm->cov_cnt = 1;
-        //pm->cov_rad = -INFINITY;
 }
 
 static void point_metadata_print(const struct point_metadata *pm)
 {
-        printf("id = %zu, cluster_id = %d, core = %d, covered = %d, quality = %f, "
-                        "representative = %d, cov_cnt = %zu, cov_rad = %f",
+        printf("id = %zu, cluster_id = %d, core = %d, covered_by = %zu, "
+                        "quality = %f, representative = %d, cov_cnt = %zu",
                         pm->id,
                         pm->cluster_id,
                         pm->core,
-                        pm->covered,
+                        pm->covered_by,
                         pm->quality,
                         pm->representative,
-                        pm->cov_cnt,
-                        pm->cov_rad);
+                        pm->cov_cnt);
 }
 
 static void point_features_print(const struct point_features *pf)
@@ -588,18 +587,19 @@ static size_t local_model_cluster(struct point *cluster[], size_t cluster_size,
                         distance_get_vector(distance, repr);
 
                 /* Mark the points covered by the new representative. */
-
                 repr->m.cov_cnt = 0;
                 /* Loop through the representative's neighbors. */
                 for (size_t i = repr_cnt; i < cluster_size; ++i) {
                         struct point *repr_nbr = cluster[i];
                         double dist = repr_distance[repr_nbr->m.id];
 
-                        if (dist >= global_eps || repr_nbr->m.covered) {
+                        if (dist >= global_eps || repr_nbr->m.covered_by !=
+                                        SIZE_MAX) {
+                                /* Either too far away or already covered. */
                                 continue;
                         }
 
-                        repr_nbr->m.covered = true;
+                        repr_nbr->m.covered_by = repr->m.id;
                         repr->m.cov_cnt++;
                         const double *repr_nbr_distance =
                                 distance_get_vector(distance, repr_nbr);
@@ -743,17 +743,11 @@ static size_t global_model_recv(const struct vector *repr_vec,
 
                         if (memcmp(&repr->f, &gm_point.f,
                                                 sizeof (struct point_features)) == 0) {
-                                int local_cluster_id = repr->m.cluster_id;
                                 int global_cluster_id = gm_point.m.cluster_id;
 
                                 assert(global_cluster_id >= CLUSTER_NOISE);
                                 MAX_ASSIGN(cluster_cnt, (size_t)global_cluster_id);
-                                if (local_cluster_id == CLUSTER_NOISE) {
-                                        repr->m.cluster_id = -global_cluster_id;
-                                } else if (cluster_id_map[local_cluster_id] == 0) {
-                                        cluster_id_map[local_cluster_id] =
-                                                global_cluster_id;
-                                }
+                                cluster_id_map[repr->m.id] = global_cluster_id;
                                 break;
                         }
 
@@ -770,12 +764,11 @@ static void global_model_relabel(struct vector *point_vec,
         struct point *point_end = point_begin + point_vec->size;
 
         for (struct point *point = point_begin; point < point_end; ++point) {
-                const int old_id = point->m.cluster_id;
+                const int new_id = cluster_id_map[point->m.covered_by];
 
-                if (old_id < CLUSTER_UNVISITED) {
-                        point->m.cluster_id = -old_id;
-                } else if (cluster_id_map[old_id] != 0) {
-                        point->m.cluster_id = cluster_id_map[old_id];
+                if (new_id >= CLUSTER_FIRST) {
+                        /* Mapping exists, relabel. */
+                        point->m.cluster_id = new_id;
                 }
         }
 }
@@ -833,7 +826,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
                 file_proc_rec_cntr++;
 
                 point_metadata_clear(&point.m);
-                point.m.id = file_rec_cntr - 1;
+                point.m.id = file_rec_cntr - 1; //start from 0
 
                 lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &point.f.srcaddr);
                 lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &point.f.dstaddr);
@@ -856,7 +849,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
 
         /**********************************************************************/
         /* DBSCAN */
-        size_t cluster_cnt = dbscan(&point_vec, &distance);
+        const size_t local_cluster_cnt = dbscan(&point_vec, &distance);
         if (stc->slave_cnt == 1) {
                 dbscan_print(&point_vec);
                 goto finish;
@@ -873,20 +866,21 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         /* Create and send local model. */
         {
         struct vector repr_vec;
-
         vector_init(&repr_vec, sizeof (struct point *));
-        local_model(&repr_vec, &point_vec, &distance, cluster_cnt);
-        //local_model_print(&point_vec, cluster_cnt);
+
+        local_model(&repr_vec, &point_vec, &distance, local_cluster_cnt);
+        //local_model_print(&point_vec, local_cluster_cnt);
         local_model_send(&repr_vec);
 
 
         /**********************************************************************/
         /* Global model. */
-        int cluster_id_map[cluster_cnt];
-        memset(cluster_id_map, 0, sizeof(cluster_id_map));
-        cluster_cnt = global_model_recv(&repr_vec, cluster_id_map);
+        int cluster_id_map[point_vec.size];
+        memset(cluster_id_map, 0, sizeof(cluster_id_map)); //TODO
+
+        global_model_recv(&repr_vec, cluster_id_map);
         global_model_relabel(&point_vec, cluster_id_map);
-        //local_model_print(&point_vec, cluster_cnt);
+        //local_model_print(&point_vec, global_cluster_cnt);
         dbscan_print(&point_vec);
 
         vector_free(&repr_vec);
