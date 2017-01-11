@@ -230,7 +230,7 @@ static void distance_fill(struct distance *d)
                 return;
         }
 
-        #pragma omp parallel for firstprivate(d)
+        #pragma omp parallel for schedule(guided) firstprivate(d)
         for (size_t i = 0; i < d->size; ++i) {
                 d->data.matrix[i][i] = 0.0; //property 1
 
