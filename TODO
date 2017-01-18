@@ -5,6 +5,8 @@ Features:
         -add output printing in defined order
         -add fields offsets for output printing
         -add output alignment options: none, expanding, absolute
+	-add more output format options (e.g. pretty with disabled stat
+	 conversions) and create short options for them
 
 Optimizations:
         -optimization for ascending sort, there is possibility to vastly reduce

@@ -861,10 +861,9 @@ const char * sprint_rec(const uint8_t *data)
 
         /* Loop through the fields in one record. */
         for (size_t i = 0; i < fields_cnt; ++i) {
-                field_to_str(fields[i].id, data + off);
+                strcpy(string + string_len,
+                                field_to_str(fields[i].id, data + off));
                 off += fields[i].size;
-
-                strcpy(string + string_len, global_str);
                 string_len = strlen(string);
                 string[string_len++] = ' ';
         }
