@@ -54,6 +54,9 @@
 
 #define VECTOR_INIT_CAPACITY 2
 
+#define VECTOR_DATA_END(vec) ((void *)((uint8_t *)(vec)->data + \
+			(vec)->size * (vec)->element_size))
+
 
 struct vector {
         void *data; //data storage
@@ -93,17 +96,17 @@ static void vector_reserve(struct vector *v, size_t capacity)
 }
 
 /* Resizes the vector to contain count elements. */
-static void vector_resize(struct vector *v, size_t count)
-{
-        v->size = count;
-}
+//static void vector_resize(struct vector *v, size_t count)
+//{
+//        v->size = count;
+//}
 
 /* Get pointer to the element on the element_index position. */
-static void * vector_get_ptr(const struct vector *v, size_t element_index)
-{
-        assert(element_index < v->size);
-        return (uint8_t *)v->data + v->element_size * element_index;
-}
+//static void * vector_get_ptr(const struct vector *v, size_t element_index)
+//{
+//        assert(element_index < v->size);
+//        return (uint8_t *)v->data + v->element_size * element_index;
+//}
 
 /* Add a new element into the vector. */
 static bool vector_add(struct vector *v, const void *element)
@@ -121,24 +124,21 @@ static bool vector_add(struct vector *v, const void *element)
         }
 
         /* Append the elements to the vector. */
-        memcpy((void *)((uint8_t *)v->data + v->size * v->element_size),
-                        element, v->element_size);
+        memcpy(VECTOR_DATA_END(v), element, v->element_size);
         v->size++;
 
         return true;
 }
 
-/* Concatenate vectors, append the src to the dest. */
-static bool vector_concat(struct vector *dest, const struct vector *src)
+/* Concatenate two *different* vectors, append the src to the dest. */
+static void vector_concat(struct vector *dest, const struct vector *src)
 {
-        size_t err = 0;
-
+	assert(dest != src);
         assert(dest->element_size == src->element_size);
-        for (size_t i = 0; i < src->size; ++i) {
-                err += vector_add(dest, vector_get_ptr(src, i));
-        }
 
-        return (err == 0);
+	vector_reserve(dest, dest->size + src->size);
+        memcpy(VECTOR_DATA_END(dest), src->data, src->size * src->element_size);
+	dest->size += src->size;
 }
 
 /* Clear the vector but don't free allocated memory. */
@@ -151,7 +151,7 @@ static void vector_clear(struct vector *v)
 //static void vector_iter_init(struct vector *v)
 //{
 //        v->it_begin = v->data;
-//        v->it_end = (uint8_t *)v->data + v->size * v->element_size;
+//        v->it_end = VECTOR_DATA_END(v);
 //}
 
 
