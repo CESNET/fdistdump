@@ -435,13 +435,15 @@ static int dbscan(const struct vector *point_vec, struct distance *distance)
 
         vector_init(&seeds, sizeof (struct point *));
         vector_init(&neighbors, sizeof (struct point *));
+        vector_reserve(&seeds, point_vec->size);
 
 
         /* Loop through all base points (static vector). */
         for (struct point *point = point_begin; point < point_end; ++point) {
                 if (point->m.cluster_id != CLUSTER_UNVISITED) {
                         /* The point is a noise or already in some cluster. */
-                        PRINT_DEBUG("base point %zu: already visited", point->m.id);
+                        PRINT_DEBUG("base point %zu: already part of cluster %d",
+                                        point->m.id, point->m.cluster_id);
                         continue;
                 }
 
@@ -449,7 +451,8 @@ static int dbscan(const struct vector *point_vec, struct distance *distance)
 
                 if (cov_pts < global_min_pts) {
                         /* The point is a noise, this may be chaged later. */
-                        PRINT_DEBUG("base point %zu: noise", point->m.id);
+                        PRINT_DEBUG("base point %zu: noise covering %zu points",
+                                        point->m.id, cov_pts);
                         point->m.cluster_id = CLUSTER_NOISE;
                         vector_clear(&seeds);
                         continue;
@@ -472,14 +475,14 @@ static int dbscan(const struct vector *point_vec, struct distance *distance)
                                                 &neighbors, distance);
 
                                 if (cov_pts >= global_min_pts) { //core point
-                                        PRINT_DEBUG("seed %zu: core point covering %zu points",
-                                                        seed->m.id, cov_pts);
+                                        PRINT_DEBUG("seed %zu: core point covering %zu points (%zu new)",
+                                                        seed->m.id, cov_pts, neighbors.size);
                                         seed->m.core = true;
                                         mark_covered(seed->m.id, &neighbors);
                                         vector_concat(&seeds, &neighbors);
                                 } else { //border point
-                                        PRINT_DEBUG("seed %zu: border point covering %zu points",
-                                                        seed->m.id, cov_pts);
+                                        PRINT_DEBUG("seed %zu: border point covering %zu points (%zu new)",
+                                                        seed->m.id, cov_pts, neighbors.size);
                                 }
                         } else if (seed->m.cluster_id == CLUSTER_NOISE) {
                                 /* The point was a noise, but isn't anymore. */
@@ -487,7 +490,7 @@ static int dbscan(const struct vector *point_vec, struct distance *distance)
                                 PRINT_DEBUG("seed %zu: border point, former noise",
                                                 seed->m.id);
                         } else { /* The point was already part of some cluster. */
-                                PRINT_DEBUG("seed %zu: point already part of cluster %d",
+                                PRINT_DEBUG("seed %zu: already part of cluster %d",
                                                 seed->m.id, seed->m.cluster_id);
                         }
                 }
