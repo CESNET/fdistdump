@@ -3,11 +3,11 @@
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+ * \date 2015 - 2017
  */
 
 /*
- * Copyright (C) 2015 CESNET
+ * Copyright (C) 2015, 2016, 2017 CESNET
  *
  * LICENSE TERMS
  *
@@ -47,6 +47,7 @@
 #include "slave.h"
 #include "path_array.h"
 #include "print.h"
+#include "file_index/file_index.h"
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -61,6 +62,7 @@
 #endif //_OPENMP
 #include <mpi.h>
 #include <libnf.h>
+#include <ffilter.h>
 #include <dirent.h> //list directory
 #include <sys/stat.h> //stat()
 
@@ -88,6 +90,8 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
+        ip_tree_node_t *idx_tree; //Indexing IP address tree (created from the
+                                  //LNF filter)
 
         uint8_t *buff[2]; //two chunks of memory for the data buffers
         char *path_str; //file/directory/profile(s) path string
@@ -448,7 +452,9 @@ static void task_free(struct slave_task_ctx *stc)
 }
 
 
-static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
+static error_code_t task_init_filter(lnf_filter_t **filter,
+                                     ip_tree_node_t **idx_tree,
+                                     char *filter_str)
 {
         int secondary_errno;
 
@@ -461,6 +467,16 @@ static error_code_t task_init_filter(lnf_filter_t **filter, char *filter_str)
         if (secondary_errno != LNF_OK) {
                 PRINT_ERROR(E_LNF, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
+                return E_LNF;
+
+        }
+
+        /// TODO: IF indexing
+        ff_t *filter_tree = (ff_t *) lnf_filter_ffilter_ptr(*filter);
+        if (get_ip_tree((ff_node_t *) filter_tree->root, idx_tree) != E_OK){
+                PRINT_ERROR(E_IDX, 0,
+                            "unable to create an indexing IP address tree");
+                /// TURN OFF INDEXING, DESTROY TREE IF EXISTS
                 return E_LNF;
         }
 
@@ -494,7 +510,8 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
                                 ROOT_PROC, MPI_COMM_WORLD);
 
                 filter_str[stc->shared.filter_str_len] = '\0'; //termination
-                primary_errno = task_init_filter(&stc->filter, filter_str);
+                primary_errno = task_init_filter(&stc->filter, &stc->idx_tree,
+                                                 filter_str);
                 //it is OK not to chech primary_errno
         }
 
@@ -1048,6 +1065,15 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 /* Increment the private metadata summary counters. */
                 metadata_summ_update(&tc.metadata_summ, tc.file);
 
+                /// TODO: IF indexing
+                if (stc->idx_tree){
+                        if (ips_in_file(paths[i], stc->idx_tree) == false){
+                                PRINT_DEBUG("File-indexing: Skipping file %s.",
+                                            paths[i]);
+                                goto my_continue;
+                        }
+                }
+
                 /* Process the file according to the working mode. */
                 switch (stc->shared.working_mode) {
                 //According to GCC, #pragma omp flush may only be used in
@@ -1117,7 +1143,6 @@ error_code_t slave(int world_size)
         struct slave_task_ctx stc;
         char **paths = NULL;
         size_t paths_cnt = 0;
-
 
         memset(&stc, 0, sizeof (stc));
         stc.slave_cnt = world_size - 1; //all nodes without master

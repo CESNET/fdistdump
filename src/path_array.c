@@ -46,6 +46,7 @@
 #include "common.h"
 #include "path_array.h"
 #include "print.h"
+#include "file_index/file_index.h"
 
 #include <stdlib.h>
 #include <errno.h>
@@ -179,8 +180,10 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
         while ((entry = readdir(dir)) != NULL) {
                 char new_path[PATH_MAX];
 
-                /* Dot starting filenames are ignored. */
-                if (entry->d_name[0] == '.') {
+                /* Dot starting / file-indexing filenames are ignored. */
+                if (entry->d_name[0] == '.' || strncmp(entry->d_name,
+                        F_INDEX_FN_PREFIX, strlen(F_INDEX_FN_PREFIX)) == 0) {
+                        // Skip file
                         continue;
                 }
                 /* Too long filenames are ignored. */
@@ -188,6 +191,7 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
                         errno = ENAMETOOLONG;
                         PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
+                        // Skip file
                         continue;
                 }
 

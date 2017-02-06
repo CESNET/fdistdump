@@ -105,6 +105,10 @@ static char * error_code_to_str(error_code_t e1)
                 snprintf(msg, MAX_STR_LEN, "path");
                 break;
 
+        case E_IDX:
+                snprintf(msg, MAX_STR_LEN, "index");
+                break;
+
         default:
                 assert(!"unknown error code");
         };

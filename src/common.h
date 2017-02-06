@@ -82,6 +82,7 @@ typedef enum { //error return codes
         E_INTERNAL, //internal
         E_ARG, //command line arguments
         E_PATH, //problem with access to file/directory
+        E_IDX, //indexing error
 } error_code_t;
 
 typedef enum { //working modes
