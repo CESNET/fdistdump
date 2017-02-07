@@ -448,6 +448,9 @@ static void task_free(struct slave_task_ctx *stc)
         if (stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
         }
+        if (stc->idx_tree){
+                destroy_ip_tree(&stc->idx_tree);
+        }
         free(stc->path_str);
 }
 
