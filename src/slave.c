@@ -90,7 +90,7 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
-        ip_tree_node_t *idx_tree; //Indexing IP address tree (created from the
+        struct ip_tree_node *idx_tree; //Indexing IP address tree (created from the
                                   //LNF filter)
 
         uint8_t *buff[2]; //two chunks of memory for the data buffers
@@ -449,14 +449,14 @@ static void task_free(struct slave_task_ctx *stc)
                 free_aggr_mem(stc->aggr_mem);
         }
         if (stc->idx_tree){
-                destroy_ip_tree(&stc->idx_tree);
+                fidx_destroy_tree(&stc->idx_tree);
         }
         free(stc->path_str);
 }
 
 
 static error_code_t task_init_filter(lnf_filter_t **filter,
-                                     ip_tree_node_t **idx_tree,
+                                     struct ip_tree_node **idx_tree,
                                      char *filter_str)
 {
         int secondary_errno;
@@ -476,7 +476,7 @@ static error_code_t task_init_filter(lnf_filter_t **filter,
 
         /// TODO: IF indexing
         ff_t *filter_tree = (ff_t *) lnf_filter_ffilter_ptr(*filter);
-        if (get_ip_tree((ff_node_t *) filter_tree->root, idx_tree) != E_OK){
+        if (fidx_get_tree((ff_node_t *) filter_tree->root, idx_tree) != E_OK){
                 PRINT_ERROR(E_IDX, 0,
                             "unable to create an indexing IP address tree");
                 /// TURN OFF INDEXING, DESTROY TREE IF EXISTS
@@ -1070,7 +1070,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
 
                 /// TODO: IF indexing
                 if (stc->idx_tree){
-                        if (ips_in_file(paths[i], stc->idx_tree) == false){
+                        if (fidx_ips_in_file(paths[i], stc->idx_tree) == false){
                                 PRINT_DEBUG("File-indexing: Skipping file %s.",
                                             paths[i]);
                                 goto my_continue;
