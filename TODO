@@ -5,8 +5,8 @@ Features:
         -add output printing in defined order
         -add fields offsets for output printing
         -add output alignment options: none, expanding, absolute
-	-add more output format options (e.g. pretty with disabled stat
-	 conversions) and create short options for them
+        -add more output format options (e.g. pretty with disabled stat
+         conversions) and create short options for them
 
 Optimizations:
         -optimization for ascending sort, there is possibility to vastly reduce
@@ -29,11 +29,14 @@ Documentation:
         -clarify repeating options
         -create a ChangeLog
 
-Others:
-        -create and use more MPI tags
-        -suppress printing command-line error messages on all nodes
-	-use MPI error handler
+Build:
+        -move away from autotools
 
 Coding style:
         -join multiline string
         -check 80 characters per line
+
+Others:
+        -create and use more MPI tags
+        -suppress printing command-line error messages on all nodes
+        -use MPI error handler
