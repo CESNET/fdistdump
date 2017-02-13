@@ -3,11 +3,11 @@
  * \brief Header file for file-indexing using Bloom filter indexes for IP
  * addresses
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2016 - 2017
+ * \date 2016
  */
 
 /*
- * Copyright (C) 2016, 2017 CESNET
+ * Copyright (C) 2016 CESNET
  *
  * LICENSE TERMS
  *
@@ -46,33 +46,19 @@
 #ifndef _FDD_FILE_INDEX_H
 #define _FDD_FILE_INDEX_H
 
+
 #include "common.h"
 
 #include <stdbool.h>
 #include <libnf.h>
 #include <ffilter.h>
 
+
 /* Prefix of file-index file names */
-#define F_INDEX_FN_PREFIX ".bf_index"
-
-/** \brief Maximal count of IP addresses used in a query filter.
- *
- * \note Using a bigger count of IP addresses may lead to the index inefficiency.
- */
-#define MAX_IP_ADDRESES 20
+#define FIDX_FN_PREFIX ".bf_index"
 
 
-/** \brief File-indexing IP address tree node types. */
-typedef enum e_ip_node_type{
-        OPER_AND = 1,
-        OPER_OR,
-        IP_ADDR_V4,
-        IP_ADDR_V6,
-        DONT_CARE
-} ip_node_type_t;
-
-
-struct ip_tree_node;
+struct fidx_ip_tree_node; //forward declaration
 
 
 /** \brief Get a file-indexing IP address tree from a filter tree.
@@ -87,15 +73,16 @@ struct ip_tree_node;
  * \param[in] idx_root  Pointer to the root of the file-indexing IP address tree.
  * \return Returns E_OK on success, error code otherwise.
  */
-error_code_t fidx_get_tree(ff_node_t *filter_root, struct ip_tree_node **idx_root);
+error_code_t fidx_get_tree(ff_node_t *filter_root,
+                struct fidx_ip_tree_node **idx_root);
 
 /** \brief Destroy a file-indexing IP address tree.
  *
  * \note Function sets the root node to NULL.
  *
- * \param[in] ip_tree_node  Pointer to the root of a tree to destroy.
+ * \param[in] fidx_ip_tree_node  Pointer to the root of a tree to destroy.
  */
-void fidx_destroy_tree(struct ip_tree_node **ip_tree_node);
+void fidx_destroy_tree(struct fidx_ip_tree_node **fidx_ip_tree_node);
 
 /** \brief Check if IP addresses in a file-indexing IP address tree are
  * contained in a file.
@@ -112,6 +99,7 @@ void fidx_destroy_tree(struct ip_tree_node **ip_tree_node);
  *         the logical expression represented by the file-indexing IP address
  *         tree.
  */
-bool fidx_ips_in_file(const char *path, struct ip_tree_node *ip_tree);
+bool fidx_ips_in_file(const char *path, struct fidx_ip_tree_node *ip_tree);
+
 
 #endif // _FDD_FILE_INDEX_H

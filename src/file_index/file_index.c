@@ -2,11 +2,11 @@
  * \file file_index.c
  * \brief File file-indexing using Bloom filter indexes for IP addresses
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2016 - 2017
+ * \date 2016
  */
 
 /*
- * Copyright (C) 2016, 2017 CESNET
+ * Copyright (C) 2016 CESNET
  *
  * LICENSE TERMS
  *
@@ -42,6 +42,7 @@
  *
  */
 
+
 #include "print.h"
 #include "file_index.h"
 
@@ -55,28 +56,43 @@
 #include <bf_index.h>
 
 
+/** \brief Maximal count of IP addresses used in a query filter.
+ *
+ * \note Using a bigger count of IP addresses may lead to the index inefficiency.
+ */
+#define MAX_IP_ADDRESES 20
+
+
+/** \brief File-indexing IP address tree node types. */
+typedef enum {
+        OPER_AND = 1,
+        OPER_OR,
+        IP_ADDR_V4,
+        IP_ADDR_V6,
+        DONT_CARE
+} ip_node_type_t;
+
 /** \brief File-indexing IP address tree node structure.
  *
  * This structure contains information about single node in a file-indexing IP.
  */
-struct ip_tree_node{
+struct fidx_ip_tree_node {
         ip_node_type_t type; /**< Type of a node (operators / different version
-                                    of addresses). */
+                               of addresses). */
 
         ff_ip_t addr;        /**< If node is one of the IP_ADDR_... type, an IP
-                                  address itself is stored here. */
+                               address itself is stored here. */
 
         /**< If node is one of the IP_ADDR_... type both pointers are set to
-             NULL. If node is one of the OPER_... type: */
-        struct ip_tree_node *left; /**< Contains pointer to the left node
-                                          (i.e. first operand). */
-        struct ip_tree_node *right; /**< Contains pointer to the right node
-										   (i.e. second operand). */
+          NULL. If node is one of the OPER_... type: */
+        struct fidx_ip_tree_node *left; /**< Contains pointer to the left node
+                                     (i.e. first operand). */
+        struct fidx_ip_tree_node *right; /**< Contains pointer to the right node
+                                      (i.e. second operand). */
 };
 
-
 /** \brief Internal file-indexing IP address tree error codes. */
-typedef enum{
+typedef enum {
         IPT_OK = 0,
         IPT_ERR,
         IPT_LIMIT
@@ -84,10 +100,10 @@ typedef enum{
 
 
 /* Count of IP address in a file-indexing IP address tree. */
-unsigned int ip_cnt = 0;
+static unsigned int ip_cnt = 0;
 
 
-static ipt_ecode_t build_ip_tree(struct ip_tree_node **, ff_node_t *);
+static ipt_ecode_t build_ip_tree(struct fidx_ip_tree_node **, ff_node_t *);
 
 
 /** \brief Auxiliary function for getting of file-indexing IP address tree.
@@ -104,11 +120,11 @@ static ipt_ecode_t build_ip_tree(struct ip_tree_node **, ff_node_t *);
  *                         tree.
  * \return Returns E_OK on success, error code otherwise.
  */
-static ipt_ecode_t process_ip_node(struct ip_tree_node **ip_node,
-                                     ff_node_t *filter_node)
+static ipt_ecode_t process_ip_node(struct fidx_ip_tree_node **ip_node,
+                ff_node_t *filter_node)
 {
         /// TODO FF_VER
-//                ff_ver_t ip_ver = ((ff_net_t *)filter_node->value)->ver;
+        //                ff_ver_t ip_ver = ((ff_net_t *)filter_node->value)->ver;
         int ip_ver = ((ff_net_t *)filter_node->value)->ver;
         ff_ip_t *ip_addr = (ff_ip_t *)&((ff_net_t *)filter_node->value)->ip;
         ff_ip_t *ip_mask = (ff_ip_t *)&((ff_net_t *)filter_node->value)->mask;
@@ -119,27 +135,27 @@ static ipt_ecode_t process_ip_node(struct ip_tree_node **ip_node,
                         (*ip_node)->type = IP_ADDR_V4;
 
                         if (ip_mask->data[3] != 0xffffffff
-                            || (ip_cnt + 1) > MAX_IP_ADDRESES){
+                                        || (ip_cnt + 1) > MAX_IP_ADDRESES){
                                 PRINT_DEBUG("IP address limit reached while "\
-                                            "getting a file-indexing IP "\
-                                            "address tree (reason: too many "\
-                                            "addresses or network is used - IPv4).");
+                                                "getting a file-indexing IP "\
+                                                "address tree (reason: too many "\
+                                                "addresses or network is used - IPv4).");
                                 return IPT_LIMIT;
                         }
-                /// TODO FF_VER
+                        /// TODO FF_VER
                 } else if (ip_ver == 6){
                         (*ip_node)->type = IP_ADDR_V6;
 
                         if (ip_mask->data[0] != 0xffffffff
-                            || ip_mask->data[1] != 0xffffffff
-                            || ip_mask->data[2] != 0xffffffff
-                            || ip_mask->data[3] != 0xffffffff
-                            || (ip_cnt + 1) > MAX_IP_ADDRESES)
+                                        || ip_mask->data[1] != 0xffffffff
+                                        || ip_mask->data[2] != 0xffffffff
+                                        || ip_mask->data[3] != 0xffffffff
+                                        || (ip_cnt + 1) > MAX_IP_ADDRESES)
                         {
                                 PRINT_DEBUG("IP address limit reached while "\
-                                            "getting a file-indexing IP "\
-                                            "address tree (reason: too many "\
-                                            "addresses or network is used - IPv6).");
+                                                "getting a file-indexing IP "\
+                                                "address tree (reason: too many "\
+                                                "addresses or network is used - IPv6).");
                                 return IPT_LIMIT;
                         }
                 }
@@ -150,8 +166,8 @@ static ipt_ecode_t process_ip_node(struct ip_tree_node **ip_node,
                 (*ip_node)->right = NULL;
         } else {
                 PRINT_DEBUG("IP address limit reached while getting an "\
-                            "file-indexing IP address tree (reason: other "\
-                            "operator than EQ is used).");
+                                "file-indexing IP address tree (reason: other "\
+                                "operator than EQ is used).");
                 return IPT_LIMIT;
         }
 
@@ -172,18 +188,18 @@ static ipt_ecode_t process_ip_node(struct ip_tree_node **ip_node,
  *                         tree.
  * \return Returns E_OK on success, error code otherwise.
  */
-static ipt_ecode_t get_operator_subtree(struct ip_tree_node **ip_node,
-                                      ff_node_t *filter_node)
+static ipt_ecode_t get_operator_subtree(struct fidx_ip_tree_node **ip_node,
+                ff_node_t *filter_node)
 {
         ipt_ecode_t ret;
 
         // Allocate nodes
-        (*ip_node)->left = calloc(1, sizeof(struct ip_tree_node));
-        (*ip_node)->right = calloc(1, sizeof(struct ip_tree_node));
+        (*ip_node)->left = calloc(1, sizeof(struct fidx_ip_tree_node));
+        (*ip_node)->right = calloc(1, sizeof(struct fidx_ip_tree_node));
         if (!(*ip_node)->left || !(*ip_node)->right){
                 PRINT_ERROR(E_MEM, 0, "memory error while getting "\
-                            "file-indexing IP address tree (child node "\
-                            "allocation).");
+                                "file-indexing IP address tree (child node "\
+                                "allocation).");
                 return IPT_ERR;
         }
 
@@ -216,15 +232,15 @@ static ipt_ecode_t get_operator_subtree(struct ip_tree_node **ip_node,
                         /* Both child nodes are NULL -> we don't need the parent
                          * node either */
                         PRINT_DEBUG("File-indexing IP tree: Reducing whole "\
-                                    "node - no relevant child nodes.");
+                                        "node - no relevant child nodes.");
                         free(*ip_node);
                         *ip_node = NULL;
                 } else {
                         /* Left child node is NULL, a Right child node carries
                          * some data -> make the right node the parent node. */
                         PRINT_DEBUG("File-indexing IP tree: Reducing operator "\
-                                    "node - using right child node directly.");
-                        struct ip_tree_node *tmp_node_ptr = (*ip_node)->right;
+                                        "node - using right child node directly.");
+                        struct fidx_ip_tree_node *tmp_node_ptr = (*ip_node)->right;
                         free(*ip_node);
                         *ip_node = tmp_node_ptr;
                 }
@@ -232,27 +248,27 @@ static ipt_ecode_t get_operator_subtree(struct ip_tree_node **ip_node,
                 /* Right child node is NULL, left child node carries
                  * some data -> make left node the parent node. */
                 PRINT_DEBUG("File-indexing IP tree: Reducing operator node "\
-                                    "- using left child node directly.");
-                struct ip_tree_node *tmp_node_ptr = (*ip_node)->left;
+                                "- using left child node directly.");
+                struct fidx_ip_tree_node *tmp_node_ptr = (*ip_node)->left;
                 free(*ip_node);
                 *ip_node = tmp_node_ptr;
         } else {
                 ip_node_type_t left_type = (*ip_node)->left->type;
                 ip_node_type_t right_type = (*ip_node)->right->type;
                 if ((left_type == IP_ADDR_V4 || left_type == IP_ADDR_V6)
-                    && (right_type == IP_ADDR_V4 || right_type == IP_ADDR_V6)
-                    && (memcmp((const void *)&((*ip_node)->left->addr),
-                               (const void *)&((*ip_node)->right->addr),
-                               sizeof((*ip_node)->left->addr)) == 0))
+                                && (right_type == IP_ADDR_V4 || right_type == IP_ADDR_V6)
+                                && (memcmp((const void *)&((*ip_node)->left->addr),
+                                                (const void *)&((*ip_node)->right->addr),
+                                                sizeof((*ip_node)->left->addr)) == 0))
                 {
-                /* Both child nodes are address nodes, check if IP addresses
-                 * matches (reduce nodes if yes) - term "ip a.b.c.d" is
-                 * considered as "srcip a.b.c.d or dstip a.b.c.d" by ffilter.
-                 * For the file-indexing only one address is needed. */
+                        /* Both child nodes are address nodes, check if IP addresses
+                         * matches (reduce nodes if yes) - term "ip a.b.c.d" is
+                         * considered as "srcip a.b.c.d or dstip a.b.c.d" by ffilter.
+                         * For the file-indexing only one address is needed. */
                         PRINT_DEBUG("File-indexing IP tree: Reducing operator "\
-                                    "node - using left child node directly "\
-                                    "(same child nodes).");
-                        struct ip_tree_node *tmp_node_ptr = (*ip_node)->left;
+                                        "node - using left child node directly "\
+                                        "(same child nodes).");
+                        struct fidx_ip_tree_node *tmp_node_ptr = (*ip_node)->left;
                         free((*ip_node)->right);
                         free(*ip_node);
                         *ip_node = tmp_node_ptr;
@@ -274,8 +290,8 @@ static ipt_ecode_t get_operator_subtree(struct ip_tree_node **ip_node,
  * \param[in] filter_node  Pointer to the actual node of the filter tree.
  * \return Returns E_OK on success, error code otherwise.
  */
-static ipt_ecode_t build_ip_tree(struct ip_tree_node **ip_node,
-                                     ff_node_t *filter_node)
+static ipt_ecode_t build_ip_tree(struct fidx_ip_tree_node **ip_node,
+                ff_node_t *filter_node)
 {
         if(!filter_node || !(*ip_node)){
                 return IPT_ERR;
@@ -311,21 +327,21 @@ static ipt_ecode_t build_ip_tree(struct ip_tree_node **ip_node,
 }
 
 
-error_code_t fidx_get_tree(ff_node_t *filter_root, struct ip_tree_node **idx_root)
+error_code_t fidx_get_tree(ff_node_t *filter_root, struct fidx_ip_tree_node **idx_root)
 {
         ipt_ecode_t ret;
 
-        *idx_root = calloc (1, sizeof(struct ip_tree_node));
+        *idx_root = calloc (1, sizeof(struct fidx_ip_tree_node));
         if (!(*idx_root)){
                 PRINT_ERROR(E_MEM, 0, "memory error while getting a "\
-							"file-indexing IP address tree (root allocation).");
+                                "file-indexing IP address tree (root allocation).");
                 return E_IDX;
         }
 
         ret = build_ip_tree(idx_root, filter_root);
         if (ret == IPT_LIMIT){
-                 /// TODO DESTORY INDEX??
-                 PRINT_WARNING(E_IDX, 0, "the file-indexing limit for "\
+                /// TODO DESTORY INDEX??
+                PRINT_WARNING(E_IDX, 0, "the file-indexing limit for "\
                                 "a maximal count of IP addresses in a filter "\
                                 "has been reached. File indexes wont't be "\
                                 "used in current query.");
@@ -334,8 +350,8 @@ error_code_t fidx_get_tree(ff_node_t *filter_root, struct ip_tree_node **idx_roo
         }else if (ret == IPT_ERR){
                 /// TODO DESTORY INDEX??
                 PRINT_ERROR(E_IDX, 0, "unable to build file-indexing IP "\
-                            "address tree. File indexes wont't be used in "\
-                            "current query.");
+                                "address tree. File indexes wont't be used in "\
+                                "current query.");
                 PRINT_DEBUG("Destroying file-indexing IP address tree.");
                 return E_IDX;
         }
@@ -344,18 +360,18 @@ error_code_t fidx_get_tree(ff_node_t *filter_root, struct ip_tree_node **idx_roo
 }
 
 
-void fidx_destroy_tree(struct ip_tree_node **ip_tree_node)
+void fidx_destroy_tree(struct fidx_ip_tree_node **fidx_ip_tree_node)
 {
-        if (!(*ip_tree_node)) {
+        if (!(*fidx_ip_tree_node)) {
                 return;
         }
 
-        fidx_destroy_tree(&((*ip_tree_node)->left));
+        fidx_destroy_tree(&((*fidx_ip_tree_node)->left));
 
-        fidx_destroy_tree(&((*ip_tree_node)->right));
+        fidx_destroy_tree(&((*fidx_ip_tree_node)->right));
 
-        free(*ip_tree_node);
-        *ip_tree_node = NULL;
+        free(*fidx_ip_tree_node);
+        *fidx_ip_tree_node = NULL;
 }
 
 /**
@@ -364,10 +380,10 @@ void fidx_destroy_tree(struct ip_tree_node **ip_tree_node)
  * Get a filename of an index file for requested data file. The index filename
  * is acquired by replacing substring of the data filename starting with a slash
  * ("/") (or the beginning of filename if the slash is not present) and a dot
- * ("."). Such substring is replaced by F_INDEX_FN_PREFIX. If the dot character
+ * ("."). Such substring is replaced by FIDX_FN_PREFIX. If the dot character
  * is not present, function ends with an error.
  *
- * \note F_INDEX_FN_PREFIX has to be set up correctly to reflect a filename
+ * \note FIDX_FN_PREFIX has to be set up correctly to reflect a filename
  *   setup of given storage (i.e. setup from the time when files was stored).
  *
  * \param[in] path Data filename string
@@ -379,9 +395,9 @@ static char *get_index_fn(const char *path)
         const char *slash = strrchr(path, '/');
         if (!dot){
                 PRINT_ERROR(E_IDX, 0, "unable to get file-indexing file "\
-                            "name for the data file (%s) - unexpected format "\
-                            "of a data file name (a dot character is missing)."
-                            , path);
+                                "name for the data file (%s) - unexpected format "\
+                                "of a data file name (a dot character is missing)."
+                                , path);
                 return NULL;
         }
         if (!slash){
@@ -390,25 +406,25 @@ static char *get_index_fn(const char *path)
 
         size_t replace_len = dot - slash;
 
-        size_t index_path_len = strlen(path)
-                                - (replace_len - strlen(F_INDEX_FN_PREFIX)) + 1;
+        size_t index_path_len = strlen(path) -
+                (replace_len - strlen(FIDX_FN_PREFIX)) + 1;
 
         char *index_fn = malloc(sizeof(char) * index_path_len);
         if (!index_fn){
                 PRINT_ERROR(E_MEM, 0, "memory error while getting "\
-                            "file-indexing file name (data file %s).", path);
+                                "file-indexing file name (data file %s).", path);
                 return NULL;
         }
 
         size_t offset = slash - path;
         if (offset > 0) {
-            strncpy(index_fn, path, offset);
-            strcpy(index_fn + offset, "/");
-            offset++;
+                strncpy(index_fn, path, offset);
+                strcpy(index_fn + offset, "/");
+                offset++;
         }
 
-        strcpy(index_fn + offset, F_INDEX_FN_PREFIX);
-        offset += strlen(F_INDEX_FN_PREFIX);
+        strcpy(index_fn + offset, FIDX_FN_PREFIX);
+        offset += strlen(FIDX_FN_PREFIX);
         strcpy(index_fn + offset, dot);
 
         return index_fn;
@@ -423,62 +439,61 @@ static char *get_index_fn(const char *path)
  * \return Returns E_OK on success, error code otherwise.
  */
 static bool ip_tree_contains_check(bfi_index_ptr_t index,
-                                    struct ip_tree_node *ip_tree)
+                struct fidx_ip_tree_node *ip_tree)
 {
-        switch (ip_tree->type)
-        {
+        switch (ip_tree->type) {
         case OPER_AND:
                 return (ip_tree_contains_check(index, ip_tree->left)
-                        && ip_tree_contains_check(index, ip_tree->right));
+                                && ip_tree_contains_check(index, ip_tree->right));
                 break;
 
         case OPER_OR:
                 return (ip_tree_contains_check(index, ip_tree->left)
-                        || ip_tree_contains_check(index, ip_tree->right));
+                                || ip_tree_contains_check(index, ip_tree->right));
                 break;
 
         case IP_ADDR_V4:
         case IP_ADDR_V6:
                 {
-                const size_t len = 16; // For IPv4 & IPv6
-                if (sizeof(ip_tree->addr) != len){
-                        PRINT_ERROR(E_IDX, 0, "bad size of IP address "\
-                            "(expected %zu, got %zu).", len
-                            , sizeof(ip_tree->addr));
-                        return false;
-                }
-                return bfi_addr_is_stored(index,
-                            (const unsigned char *) ip_tree->addr.data , len);
+                        const size_t len = 16; // For IPv4 & IPv6
+                        if (sizeof(ip_tree->addr) != len){
+                                PRINT_ERROR(E_IDX, 0, "bad size of IP address "\
+                                                "(expected %zu, got %zu).", len
+                                                , sizeof(ip_tree->addr));
+                                return false;
+                        }
+                        return bfi_addr_is_stored(index,
+                                        (const unsigned char *) ip_tree->addr.data , len);
                 }
                 break;
 
         default:
-            PRINT_DEBUG("File-indexing: Unexpected type of a tree node "\
-                        "(type %d).", (int) ip_tree->type);
-            return false;
+                PRINT_DEBUG("File-indexing: Unexpected type of a tree node "\
+                                "(type %d).", (int) ip_tree->type);
+                return false;
         }
 }
 
 
-bool fidx_ips_in_file(const char *path, struct ip_tree_node *ip_tree)
+bool fidx_ips_in_file(const char *path, struct fidx_ip_tree_node *ip_tree)
 {
         if (!ip_tree){
                 PRINT_ERROR(E_IDX, 0, "passed an empty file-indexing tree to "\
-                            "the IP address presence check.");
+                                "the IP address presence check.");
                 return false;
         }
 
         char *index_fn = get_index_fn(path);
         if (!index_fn){
                 PRINT_DEBUG("File-indexing: filename was not created for "\
-                            "a data file %s.", path);
+                                "a data file %s.", path);
                 return false;
         }
 
         bfi_index_ptr_t index_ptr;
         if (bfi_load_index(&index_ptr, index_fn) != BFI_E_OK){
                 PRINT_ERROR(E_IDX, 0, "unable to load a file index from %s."
-                            , index_fn);
+                                , index_fn);
                 free(index_fn);
                 return false;
         }

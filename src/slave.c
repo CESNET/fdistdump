@@ -3,11 +3,11 @@
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015 - 2017
+ * \date 2015
  */
 
 /*
- * Copyright (C) 2015, 2016, 2017 CESNET
+ * Copyright (C) 2015 CESNET
  *
  * LICENSE TERMS
  *
@@ -90,8 +90,8 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
-        struct ip_tree_node *idx_tree; //Indexing IP address tree (created from the
-                                  //LNF filter)
+        struct fidx_ip_tree_node *idx_tree; //indexing IP address tree (created from
+                                       //the LNF filter)
 
         uint8_t *buff[2]; //two chunks of memory for the data buffers
         char *path_str; //file/directory/profile(s) path string
@@ -456,8 +456,7 @@ static void task_free(struct slave_task_ctx *stc)
 
 
 static error_code_t task_init_filter(lnf_filter_t **filter,
-                                     struct ip_tree_node **idx_tree,
-                                     char *filter_str)
+                struct fidx_ip_tree_node **idx_tree, char *filter_str)
 {
         int secondary_errno;
 
@@ -474,12 +473,12 @@ static error_code_t task_init_filter(lnf_filter_t **filter,
 
         }
 
-        /// TODO: IF indexing
-        ff_t *filter_tree = (ff_t *) lnf_filter_ffilter_ptr(*filter);
-        if (fidx_get_tree((ff_node_t *) filter_tree->root, idx_tree) != E_OK){
+        //TODO: IF indexing
+        ff_t *filter_tree = (ff_t *)lnf_filter_ffilter_ptr(*filter);
+        if (fidx_get_tree((ff_node_t *)filter_tree->root, idx_tree) != E_OK) {
                 PRINT_ERROR(E_IDX, 0,
-                            "unable to create an indexing IP address tree");
-                /// TURN OFF INDEXING, DESTROY TREE IF EXISTS
+                                "unable to create an indexing IP address tree");
+                //TURN OFF INDEXING, DESTROY TREE IF EXISTS
                 return E_LNF;
         }
 
@@ -514,8 +513,8 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
 
                 filter_str[stc->shared.filter_str_len] = '\0'; //termination
                 primary_errno = task_init_filter(&stc->filter, &stc->idx_tree,
-                                                 filter_str);
-                //it is OK not to chech primary_errno
+                                filter_str);
+                //it is OK not to check primary_errno
         }
 
 
@@ -1068,11 +1067,11 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 /* Increment the private metadata summary counters. */
                 metadata_summ_update(&tc.metadata_summ, tc.file);
 
-                /// TODO: IF indexing
-                if (stc->idx_tree){
-                        if (fidx_ips_in_file(paths[i], stc->idx_tree) == false){
-                                PRINT_DEBUG("File-indexing: Skipping file %s.",
-                                            paths[i]);
+                //TODO: IF indexing
+                if (stc->idx_tree) {
+                        if (fidx_ips_in_file(paths[i], stc->idx_tree) == false) {
+                                PRINT_DEBUG("file-indexing: skipping file \"%s\"",
+                                                paths[i]);
                                 goto my_continue;
                         }
                 }

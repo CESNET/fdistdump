@@ -180,19 +180,18 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
         while ((entry = readdir(dir)) != NULL) {
                 char new_path[PATH_MAX];
 
-                /* Dot starting / file-indexing filenames are ignored. */
+                /* Dot starting/file-indexing filenames are ignored. */
                 if (entry->d_name[0] == '.' || strncmp(entry->d_name,
-                        F_INDEX_FN_PREFIX, strlen(F_INDEX_FN_PREFIX)) == 0) {
-                        // Skip file
-                        continue;
+                                        FIDX_FN_PREFIX,
+                                        sizeof (FIDX_FN_PREFIX)) == 0) {
+                        continue; //skip the file
                 }
                 /* Too long filenames are ignored. */
                 if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
                         errno = ENAMETOOLONG;
                         PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
-                        // Skip file
-                        continue;
+                        continue; //skip the file
                 }
 
                 /* Construct new path: append child to the parent. */

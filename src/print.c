@@ -106,7 +106,7 @@ static char * error_code_to_str(error_code_t e1)
                 break;
 
         case E_IDX:
-                snprintf(msg, MAX_STR_LEN, "index");
+                snprintf(msg, MAX_STR_LEN, "file index");
                 break;
 
         default:
