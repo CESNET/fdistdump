@@ -1,5 +1,5 @@
 /**
- * \file vector.h
+ * \file vp_tree.h
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
  * \date 2017
@@ -43,42 +43,27 @@
  */
 
 
-#ifndef VECTOR_H
-#define VECTOR_H
+#ifndef VP_TREE_H
+#define VP_TREE_H
 
 
 #include "common.h"
+#include "metric_space.h"
+
+#include <stddef.h>
 
 
-struct vector {
-        void *data; //data storage
-        size_t size; //number of data elements
-
-        size_t capacity; //number of allocated data elements
-        size_t element_size; //element size in bytes
-
-        //void *it_begin; //iterator begin
-        //void *it_end; //iterator end
-};
+struct vp_node; //forward declaration
 
 
-/* Initialize vector structure. */
-void vector_init(struct vector *v, size_t element_size);
+struct vp_node * vp_tree_init(struct point *points_data, size_t points_size);
+void vp_tree_free(struct vp_node *root);
 
-/* Free all allocated memory and clear all settings. */
-void vector_free(struct vector *v);
+void vp_tree_range_query(const struct vp_node *root, const struct point *p,
+                double range);
 
-/* Reserve (allocate) capacity for desired number of elements. */
-void vector_reserve(struct vector *v, size_t capacity);
-
-/* Add a new element into the vector. */
-bool vector_add(struct vector *v, const void *element);
-
-/* Concatenate two *different* vectors, append the src to the dest. */
-void vector_concat(struct vector *dest, const struct vector *src);
-
-/* Clear the vector but don't free allocated memory. */
-void vector_clear(struct vector *v);
+void vp_tree_print(const struct vp_node *root);
+size_t vp_tree_height(const struct vp_node *root);
 
 
-#endif //VECTOR_H
+#endif //VP_TREE_H

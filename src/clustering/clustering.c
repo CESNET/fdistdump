@@ -45,13 +45,14 @@
 
 #include "common.h"
 #include "clustering.h"
+#include "metric_space.h"
 #include "slave.h"
 #include "path_array.h"
 #include "vector.h"
 #include "output.h"
 #include "print.h"
 
-#include <string.h> //strlen()
+#include <string.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <time.h>
@@ -68,11 +69,6 @@
 #endif //_OPENMP
 #include <mpi.h>
 #include <libnf.h>
-
-
-#define CLUSTER_UNVISITED -1 //point wasn't visited by the algorithm yet
-#define CLUSTER_NOISE     0 //point doesn't belong to any cluster yet
-#define CLUSTER_FIRST     1 //first no-noise cluster
 
 
 /* Global variables. */
@@ -112,304 +108,6 @@ struct slave_task_ctx {
         lnf_rec_t *rec; //LNF record
 };
 
-/* Point's metadata. */
-/* TODO: cleanup the data types (int -> ssize_t etc.) */
-struct point_metadata {
-        size_t id;           //point ID
-        int cluster_id;      //ID of cluster the point belongs to
-
-        bool core;           //core point flag
-        size_t covered_by;   //ID of the representative covering this point
-        double quality;
-
-        bool representative; //representative point flag
-        size_t cov_cnt;      //number of point covered by this representative
-};
-
-/* Point's feature vector. */
-struct point_features {
-        uint16_t srcport;
-        uint16_t dstport;
-        uint8_t tcp_flags;
-        lnf_ip_t srcaddr;
-        lnf_ip_t dstaddr;
-        uint8_t proto;
-} __attribute__((packed));
-
-struct point {
-        struct point_metadata m;
-        struct point_features f;
-};
-
-struct distance {
-        size_t size;
-        bool have_matrix;
-        const struct point *point_data;
-        union {
-                double **matrix;
-                double *vector;
-        } data;
-};
-
-/**
- * \defgroup slave_fun Slave functions
- * @{
- */
-double distance_function(const struct point *point1, const struct point *point2)
-{
-        double distance = 6.0;
-
-        /* After the logical negation, 0 means different, 1 means same. */
-        /* Ports: */
-        distance -= (point1->f.srcport == point2->f.srcport);
-        distance -= (point1->f.dstport == point2->f.dstport);
-
-        /* TCP flags: */
-        distance -= (point1->f.tcp_flags == point2->f.tcp_flags);
-
-        /* Addresses: */
-        distance -= !memcmp(&point1->f.srcaddr, &point2->f.srcaddr,
-                        sizeof (point1->f.srcaddr));
-        distance -= !memcmp(&point1->f.dstaddr, &point2->f.dstaddr,
-                        sizeof (point1->f.dstaddr));
-
-        /* Protocol: */
-        distance -= (point1->f.proto == point2->f.proto);
-
-        return distance / 6.0;
-}
-
-double distance_function_rand(const struct point *point1, const struct point *point2)
-{
-        (void)point1;
-        (void)point2;
-        //srand(time(NULL));
-        return (double)rand() / RAND_MAX;
-}
-
-
-/*
- * Distance matrix with a following properties:
- * 1. the entries on the main diagonal are all zero                 x[i][i] == 0
- * 2. the matrix is a symmetric matrix                        x[i][j] == x[j][i]
- * 3. the triangle inequality             for all k x[i][j] <= x[i][k] + x[k][j]
- */
-static void distance_init(struct distance *d, size_t size,
-                const struct point *point_data)
-{
-        assert(d != NULL);
-        d->size = size;
-        d->point_data = point_data;
-
-        /* Allocate space for one row of pointers plus row * row dist matrix. */
-        d->data.matrix = malloc_wr(d->size * sizeof (double *) +
-                        (d->size * d->size * sizeof (double)), 1, false);
-
-        if (d->data.matrix == NULL) {
-                PRINT_WARNING(E_MEM, 0, "not enough memory for distance matrix, falling back to on-demand calculation");
-
-                /* Allocate only one row for distance vector. */
-                d->data.vector = malloc_wr(d->size , sizeof (double), true);
-                d->have_matrix = false;
-        } else {
-                for (size_t i = 0; i < d->size; ++i) {
-                        d->data.matrix[i] = (double *)(d->data.matrix +
-                                        d->size + (i * d->size));
-                }
-                d->have_matrix = true;
-        }
-}
-
-/* Free the distance structure. */
-static void distance_free(struct distance *d)
-{
-        assert(d != NULL);
-        if (d->have_matrix) {
-                free(d->data.matrix);
-        } else {
-                free(d->data.vector);
-        }
-}
-
-/* Fill the distance matrix. */
-static void distance_fill(struct distance *d)
-{
-        assert(d != NULL);
-        if (!d->have_matrix) { //no distance matrix, only distance vector
-                return;
-        }
-
-        #pragma omp parallel for schedule(guided) firstprivate(d)
-        for (size_t i = 0; i < d->size; ++i) {
-                d->data.matrix[i][i] = 0.0; //property 1
-
-                for (size_t j = 0; j < i; ++j) {
-                        const double distance = distance_function(
-                                        d->point_data + i, d->point_data + j);
-
-                        d->data.matrix[i][j] = distance;
-                        d->data.matrix[j][i] = distance; //property 2: symmetry
-                }
-        }
-}
-
-static const double * distance_get_vector(const struct distance *d,
-                const struct point *point)
-{
-        assert(d != NULL);
-
-        if (d->have_matrix) {
-                return d->data.matrix[point->m.id];
-        } else {
-                #pragma omp parallel for firstprivate(d, point)
-                for (size_t i = 0; i < d->size; ++i) {
-                        d->data.vector[i] = distance_function(point,
-                                        d->point_data + i);
-                }
-                return d->data.vector;
-        }
-}
-
-static void distance_print(const struct distance *d)
-{
-        assert(d != NULL);
-        if (!d->have_matrix) { //no distance matrix, only distance vector
-                return;
-        }
-
-        for (size_t i = 0; i < d->size; ++i) {
-                for (size_t j = 0; j < d->size; ++j) {
-                        printf("%.1f ", d->data.matrix[i][j]);
-                }
-                putchar('\n');
-        }
-}
-
-/*
- * Check if the distance matrix properties are true:
- * 1. the entries on the main diagonal are all zero                 x[i][i] == 0
- * 2. the matrix is a symmetric matrix                        x[i][j] == x[j][i]
- * 3. the triangle inequality             for all k x[i][j] <= x[i][k] + x[k][j]
- */
-static bool distance_validate(const struct distance *d)
-{
-        bool ret = true;
-
-        assert(d != NULL);
-        if (!d->have_matrix) { //no distance matrix, only distance vector
-                return true;
-        }
-
-        #pragma omp parallel for firstprivate(d)
-        for (size_t i = 0; i < d->size; ++i) {
-openmp_break:
-                if (!ret) {
-                        continue; //cannot break from OpenMP for
-                }
-
-                if (d->data.matrix[i][i] != 0.0) {
-                        PRINT_INFO("distance matrix check: "
-                                        "non-zero entry on the main diagonal");
-                        ret = false;
-                        goto openmp_break;
-                }
-
-                for (size_t j = 0; j < d->size; ++j) {
-                        if (d->data.matrix[i][j] != d->data.matrix[i][j]) {
-                                PRINT_INFO("distance matrix check: "
-                                                "matrix is not symmetric");
-                                ret = false;
-                                goto openmp_break;
-                        }
-
-                        for (size_t k = 0; k < d->size; ++k) {
-                                if (d->data.matrix[i][j] > d->data.matrix[i][k] +
-                                                d->data.matrix[k][j]) {
-                                        PRINT_INFO("distance matrix check: "
-                                                        "triangle inequality property is not satisfied");
-                                        ret = false;
-                                        goto openmp_break;
-                                }
-                        }
-                }
-        }
-
-        return ret;
-}
-
-
-static void point_metadata_clear(struct point_metadata *pm)
-{
-        memset(pm, 0, sizeof (*pm));
-        //pm->id = 0;
-        pm->cluster_id = CLUSTER_UNVISITED;
-        //pm->core = false;
-        pm->covered_by = SIZE_MAX;
-        //pm->quality = 0.0;
-
-        //pm->representative = false;
-        pm->cov_cnt = 1;
-}
-
-static void point_metadata_print(const struct point_metadata *pm)
-{
-        printf("id = %zu, cluster_id = %d, core = %d, covered_by = %zu, "
-                        "quality = %f, representative = %d, cov_cnt = %zu",
-                        pm->id,
-                        pm->cluster_id,
-                        pm->core,
-                        pm->covered_by,
-                        pm->quality,
-                        pm->representative,
-                        pm->cov_cnt);
-}
-
-static void point_features_print(const struct point_features *pf)
-{
-        printf("%s", sprint_rec((const uint8_t *)pf));
-}
-
-static void point_print(const struct point *p)
-{
-        point_metadata_print(&p->m);
-        putchar('\t');
-        point_features_print(&p->f);
-        putchar('\n');
-}
-
-/*
- * Eps-neighborhood is an open set (i.e. <, not <=).
- * This function fills eps_vec with all unvisited and noise points within a
- * point's eps-neighborhood (including the point itsef).
- */
-static size_t point_eps_neigh(struct point *point,
-                const struct vector *point_vec, struct vector *eps_vec,
-                struct distance *distance)
-{
-        size_t cov_cnt_sum = 0;
-        const double *distance_vector = distance_get_vector(distance, point);
-
-        /* Clear the result vector. */
-        vector_clear(eps_vec);
-
-        /* Find and store eps-neighbors of a certain point. */
-        for (size_t i = 0; i < point_vec->size; ++i) {
-                const double dist = distance_vector[i];
-
-                if (dist < global_eps) {
-                        struct point *neigbor =
-                                (struct point *)point_vec->data + i;
-
-                        cov_cnt_sum += neigbor->m.cov_cnt;
-                        if (neigbor->m.covered_by == SIZE_MAX) {
-                                vector_add(eps_vec, &neigbor);
-                        }
-                }
-        }
-
-        return cov_cnt_sum;
-}
-
 
 /* Mark the points in eps_vec as covered by an id. */
 static void mark_covered(const size_t id, struct vector *eps_vec)
@@ -443,27 +141,28 @@ static int dbscan(const struct vector *point_vec, struct distance *distance)
                 if (point->m.cluster_id != CLUSTER_UNVISITED) {
                         /* The point is a noise or already in some cluster. */
                         PRINT_DEBUG("base point %zu: already part of cluster %d",
-                                        point->m.id, point->m.cluster_id);
+                                        point->id, point->m.cluster_id);
                         continue;
                 }
 
-                cov_pts = point_eps_neigh(point, point_vec, &seeds, distance);
+                cov_pts = point_eps_neigh(point, point_vec, &seeds, distance,
+                                global_eps);
 
                 if (cov_pts < global_min_pts) {
                         /* The point is a noise, this may be chaged later. */
                         PRINT_DEBUG("base point %zu: noise covering %zu points",
-                                        point->m.id, cov_pts);
+                                        point->id, cov_pts);
                         point->m.cluster_id = CLUSTER_NOISE;
                         vector_clear(&seeds);
                         continue;
                 }
 
                 /* The point is a core point of a new cluster, expand it. */
-                mark_covered(point->m.id, &seeds);
+                mark_covered(point->id, &seeds);
                 point->m.cluster_id = cluster_id;
                 point->m.core = true;
                 PRINT_DEBUG("base point %zu: new cluster %d, core point covering %zu points",
-                                point->m.id, point->m.cluster_id, cov_pts);
+                                point->id, point->m.cluster_id, cov_pts);
 
                 /* Loop through the seed points (*growing* vector). */
                 for (size_t j = 0; j < seeds.size; ++j) {
@@ -472,26 +171,27 @@ static int dbscan(const struct vector *point_vec, struct distance *distance)
                         if (seed->m.cluster_id == CLUSTER_UNVISITED) {
                                 seed->m.cluster_id = cluster_id;
                                 cov_pts = point_eps_neigh(seed, point_vec,
-                                                &neighbors, distance);
+                                                &neighbors, distance,
+                                                global_eps);
 
                                 if (cov_pts >= global_min_pts) { //core point
                                         PRINT_DEBUG("seed %zu: core point covering %zu points (%zu new)",
-                                                        seed->m.id, cov_pts, neighbors.size);
+                                                        seed->id, cov_pts, neighbors.size);
                                         seed->m.core = true;
-                                        mark_covered(seed->m.id, &neighbors);
+                                        mark_covered(seed->id, &neighbors);
                                         vector_concat(&seeds, &neighbors);
                                 } else { //border point
                                         PRINT_DEBUG("seed %zu: border point covering %zu points (%zu new)",
-                                                        seed->m.id, cov_pts, neighbors.size);
+                                                        seed->id, cov_pts, neighbors.size);
                                 }
                         } else if (seed->m.cluster_id == CLUSTER_NOISE) {
                                 /* The point was a noise, but isn't anymore. */
                                 seed->m.cluster_id = cluster_id;
                                 PRINT_DEBUG("seed %zu: border point, former noise",
-                                                seed->m.id);
+                                                seed->id);
                         } else { /* The point was already part of some cluster. */
                                 PRINT_DEBUG("seed %zu: already part of cluster %d",
-                                                seed->m.id, seed->m.cluster_id);
+                                                seed->id, seed->m.cluster_id);
                         }
                 }
 
@@ -550,7 +250,7 @@ static size_t local_model_cluster(struct point *cluster[], size_t cluster_size,
                 repr->m.quality = 0.0;
                 for (size_t j = 0; j < cluster_size; ++j) {
                         const struct point *point = cluster[j];
-                        const double dist = repr_distance[point->m.id];
+                        const double dist = repr_distance[point->id];
 
                         if (dist < global_eps) {
                                 repr->m.quality += global_eps - dist;
@@ -591,7 +291,7 @@ static size_t local_model_cluster(struct point *cluster[], size_t cluster_size,
                                                 cand);
                                 for (size_t j = 0; j < repr_cnt; ++j) {
                                         const double dist =
-                                                cand_distance[cluster[j]->m.id];
+                                                cand_distance[cluster[j]->id];
 
                                         /* Is repr. directly density reachable? */
                                         if (dist < global_eps) {
@@ -616,7 +316,7 @@ static size_t local_model_cluster(struct point *cluster[], size_t cluster_size,
                 /* Loop through the representative's neighbors. */
                 for (size_t i = repr_cnt; i < cluster_size; ++i) {
                         struct point *repr_nbr = cluster[i];
-                        double dist = repr_distance[repr_nbr->m.id];
+                        double dist = repr_distance[repr_nbr->id];
 
                         if (dist >= global_eps || repr_nbr->m.covered_by !=
                                         SIZE_MAX) {
@@ -624,7 +324,7 @@ static size_t local_model_cluster(struct point *cluster[], size_t cluster_size,
                                 continue;
                         }
 
-                        repr_nbr->m.covered_by = repr->m.id;
+                        repr_nbr->m.covered_by = repr->id;
                         repr->m.cov_cnt++;
                         const double *repr_nbr_distance =
                                 distance_get_vector(distance, repr_nbr);
@@ -632,7 +332,7 @@ static size_t local_model_cluster(struct point *cluster[], size_t cluster_size,
                          * neighbors. */
                         for (size_t j = 0; j < cluster_size; ++j) {
                                 struct point *repr_nbr_nbr = cluster[j];
-                                dist = repr_nbr_distance[repr_nbr_nbr->m.id];
+                                dist = repr_nbr_distance[repr_nbr_nbr->id];
 
                                 if (dist < global_eps) {
                                         repr_nbr_nbr->m.quality -=
@@ -773,7 +473,7 @@ static size_t global_model_recv(const struct vector *repr_vec,
 
                                 assert(global_cluster_id >= CLUSTER_NOISE);
                                 MAX_ASSIGN(cluster_cnt, (size_t)global_cluster_id);
-                                cluster_id_map[repr->m.id] = global_cluster_id;
+                                cluster_id_map[repr->id] = global_cluster_id;
                                 break;
                         }
 
@@ -800,21 +500,126 @@ static void global_model_relabel(struct vector *point_vec,
 }
 
 
+static error_code_t read_file(struct slave_task_ctx *stc,
+                struct vector *point_vec)
+{
+        error_code_t error_code = E_OK;
+        int ret;
+
+        const struct {
+                int lnf_field;
+                size_t offset;
+        } features[] = {
+                {LNF_FLD_SRCPORT, offsetof(struct point_features, srcport) },
+                {LNF_FLD_DSTPORT, offsetof(struct point_features, dstport) },
+                {LNF_FLD_TCP_FLAGS, offsetof(struct point_features, tcp_flags) },
+                {LNF_FLD_SRCADDR, offsetof(struct point_features, srcaddr) },
+                {LNF_FLD_DSTADDR, offsetof(struct point_features, dstaddr) },
+                {LNF_FLD_PROT, offsetof(struct point_features, proto) }
+        };
+
+        /**********************************************************************/
+        /* Initialize a LNF aggregation memory. */
+        lnf_mem_t *mem;
+        ret = lnf_mem_init(&mem);
+        if (ret != LNF_OK) {
+                PRINT_ERROR(E_LNF, ret, "lnf_mem_init()");
+                return E_LNF;
+        }
+        /* Add a flows/duplicity counter and all features as keys. */
+        lnf_mem_fadd(mem, LNF_FLD_AGGR_FLOWS, LNF_AGGR_SUM, 0, 0);
+        for (size_t i = 0; i < ARRAY_SIZE(features); ++i) {
+                ret = lnf_mem_fadd(mem, features[i].lnf_field, LNF_AGGR_KEY, 32,
+                                128);
+                if (ret != LNF_OK) {
+                        error_code = E_LNF;
+                        PRINT_ERROR(error_code, ret, "lnf_mem_fadd()");
+                        goto free_lnf_mem;
+                }
+        }
+
+        /**********************************************************************/
+        /* Write all records into the memory, aggregate duplicates. */
+        size_t file_rec_cntr = 0;
+        size_t file_proc_rec_cntr = 0;
+        while ((ret = lnf_read(stc->file, stc->rec)) == LNF_OK) {
+                file_rec_cntr++;
+
+                /* Apply the filter (if there is any). */
+                if (stc->filter && !lnf_filter_match(stc->filter, stc->rec)) {
+                        continue;
+                }
+                file_proc_rec_cntr++;
+
+                ret = lnf_mem_write(mem, stc->rec);
+                if (ret != LNF_OK) {
+                        error_code = E_LNF;
+                        PRINT_ERROR(error_code, ret, "lnf_mem_write()");
+                        break;
+                }
+
+        }
+        /* Check if we reach end of the file. */
+        if (ret != LNF_EOF) {
+                PRINT_WARNING(E_LNF, ret, "EOF wasn't reached");
+        }
+
+        /**********************************************************************/
+        /* Read the deduplicated records from the memory, write to the vector.*/
+
+        /* Reserve a space according to the medatada?
+         * size_t flows_cnt_meta;
+         * assert(lnf_info(stc->file, LNF_INFO_FLOWS, &flows_cnt_meta,
+         *                         sizeof (flows_cnt_meta)) == LNF_OK);
+         * vector_reserve(point_vec, flows_cnt_meta);
+         */
+
+        /* Sample?
+         * const size_t rec_max = 1000000;
+         * const double probability = (double)rec_max / flows_cnt_meta * RAND_MAX;
+         * if (rand() > probability) {
+         *         continue;
+         * }
+         */
+
+        size_t mem_rec_cntr = 0;
+        size_t aggr_flows_sum = 0; //only for assertion
+        lnf_mem_cursor_t *cursor = NULL;
+        for (lnf_mem_first_c(mem, &cursor); cursor != NULL;
+                        lnf_mem_next_c(mem, &cursor))
+        {
+                lnf_mem_read_c(mem, cursor, stc->rec);
+
+                struct point point; //data point
+                point_metadata_clear(&point.m);
+                point.id = mem_rec_cntr++;
+
+                lnf_rec_fget(stc->rec, LNF_FLD_AGGR_FLOWS, &point.m.cov_cnt);
+                for (size_t i = 0; i < ARRAY_SIZE(features); ++i) {
+                        lnf_rec_fget(stc->rec, features[i].lnf_field,
+                                        (uint8_t *)&point.f + features[i].offset);
+                }
+
+                aggr_flows_sum += point.m.cov_cnt;
+                vector_add(point_vec, &point);
+        }
+        assert(aggr_flows_sum == file_proc_rec_cntr);
+        PRINT_INFO("read: %zu, processed: %zu, unique key: %zu (%f %)",
+                        file_rec_cntr, file_proc_rec_cntr, mem_rec_cntr,
+                        (double)mem_rec_cntr / file_proc_rec_cntr * 100.0);
+
+free_lnf_mem:
+        lnf_mem_free(mem);
+
+        return error_code;
+}
+
 static error_code_t clusterize(struct slave_task_ctx *stc)
 {
         error_code_t primary_errno = E_OK;
-        int secondary_errno;
-
-        size_t file_rec_cntr = 0;
-        size_t file_proc_rec_cntr = 0;
-        size_t flows_cnt_meta;
-
-        struct point point; //data point
-        struct vector point_vec; //set of data points
-
-        struct distance distance;
 
         /**********************************************************************/
+        /* Setup output (temporary). */
         struct output_params op;
         struct field_info fi[LNF_FLD_TERM_];
 
@@ -833,63 +638,27 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         fi[LNF_FLD_PROT].id = LNF_FLD_PROT;
 
         output_setup(op, fi);
+
         /**********************************************************************/
-
-
+        /* Read and deduplicate all records from the file into the vector. */
+        struct vector point_vec; //set of data points
         vector_init(&point_vec, sizeof (struct point));
-        assert(lnf_info(stc->file, LNF_INFO_FLOWS, &flows_cnt_meta,
-                                sizeof (flows_cnt_meta)) == LNF_OK);
-        vector_reserve(&point_vec, flows_cnt_meta);
-
-
-        /**********************************************************************/
-        /* Read all records from the file. */
-        //const size_t rec_max = 1000000;
-        //const double probability = (double)rec_max / flows_cnt_meta * RAND_MAX;
-        while ((secondary_errno = lnf_read(stc->file, stc->rec)) == LNF_OK) {
-                //if (rand() > probability) {
-                //        continue;
-                //}
-                file_rec_cntr++;
-
-                /* Apply filter (if there is any). */
-                if (stc->filter && !lnf_filter_match(stc->filter, stc->rec)) {
-                        continue;
-                }
-                file_proc_rec_cntr++;
-
-                point_metadata_clear(&point.m);
-                point.m.id = file_rec_cntr - 1; //start from 0
-
-                lnf_rec_fget(stc->rec, LNF_FLD_SRCPORT, &point.f.srcport);
-                lnf_rec_fget(stc->rec, LNF_FLD_DSTPORT, &point.f.dstport);
-                lnf_rec_fget(stc->rec, LNF_FLD_TCP_FLAGS, &point.f.tcp_flags);
-                lnf_rec_fget(stc->rec, LNF_FLD_SRCADDR, &point.f.srcaddr);
-                lnf_rec_fget(stc->rec, LNF_FLD_DSTADDR, &point.f.dstaddr);
-                lnf_rec_fget(stc->rec, LNF_FLD_PROT, &point.f.proto);
-
-                vector_add(&point_vec, &point);
-        }
-        /* Check if we reach end of the file. */
-        if (secondary_errno != LNF_EOF) {
-                PRINT_WARNING(E_LNF, secondary_errno, "EOF wasn't reached");
-        }
-        PRINT_DEBUG("read %zu, processed %zu", file_rec_cntr,
-                        file_proc_rec_cntr);
-
+        read_file(stc, &point_vec);
 
         /**********************************************************************/
         /* Create and fill distance matrix. */
-        distance_init(&distance, point_vec.size, (struct point *)point_vec.data);
-        distance_fill(&distance);
-        //distance_print(&distance);
-        //distance_validate(&distance);
+        struct distance *distance = distance_init(point_vec.size,
+                        (struct point *)point_vec.data);
+        distance_fill(distance);
+        //distance_print(distance);
+        //distance_validate(distance);
+        //distance_pmf(distance);
 
         /**********************************************************************/
         /* DBSCAN */
-        const size_t local_cluster_cnt = dbscan(&point_vec, &distance);
+        const size_t local_cluster_cnt = dbscan(&point_vec, distance);
         if (stc->slave_cnt == 1) {
-                dbscan_print(&point_vec);
+                //dbscan_print(&point_vec);
                 goto finish;
         }
 
@@ -906,7 +675,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         struct vector repr_vec;
         vector_init(&repr_vec, sizeof (struct point *));
 
-        local_model(&repr_vec, &point_vec, &distance, local_cluster_cnt);
+        local_model(&repr_vec, &point_vec, distance, local_cluster_cnt);
         //local_model_print(&point_vec, local_cluster_cnt);
         local_model_send(&repr_vec);
 
@@ -928,7 +697,7 @@ static error_code_t clusterize(struct slave_task_ctx *stc)
         /**********************************************************************/
 finish:
         /* Free the memory. */
-        distance_free(&distance);
+        distance_free(distance);
         vector_free(&point_vec);
 
         return primary_errno;
@@ -1051,7 +820,7 @@ error_code_t clustering_slave(int world_size)
         /* Wait for reception of task context from master. */
         primary_errno = task_receive_ctx(&stc);
         if (primary_errno != E_OK) {
-                goto finalize_task;
+                goto finalize;
         }
 
         /* Data source specific initialization. */
@@ -1059,17 +828,18 @@ error_code_t clustering_slave(int world_size)
                         stc.shared.time_end, &paths_cnt);
         if (paths == NULL) {
                 primary_errno = E_PATH;
-                goto finalize_task;
+                goto finalize;
         }
 
 
         primary_errno = process(&stc, paths, paths_cnt);
 
 
-finalize_task:
+finalize:
         path_array_free(paths, paths_cnt);
         task_free(&stc);
 
+        MPI_Barrier(MPI_COMM_WORLD); //for time measurement
         return primary_errno;
 }
 /**
@@ -1164,7 +934,7 @@ static void local_model_recv(struct vector *point_vec)
 
                 const size_t cov_cnt = point.m.cov_cnt;
                 point_metadata_clear(&point.m);
-                point.m.id = i;
+                point.id = i;
                 point.m.cov_cnt = cov_cnt;
                 vector_add(point_vec, &point);
         }
@@ -1198,7 +968,7 @@ error_code_t clustering_master(int world_size, const struct cmdline_args *args)
         }
 
         if (mtc.slave_cnt == 1) {
-                return primary_errno;
+                goto finalize;
         }
 
         /**********************************************************************/
@@ -1232,16 +1002,16 @@ error_code_t clustering_master(int world_size, const struct cmdline_args *args)
 
         /**********************************************************************/
         /* Create and fill distance matrix. */
-        struct distance distance;
-        distance_init(&distance, point_vec.size, (struct point *)point_vec.data);
-        distance_fill(&distance);
-        //distance_validate(&distance);
-        //distance_print(&distance);
+        struct distance *distance = distance_init(point_vec.size,
+                        (struct point *)point_vec.data);
+        distance_fill(distance);
+        //distance_validate(distance);
+        //distance_print(distance);
 
 
         /**********************************************************************/
         /* DBSCAN */
-        const size_t cluster_cnt = dbscan(&point_vec, &distance);
+        const size_t cluster_cnt = dbscan(&point_vec, distance);
         //dbscan_print(&point_vec);
         //global_model_print(&point_vec, cluster_cnt);
         global_model_send(&point_vec);
@@ -1249,11 +1019,14 @@ error_code_t clustering_master(int world_size, const struct cmdline_args *args)
 
         /**********************************************************************/
         /* Free the memory. */
-        distance_free(&distance);
+        distance_free(distance);
         vector_free(&point_vec);
 
 
+finalize:
+        MPI_Barrier(MPI_COMM_WORLD);
         duration += MPI_Wtime(); //end time measurement
+        PRINT_INFO("duration: %f", duration);
 
         return primary_errno;
 }

@@ -219,6 +219,11 @@ struct shared_task_ctx {
                  _a > _b ? _a : _b; \
          })
 #endif
+
+//generic swap, macro-local variable is called the same as the macro to avoid
+//shadowing some caller-local variable, or causing a bug if that variable is
+//passed in as an argument
+#define SWAP(a, b, type) do { type SWAP = a; a = b; b = SWAP; } while (0)
 /**
  * @}
  */ //func_like_macros

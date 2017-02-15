@@ -1,15 +1,18 @@
 #fdistdump binary
 bin_PROGRAMS=fdistdump
-fdistdump_SOURCES=src/main.c \
-		  src/master.c src/master.h \
-		  src/slave.c src/slave.h \
-		  src/common.c src/common.h \
-		  src/arg_parse.c src/arg_parse.h \
-		  src/path_array.c src/path_array.h \
-		  src/output.c src/output.h \
-		  src/print.c src/print.h \
-		  src/clustering.c src/clustering.h \
-		  src/vector.h
+fdistdump_base=src/main.c \
+	       src/master.c src/master.h \
+	       src/slave.c src/slave.h \
+	       src/common.c src/common.h \
+	       src/arg_parse.c src/arg_parse.h \
+	       src/path_array.c src/path_array.h \
+	       src/output.c src/output.h \
+	       src/print.c src/print.h \
+	       src/vector.c src/vector.h
+fdistdump_clustering=src/clustering/clustering.c src/clustering/clustering.h \
+		     src/clustering/metric_space.c src/clustering/metric_space.h \
+		     src/clustering/vp_tree.c src/clustering/vp_tree.h
+fdistdump_SOURCES=$(fdistdump_base) $(fdistdump_clustering)
 
 
 #define variables for tests

@@ -45,7 +45,7 @@
 #include "common.h"
 #include "master.h"
 #include "slave.h"
-#include "clustering.h"
+#include "clustering/clustering.h"
 #include "arg_parse.h"
 #include "print.h"
 
