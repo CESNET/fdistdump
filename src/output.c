@@ -43,6 +43,13 @@
  */
 
 
+/*
+ * XXX: Define System V source as a workaround of the "IN6_IS_ADDR_UNSPECIFIED
+ * can use undefined s6_addr32" GNU C library bug (fixed in version 2.25).
+ * https://sourceware.org/bugzilla/show_bug.cgi?id=16421
+ */
+#define _SVID_SOURCE
+
 #include "common.h"
 #include "output.h"
 #include "print.h"
