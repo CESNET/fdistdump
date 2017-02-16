@@ -50,6 +50,10 @@ AC_SEARCH_LIBS([MPI_Put], [mpi], [],
 ##check version 3
 AC_SEARCH_LIBS([MPI_Ibarrier], [mpi]) #version 3 not needed
 
+##libbfindex (Bloom filter indexing)
+AC_SEARCH_LIBS([bfi_init_index], [bfindex], [], [AC_MSG_ERROR([unable to find \
+                bfindex library])])
+
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h inttypes.h limits.h stddef.h stdlib.h string.h \

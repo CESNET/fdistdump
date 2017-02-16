@@ -7,8 +7,8 @@ fdistdump_SOURCES=src/main.c \
 		  src/arg_parse.c src/arg_parse.h \
 		  src/path_array.c src/path_array.h \
 		  src/output.c src/output.h \
-		  src/print.c src/print.h
-
+		  src/print.c src/print.h \
+		  src/file_index/file_index.c src/file_index/file_index.h
 
 #define variables for tests
 TESTS=
