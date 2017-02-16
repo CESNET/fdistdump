@@ -43,8 +43,7 @@
  *
  */
 
-#ifndef _FDD_FILE_INDEX_H
-#define _FDD_FILE_INDEX_H
+#pragma once
 
 
 #include "common.h"
@@ -100,6 +99,3 @@ void fidx_destroy_tree(struct fidx_ip_tree_node **fidx_ip_tree_node);
  *         tree.
  */
 bool fidx_ips_in_file(const char *path, struct fidx_ip_tree_node *ip_tree);
-
-
-#endif // _FDD_FILE_INDEX_H

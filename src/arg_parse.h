@@ -2,7 +2,7 @@
  * \file arg_parse.h
  * \brief
  * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+ * \date 2017
  */
 
 /*
@@ -42,8 +42,8 @@
  *
  */
 
-#ifndef ARG_PARSE_H
-#define ARG_PARSE_H
+#pragma once
+
 
 #include "common.h"
 #include "output.h"
@@ -97,5 +97,3 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
  *                   program settings.
  */
 void arg_free(struct cmdline_args *args);
-
-#endif //ARG_PARSE_H

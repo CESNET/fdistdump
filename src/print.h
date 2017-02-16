@@ -42,9 +42,7 @@
  *
  */
 
-
-#ifndef PRINT_H
-#define PRINT_H
+#pragma once
 
 
 #include "config.h"
@@ -122,6 +120,3 @@ extern verbosity_t verbosity;
  */
 void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
                 const char *func, const int line, ...);
-
-
-#endif //PRINT_H

@@ -43,8 +43,8 @@
  *
  */
 
-#ifndef SLAVE_H
-#define SLAVE_H
+#pragma once
+
 
 #include "common.h"
 
@@ -58,5 +58,3 @@
  * \return Error code.
  */
 error_code_t slave(int world_size);
-
-#endif //SLAVE_H

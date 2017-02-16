@@ -43,8 +43,8 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#pragma once
+
 
 #include "common.h"
 #include "arg_parse.h"
@@ -58,5 +58,3 @@
  * \return Error code.
  */
 error_code_t master(int world_size, const struct cmdline_args *args);
-
-#endif //MASTER_H

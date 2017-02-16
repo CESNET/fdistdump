@@ -42,9 +42,8 @@
  *
  */
 
+#pragma once
 
-#ifndef COMMON_H
-#define COMMON_H
 
 #include "config.h"
 
@@ -280,6 +279,3 @@ time_t mktime_utc(struct tm *tm);
 
 int field_get_type(int field);
 size_t field_get_size(int field);
-
-
-#endif //COMMON_H
