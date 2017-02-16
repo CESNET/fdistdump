@@ -1,8 +1,4 @@
-/**
- * \file common.h
- * \brief Common fdistdump prototypes, macros, data types, enumerations, etc.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Various macros and declarations needed in multiple translation units.
  */
 
 /*

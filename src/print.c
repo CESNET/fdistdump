@@ -1,8 +1,4 @@
-/**
- * \file print.c
- * \brief Implementation of console message printing.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Implementation of console message printing (debug,info,warning, error).
  */
 
 /*

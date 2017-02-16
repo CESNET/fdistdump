@@ -1,8 +1,4 @@
-/**
- * \file print.h
- * \brief Header file for console message printing.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Declarations for console message printing (debug,info,warning, error).
  */
 
 /*

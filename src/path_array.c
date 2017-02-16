@@ -1,9 +1,4 @@
-/**
- * \file path_array.c
- * \brief
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Preprocessing and generating array of paths from string or time range.
  */
 
 /*

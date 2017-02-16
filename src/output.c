@@ -1,8 +1,4 @@
-/**
- * \file output.c
- * \brief Implementation of functions for printing records and fields.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+/** Functions for printing IP flow records and fields.
  */
 
 /*

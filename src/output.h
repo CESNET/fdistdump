@@ -1,8 +1,4 @@
-/**
- * \file output.h
- * \brief Prototypes of functions for printing records and fields.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+/** Declarations for printing IP flow records and fields.
  */
 
 /*

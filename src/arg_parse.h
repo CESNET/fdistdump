@@ -1,8 +1,4 @@
-/**
- * \file arg_parse.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
+/** Argument parsing declarations.
  */
 
 /*

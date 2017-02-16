@@ -1,9 +1,4 @@
-/**
- * \file master.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+/** Master process query declarations.
  */
 
 /*

@@ -1,12 +1,8 @@
-/**
- * \file file_index.c
- * \brief File file-indexing using Bloom filter indexes for IP addresses
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2016
+/** File-indexing using Bloom filter indexes for IP addresses.
  */
 
 /*
- * Copyright (C) 2016 CESNET
+ * Copyright (C) 2017 CESNET
  *
  * LICENSE TERMS
  *

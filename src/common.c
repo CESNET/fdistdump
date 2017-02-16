@@ -1,8 +1,4 @@
-/**
- * \file common.c
- * \brief Implementation of common fdistdump functionality.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Various functions and variables needed in multiple translation units.
  */
 
 /*
