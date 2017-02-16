@@ -1,8 +1,4 @@
-/**
- * \file output.h
- * \brief Prototypes of functions for printing records and fields.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+/** Declarations for printing IP flow records and fields.
  */
 
 /*
@@ -42,9 +38,7 @@
  *
  */
 
-
-#ifndef OUTPUT_H
-#define OUTPUT_H
+#pragma once
 
 
 #include "common.h"
@@ -130,6 +124,3 @@ const char * sprint_rec(const uint8_t *data);
 error_code_t print_mem(lnf_mem_t *mem, size_t limit);
 void print_processed_summ(const struct processed_summ *s, double duration);
 void print_metadata_summ(const struct metadata_summ *s);
-
-
-#endif //OUTPUT_H

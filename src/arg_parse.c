@@ -1,8 +1,4 @@
-/**
- * \file arg_parse.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+/** Argument parsing and usage/help printing implementation.
  */
 
 /*
@@ -41,7 +37,6 @@
  * if advised of the possibility of such damage.
  *
  */
-
 
 #define _XOPEN_SOURCE //strptime()
 

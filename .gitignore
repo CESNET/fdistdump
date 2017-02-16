@@ -17,7 +17,7 @@ Makefile
 /config.log
 /config.status
 /stamp-h1
-/src/.dirstamp
+.dirstamp
 
 #vim
 *~

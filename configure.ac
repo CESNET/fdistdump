@@ -14,9 +14,12 @@ AC_PROG_AWK
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 
+## Use only C11 (ISO/IEC 9899:2011) and POSIX 200809L (IEEE 1003.1-2008).
+CFLAGS="-std=c11 -D_POSIX_C_SOURCE=200809L"
+CLFAGS="$CFLAGS -g -O3"
+
 ## Checks for MPI compiler.
 AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
-AC_PROG_CC_STDC #C99
 AM_PROG_CC_C_O #required by subdir-objects
 CFLAGS="$CFLAGS -pedantic -W -Wall -Wextra -Winit-self -Wcast-align \
 -Wcast-qual -Wmissing-include-dirs -Wshadow"
@@ -46,6 +49,10 @@ AC_SEARCH_LIBS([MPI_Put], [mpi], [],
                [AC_MSG_ERROR([need at least MPI-2.0 implementation])])
 ##check version 3
 AC_SEARCH_LIBS([MPI_Ibarrier], [mpi]) #version 3 not needed
+
+##libbfindex (Bloom filter indexing)
+AC_SEARCH_LIBS([bfi_init_index], [bfindex], [], [AC_MSG_ERROR([unable to find \
+                bfindex library])])
 
 
 # Checks for header files.

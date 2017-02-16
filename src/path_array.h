@@ -1,9 +1,4 @@
-/**
- * \file path_array.h
- * \brief
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Preprocessing and generating array of paths from string or time range.
  */
 
 /*
@@ -43,8 +38,7 @@
  *
  */
 
-#ifndef PATH_ARRAY_H
-#define PATH_ARRAY_H
+#pragma once
 
 
 #include <stddef.h> //size_t
@@ -55,6 +49,3 @@ char ** path_array_gen(char *paths, const struct tm begin,
                 const struct tm end, size_t *cnt);
 /* Free all file names and array. */
 void path_array_free(char **names, size_t names_cnt);
-
-
-#endif //PATH_ARRAY_H

@@ -1,8 +1,4 @@
-/**
- * \file main.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Program entry point with various initializations and master and slave split.
  */
 
 /*

@@ -1,8 +1,4 @@
-/**
- * \file common.h
- * \brief Common fdistdump prototypes, macros, data types, enumerations, etc.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Various macros and declarations needed in multiple translation units.
  */
 
 /*
@@ -42,9 +38,8 @@
  *
  */
 
+#pragma once
 
-#ifndef COMMON_H
-#define COMMON_H
 
 #include "config.h"
 
@@ -82,6 +77,7 @@ typedef enum { //error return codes
         E_INTERNAL, //internal
         E_ARG, //command line arguments
         E_PATH, //problem with access to file/directory
+        E_IDX, //indexing error
 } error_code_t;
 
 typedef enum { //working modes
@@ -304,6 +300,3 @@ size_t field_get_size(int field);
 void * malloc_wr(size_t nmemb, size_t size, bool abort);
 void * calloc_wr(size_t nmemb, size_t size, bool abort);
 void * realloc_wr(void *ptr, size_t nmemb, size_t size, bool abort);
-
-
-#endif //COMMON_H

@@ -1,5 +1,6 @@
 #fdistdump binary
 bin_PROGRAMS=fdistdump
+<<<<<<< HEAD
 fdistdump_base=src/main.c \
 	       src/master.c src/master.h \
 	       src/slave.c src/slave.h \
@@ -9,11 +10,12 @@ fdistdump_base=src/main.c \
 	       src/output.c src/output.h \
 	       src/print.c src/print.h \
 	       src/vector.c src/vector.h
+fdistdump_file_index=src/file_index/file_index.c src/file_index/file_index.h
 fdistdump_clustering=src/clustering/clustering.c src/clustering/clustering.h \
 		     src/clustering/metric_space.c src/clustering/metric_space.h \
 		     src/clustering/vp_tree.c src/clustering/vp_tree.h
-fdistdump_SOURCES=$(fdistdump_base) $(fdistdump_clustering)
-
+fdistdump_SOURCES=$(fdistdump_base) $(fdistdump_file_index) \
+		  $(fdistdump_clustering)
 
 #define variables for tests
 TESTS=

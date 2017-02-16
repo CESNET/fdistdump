@@ -1,8 +1,4 @@
-/**
- * \file print.h
- * \brief Header file for console message printing.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Declarations for console message printing (debug,info,warning, error).
  */
 
 /*
@@ -42,12 +38,11 @@
  *
  */
 
-
-#ifndef PRINT_H
-#define PRINT_H
+#pragma once
 
 
 #include "config.h"
+#include "common.h"
 
 
 typedef enum {
@@ -121,6 +116,3 @@ extern verbosity_t verbosity;
  */
 void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
                 const char *func, const int line, ...);
-
-
-#endif //PRINT_H

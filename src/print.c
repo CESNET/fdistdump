@@ -1,8 +1,4 @@
-/**
- * \file print.c
- * \brief Implementation of console message printing.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Implementation of console message printing (debug,info,warning, error).
  */
 
 /*
@@ -103,6 +99,10 @@ static char * error_code_to_str(error_code_t e1)
 
         case E_PATH:
                 snprintf(msg, MAX_STR_LEN, "path");
+                break;
+
+        case E_IDX:
+                snprintf(msg, MAX_STR_LEN, "file index");
                 break;
 
         default:
