@@ -1,12 +1,8 @@
-/**
- * \file vector.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
+/** General purpose vector data type.
  */
 
 /*
- * Copyright (C) 2015 CESNET
+ * Copyright (C) 2016 CESNET
  *
  * LICENSE TERMS
  *
@@ -42,7 +38,6 @@
  *
  */
 
-
 #include "vector.h"
 
 #include <string.h>
@@ -50,8 +45,8 @@
 
 
 #define VECTOR_INIT_CAPACITY 2
-#define VECTOR_DATA_END(vec) ((void *)((uint8_t *)(vec)->data + \
-			(vec)->size * (vec)->element_size))
+#define VECTOR_DATA_END(vec) ((void *)((uint8_t *)(vec)->data + (vec)->size * \
+                        (vec)->element_size))
 
 
 /* Initialize vector structure. */
@@ -117,12 +112,12 @@ bool vector_add(struct vector *v, const void *element)
 /* Concatenate two *different* vectors, append the src to the dest. */
 void vector_concat(struct vector *dest, const struct vector *src)
 {
-	assert(dest != src);
+        assert(dest != src);
         assert(dest->element_size == src->element_size);
 
-	vector_reserve(dest, dest->size + src->size);
+        vector_reserve(dest, dest->size + src->size);
         memcpy(VECTOR_DATA_END(dest), src->data, src->size * src->element_size);
-	dest->size += src->size;
+        dest->size += src->size;
 }
 
 /* Clear the vector but don't free allocated memory. */

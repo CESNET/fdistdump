@@ -1,8 +1,4 @@
-/**
- * \file clustering.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Master and slave IP flow cluster analysis functionality.
  */
 
 /*
@@ -41,7 +37,6 @@
  * if advised of the possibility of such damage.
  *
  */
-
 
 #include "common.h"
 #include "clustering.h"

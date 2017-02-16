@@ -1,6 +1,5 @@
 #fdistdump binary
 bin_PROGRAMS=fdistdump
-<<<<<<< HEAD
 fdistdump_base=src/main.c \
 	       src/master.c src/master.h \
 	       src/slave.c src/slave.h \

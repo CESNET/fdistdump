@@ -1,12 +1,9 @@
-/**
- * \file vp_tree.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
+/** Implementation of the Vantage-point tree, a metric space indexing data
+ * structure.
  */
 
 /*
- * Copyright (C) 2016 CESNET
+ * Copyright (C) 2017 CESNET
  *
  * LICENSE TERMS
  *
@@ -41,7 +38,6 @@
  * if advised of the possibility of such damage.
  *
  */
-
 
 #include "vp_tree.h"
 #include "print.h"

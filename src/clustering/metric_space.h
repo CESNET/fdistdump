@@ -1,12 +1,8 @@
-/**
- * \file metric_space.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
+/** Declarations for IP flow metric space creation, queries, indexing and more.
  */
 
 /*
- * Copyright (C) 2015 CESNET
+ * Copyright (C) 2017 CESNET
  *
  * LICENSE TERMS
  *
@@ -42,9 +38,7 @@
  *
  */
 
-
-#ifndef METRIC_SPACE_H
-#define METRIC_SPACE_H
+#pragma once
 
 
 #include "common.h"
@@ -121,6 +115,3 @@ bool distance_validate(const struct distance *d);
 
 void distance_ones_perspective(const struct point *the_one,
                 struct point *points[], size_t points_size);
-
-
-#endif //METRIC_SPACE_H

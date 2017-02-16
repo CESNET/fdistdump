@@ -1,12 +1,8 @@
-/**
- * \file vector.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
- */
+/** Declarations for the general purpose vector data type.
+*/
 
 /*
- * Copyright (C) 2015 CESNET
+ * Copyright (C) 2016 CESNET
  *
  * LICENSE TERMS
  *
@@ -42,9 +38,7 @@
  *
  */
 
-
-#ifndef VECTOR_H
-#define VECTOR_H
+#pragma once
 
 
 #include "common.h"
@@ -79,6 +73,3 @@ void vector_concat(struct vector *dest, const struct vector *src);
 
 /* Clear the vector but don't free allocated memory. */
 void vector_clear(struct vector *v);
-
-
-#endif //VECTOR_H

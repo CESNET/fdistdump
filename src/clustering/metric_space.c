@@ -1,12 +1,8 @@
-/**
- * \file metric_space.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
+/** IP flow metric space creation, queries, indexing and more.
  */
 
 /*
- * Copyright (C) 2016 CESNET
+ * Copyright (C) 2017 CESNET
  *
  * LICENSE TERMS
  *
@@ -41,7 +37,6 @@
  * if advised of the possibility of such damage.
  *
  */
-
 
 #include "metric_space.h"
 #include "vp_tree.h"

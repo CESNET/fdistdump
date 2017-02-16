@@ -1,12 +1,8 @@
-/**
- * \file clustering.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Master and slave IP flow cluster analysis declarations.
  */
 
 /*
- * Copyright (C) 2015 CESNET
+ * Copyright (C) 2016 CESNET
  *
  * LICENSE TERMS
  *
@@ -42,9 +38,7 @@
  *
  */
 
-
-#ifndef CLUSTERING_H
-#define CLUSTERING_H
+#pragma once
 
 
 #include "common.h"
@@ -71,6 +65,3 @@ error_code_t clustering_master(int world_size, const struct cmdline_args *args);
  * \return Error code.
  */
 error_code_t clustering_slave(int world_size);
-
-
-#endif //CLUSTERING_H

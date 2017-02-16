@@ -1,12 +1,9 @@
-/**
- * \file vp_tree.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2017
+/** Declarations for the Vantage-point tree, a metric space indexing data
+ * structure.
  */
 
 /*
- * Copyright (C) 2015 CESNET
+ * Copyright (C) 2017 CESNET
  *
  * LICENSE TERMS
  *
@@ -42,9 +39,7 @@
  *
  */
 
-
-#ifndef VP_TREE_H
-#define VP_TREE_H
+#pragma once
 
 
 #include "common.h"
@@ -64,6 +59,3 @@ void vp_tree_range_query(const struct vp_node *root, const struct point *p,
 
 void vp_tree_print(const struct vp_node *root);
 size_t vp_tree_height(const struct vp_node *root);
-
-
-#endif //VP_TREE_H
