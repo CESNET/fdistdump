@@ -57,16 +57,10 @@
  * \defgroup point_group Point related objects
  * @{
  */
-static void point_metadata_print(const struct point_metadata *pm)
+static void point_clustering_print(const struct point_clustering *pc)
 {
-        printf("cluster_id = %d, core = %d, covered_by = %zu, "
-                        "quality = %f, representative = %d, cov_cnt = %zu",
-                        pm->cluster_id,
-                        pm->core,
-                        pm->covered_by,
-                        pm->quality,
-                        pm->representative,
-                        pm->cov_cnt);
+        printf("cluster_id = %d, core = %d, covered_by = %zu, quality = %f\n",
+                        pc->cluster_id, pc->core, pc->covered_by, pc->quality);
 }
 
 static void point_features_print(const struct point_features *pf)
@@ -89,8 +83,7 @@ void point_metadata_clear(struct point_metadata *pm)
 
 void point_print(const struct point *p)
 {
-        point_metadata_print(&p->m);
-        putchar('\t');
+        printf("id = %zu, cov_cnt = %zu, features: ", p->id, p->cov_cnt);
         point_features_print(&p->f);
         putchar('\n');
 }
@@ -101,9 +94,9 @@ void point_print(const struct point *p)
  * point's eps-neighborhood (including the point itsef).
  */
 //TODO: change to metric_space related function
-size_t point_eps_neigh(struct point *point, const struct vector *point_vec,
-                struct vector *eps_vec, struct distance *distance,
-                const double eps)
+size_t point_eps_neigh(struct point *point, const struct point *point_storage,
+                size_t point_storage_size, struct vector *eps_vec,
+                struct distance *distance, const double eps)
 {
         size_t cov_cnt_sum = 0;
         const double *distance_vector = distance_get_vector(distance, point);
@@ -112,15 +105,14 @@ size_t point_eps_neigh(struct point *point, const struct vector *point_vec,
         vector_clear(eps_vec);
 
         /* Find and store eps-neighbors of a certain point. */
-        for (size_t i = 0; i < point_vec->size; ++i) {
+        for (size_t i = 0; i < point_storage_size; ++i) {
                 const double dist = distance_vector[i];
 
                 if (dist < eps) {
-                        struct point *neigbor =
-                                (struct point *)point_vec->data + i;
+                        struct point *neigbor = point_storage + i;
 
-                        cov_cnt_sum += neigbor->m.cov_cnt;
-                        if (neigbor->m.covered_by == SIZE_MAX) {
+                        cov_cnt_sum += neigbor->cov_cnt;
+                        if (neigbor->clustering.covered_by == SIZE_MAX) {
                                 vector_add(eps_vec, &neigbor);
                         }
                 }
@@ -466,3 +458,182 @@ void distance_ones_perspective(const struct point *the_one,
 /**
  * @}
  */ //distance_group
+
+
+/**
+ * \defgroup metric_space_group Metric space related objects
+ * @{
+ */
+struct metric_space * metric_space_init(void)
+{
+        struct metric_space *ms = calloc_wr(1, sizeof (*ms), false);
+
+        return ms;
+}
+
+void metric_space_free(struct metric_space *ms)
+{
+        assert(ms != NULL);
+
+        free(ms->point_storage);
+        free(ms);
+}
+
+error_code_t metric_space_load(struct metric_space *ms, char **paths,
+                size_t paths_cnt, const lnf_filter_t *lnf_filter)
+{
+        assert(ms != NULL);
+
+        error_code_t error_code = E_OK;
+        int ret;
+
+        const struct {
+                int lnf_field;
+                size_t offset;
+        } features[] = {
+                {LNF_FLD_SRCPORT, offsetof(struct point_features, srcport) },
+                {LNF_FLD_DSTPORT, offsetof(struct point_features, dstport) },
+                {LNF_FLD_TCP_FLAGS, offsetof(struct point_features, tcp_flags) },
+                {LNF_FLD_SRCADDR, offsetof(struct point_features, srcaddr) },
+                {LNF_FLD_DSTADDR, offsetof(struct point_features, dstaddr) },
+                {LNF_FLD_PROT, offsetof(struct point_features, proto) }
+        };
+
+        /**********************************************************************/
+        /* Initialize a LNF record and a LNF aggregation memory. */
+        lnf_rec_t *lnf_rec;
+        ret = lnf_rec_init(&lnf_rec);
+        if (ret != LNF_OK) {
+                error_code = E_LNF;
+                PRINT_ERROR(error_code, ret, "lnf_rec_init()");
+                goto finalize;
+        }
+
+        lnf_mem_t *lnf_mem;
+        ret = lnf_mem_init(&lnf_mem);
+        if (ret != LNF_OK) {
+                error_code = E_LNF;
+                PRINT_ERROR(error_code, ret, "lnf_mem_init()");
+                return free_lnf_rec;
+        }
+
+        /* Add a flow/duplicity counter and all features as keys. */
+        lnf_mem_fadd(lnf_mem, LNF_FLD_AGGR_FLOWS, LNF_AGGR_SUM, 0, 0);
+        for (size_t i = 0; i < ARRAY_SIZE(features); ++i) {
+                ret = lnf_mem_fadd(lnf_mem, features[i].lnf_field, LNF_AGGR_KEY,
+                                32, 128);
+                if (ret != LNF_OK) {
+                        error_code = E_LNF;
+                        PRINT_ERROR(error_code, ret, "lnf_mem_fadd()");
+                        goto free_lnf_mem;
+                }
+        }
+
+        /**********************************************************************/
+        /* Read files, write records into the memory and aggregate duplicates.*/
+        //TODO: parallelize
+        size_t rec_cntr = 0;
+        size_t proc_rec_cntr = 0;
+        lnf_file_t *lnf_file;
+        for (size_t i = 0; i < paths_cnt; ++i) {
+                /* Open a flow file. */
+                ret = lnf_open(&lnf_file, paths[i], LNF_READ, NULL);
+                if (ret != LNF_OK) {
+                        PRINT_WARNING(E_LNF, ret, "unable to open file \"%s\"",
+                                        paths[i]);
+                        continue;
+                }
+
+                /* Process the flow file. */
+                size_t file_rec_cntr = 0;
+                size_t file_proc_rec_cntr = 0;
+                while ((ret = lnf_read(lnf_file, lnf_rec)) == LNF_OK) {
+                        file_rec_cntr++;
+
+                        /* Apply the filter (if there is any). */
+                        if (lnf_filter && !lnf_filter_match(lnf_filter, lnf_rec)) {
+                                continue;
+                        }
+                        file_proc_rec_cntr++;
+
+                        ret = lnf_mem_write(lnf_mem, lnf_rec);
+                        if (ret != LNF_OK) {
+                                error_code = E_LNF;
+                                PRINT_ERROR(error_code, ret, "lnf_mem_write()");
+                                break;
+                        }
+
+                }
+                /* Check if we reach end of the file. */
+                if (ret != LNF_EOF) {
+                        PRINT_WARNING(E_LNF, ret, "EOF wasn't reached");
+                }
+                rec_cntr += file_rec_cntr;
+                proc_rec_cntr += file_proc_rec_cntr;
+
+                /* Close the flow file. */
+                lnf_close(lnf_file);
+
+                PRINT_INFO("metric space load: file: \"%s\", read: %zu, processed: %zu",
+                                paths[i], file_rec_cntr, file_proc_rec_cntr);
+        }
+
+        /**********************************************************************/
+        /* Read the deduplicated records from the memory, write to the vector.*/
+        struct vector point_vec; //set of data points
+        vector_init(&point_vec, sizeof (struct point));
+        vector_reserve(&point_vec, proc_rec_cntr); //TODO: is it a good idea?
+
+        /* Sample?
+         * const size_t rec_max = 1000000;
+         * const double probability = (double)rec_max / flows_cnt_meta * RAND_MAX;
+         * if (rand() > probability) {
+         *         continue;
+         * }
+         */
+
+        size_t mem_rec_cntr = 0;
+        size_t aggr_flows_sum = 0; //only for assertion
+        lnf_mem_cursor_t *cursor = NULL;
+        for (lnf_mem_first_c(lnf_mem, &cursor);
+                        cursor != NULL;
+                        lnf_mem_next_c(lnf_mem, &cursor))
+        {
+                lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
+
+                struct point point; //data point
+                //point_metadata_clear(&point.m); //TODO
+                point.id = mem_rec_cntr++;
+
+                lnf_rec_fget(lnf_rec, LNF_FLD_AGGR_FLOWS, &point.cov_cnt);
+                for (size_t i = 0; i < ARRAY_SIZE(features); ++i) {
+                        lnf_rec_fget(lnf_rec, features[i].lnf_field,
+                                        (uint8_t *)&point.f + features[i].offset);
+                }
+
+                aggr_flows_sum += point.cov_cnt;
+                vector_add(point_vec, &point);
+        }
+        assert(aggr_flows_sum == proc_rec_cntr);
+
+        vector_shrink_to_fit(&point_vec);
+        ms->point_storage = point_vec.data;
+        ms->size = point_vec->size;
+        //vector_free() would free point_storage, we don't want that
+
+        /**********************************************************************/
+        /* Cleanup and finalizations. */
+free_lnf_mem:
+        lnf_mem_free(lnf_mem);
+free_lnf_rec:
+        lnf_rec_free(lnf_rec);
+finalize:
+        PRINT_INFO("metric space load summary: read %zu, processed: %zu, unique keys: %zu (%f %)",
+                        rec_cntr, proc_rec_cntr, mem_rec_cntr,
+                        (double)mem_rec_cntr / proc_rec_cntr * 100.0);
+
+        return error_code;
+}
+/**
+ * @}
+ */ //metric_space_group

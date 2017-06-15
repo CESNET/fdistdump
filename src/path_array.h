@@ -45,7 +45,7 @@
 
 
 /* Generate array of paths from paths string and optional time range. */
-char ** path_array_gen(char *paths, const struct tm begin,
+const char ** path_array_gen(char *paths, const struct tm begin,
                 const struct tm end, size_t *cnt);
 /* Free all file names and array. */
 void path_array_free(char **names, size_t names_cnt);

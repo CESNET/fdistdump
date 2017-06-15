@@ -21,8 +21,10 @@ CFLAGS="$CFLAGS -g -O3"
 ## Checks for MPI compiler.
 AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
 AM_PROG_CC_C_O #required by subdir-objects
-CFLAGS="$CFLAGS -pedantic -W -Wall -Wextra -Winit-self -Wcast-align \
--Wcast-qual -Wmissing-include-dirs -Wshadow"
+CFLAGS="$CFLAGS -Wfatal-errors -Wpedantic -Wall -Wextra \
+	-Wdouble-promotion -Winit-self -Wmissing-include-dirs -Wswitch-default \
+	-Wswitch-enum -Wfloat-equal -Wundef -Wshadow"
+CFLAGS="$CFLAGS -Wcast-align -Wcast-qual"
 
 ## Check OpenMP, add flags.
 AC_OPENMP

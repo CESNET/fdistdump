@@ -43,6 +43,10 @@
 #include <string.h>
 #include <assert.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif //_OPENMP
+
 
 #define VECTOR_INIT_CAPACITY 2
 #define VECTOR_DATA_END(vec) ((void *)((uint8_t *)(vec)->data + (vec)->size * \
@@ -72,6 +76,17 @@ void vector_reserve(struct vector *v, size_t capacity)
 
         v->data = realloc_wr(v->data, capacity, v->element_size, true);
         v->capacity = capacity;
+}
+
+/* Reduces memory usage by freeing unused memory (capacity to size). */
+void vector_shrink_to_fit(struct vector *v)
+{
+        if (v->capacity == v->size) {
+                return; //nothing to do
+        }
+
+        v->data = realloc_wr(v->data, v->size, v->element_size, true);
+        v->capacity = v->size;
 }
 
 /* Resizes the vector to contain count elements. */
@@ -105,6 +120,31 @@ bool vector_add(struct vector *v, const void *element)
         /* Append the elements to the vector. */
         memcpy(VECTOR_DATA_END(v), element, v->element_size);
         v->size++;
+
+        return true;
+}
+
+/* Add a new element into the vector (thread-safe version). */
+bool vector_add_r(struct vector *v, const void *element)
+{
+        #pragma omp critical (vector)
+        {
+                assert(v->size <= v->capacity);
+
+                /* Is there a free space in the array for another element? */
+                if (v->size == v->capacity) { //no, ask for another space
+                        const size_t alloc_size = (v->capacity == 0) ?
+                                VECTOR_INIT_CAPACITY : v->capacity * 2;
+
+                        v->data = realloc_wr(v->data, alloc_size,
+                                        v->element_size, true);
+                        v->capacity = alloc_size;
+                }
+
+                /* Append the elements to the vector. */
+                memcpy(VECTOR_DATA_END(v), element, v->element_size);
+                v->size++;
+        }
 
         return true;
 }

@@ -52,19 +52,7 @@
 #define CLUSTER_FIRST      1 //first no-noise cluster
 
 
-/* Point's metadata. */
-/* TODO: cleanup the data types (int -> ssize_t etc.) */
-struct point_metadata {
-        int cluster_id;      //ID of cluster the point belongs to
-
-        bool core;           //core point flag
-        size_t covered_by;   //ID of the representative covering this point
-        double quality;
-
-        bool representative; //representative point flag
-        size_t cov_cnt;      //number of point covered by this representative
-};
-
+/* TODO: cleanup the data types (int -> ssize_t, exact width, ...) */
 /* Point's features. */
 struct point_features {
         uint16_t srcport;
@@ -75,30 +63,36 @@ struct point_features {
         uint8_t proto;
 } __attribute__((packed)); //TODO: this is because of sprint_rec
 
+struct point_clustering {
+        int cluster_id;    //ID of cluster the point belongs to
+        bool core;         //core point flag
+        size_t covered_by; //ID of the representative covering this point
+        double quality;
+};
+
 struct point {
-        size_t id;           //point ID
+        size_t id; //point identification
+        size_t cov_cnt; //number of points represented by this point
+        struct point_features f; //feature vector
+
         union {
-                struct {
-                        int a_int;
-                        double a_double;
-                } a;
-                struct {
-                        int b_int;
-                        double b_double;
-                } b;
+                struct point_clustering clustering;
         };
-        struct point_metadata m;
-        struct point_features f;
+
+};
+
+struct metric_space {
+        struct point *point_storage;
+        const size_t size;
 };
 
 struct distance; //forward declaration
 
 
-void point_metadata_clear(struct point_metadata *pm);
 void point_print(const struct point *p);
-size_t point_eps_neigh(struct point *point, const struct vector *point_vec,
-                struct vector *eps_vec, struct distance *distance,
-                const double eps);
+size_t point_eps_neigh(struct point *point, const struct point *point_storage,
+                size_t point_storage_size, struct vector *eps_vec,
+                struct distance *distance, const double eps);
 
 
 struct distance * distance_init(size_t size, struct point *point_data);
@@ -115,3 +109,10 @@ bool distance_validate(const struct distance *d);
 
 void distance_ones_perspective(const struct point *the_one,
                 struct point *points[], size_t points_size);
+
+
+struct metric_space * metric_space_init(void);
+void metric_space_free(struct metric_space *ms);
+error_code_t metric_space_load(struct metric_space *ms, char **paths,
+                size_t paths_cnt, const lnf_filter_t *lnf_filter);
+

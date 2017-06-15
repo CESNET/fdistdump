@@ -65,8 +65,13 @@ void vector_free(struct vector *v);
 /* Reserve (allocate) capacity for desired number of elements. */
 void vector_reserve(struct vector *v, size_t capacity);
 
+/* Reduces memory usage by freeing unused memory (capacity to size). */
+void vector_shrink_to_fit(struct vector *v);
+
 /* Add a new element into the vector. */
 bool vector_add(struct vector *v, const void *element);
+/* Add a new element into the vector (thread-safe version). */
+bool vector_add_ts(struct vector *v, const void *element);
 
 /* Concatenate two *different* vectors, append the src to the dest. */
 void vector_concat(struct vector *dest, const struct vector *src);

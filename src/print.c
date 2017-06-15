@@ -51,7 +51,7 @@
 #include <mpi.h>
 
 
-/* Default verbosity levele is warning. */
+/* Default verbosity level is warning. */
 verbosity_t verbosity = VERBOSITY_WARNING;
 
 

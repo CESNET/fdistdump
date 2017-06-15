@@ -294,7 +294,7 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
 }
 
 /* Generate array of paths from paths string and optional time range. */
-char ** path_array_gen(char *paths, const struct tm begin,
+const char ** path_array_gen(char *paths, const struct tm begin,
                 const struct tm end, size_t *cnt)
 {
         error_code_t primary_errno = E_OK;
