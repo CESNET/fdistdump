@@ -62,7 +62,7 @@
 //TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
 #define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
-#define FLOW_FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"
+#define FLOW_FILE_NAME_FORMAT "lnf.%Y%m%d%H%M%S"
 #define FLOW_FILE_FORMAT (FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT)
 
 
