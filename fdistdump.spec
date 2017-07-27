@@ -4,7 +4,7 @@
 # preamble #####################################################################
 # shared
 Name:           fdistdump
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Distributed IP flow files processing tool
 
@@ -132,6 +132,9 @@ make --directory="${MPI_COMPILER}" install uninstall-man DESTDIR=%{buildroot}
 
 # changelog section ############################################################
 %changelog
+* Thu Jul 27 2017 Jan Wrona <wrona@cesnet.cz> - 0.2.2-1
+- Incremented the patch version number (0.2.1 -> 0.2.2).
+
 * Tue Sep 6 2016 Jan Wrona <wrona@cesnet.cz> - 0.2.1-1
 - Changed the patch version number.
 
