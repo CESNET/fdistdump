@@ -117,10 +117,10 @@ int main(int argc, char **argv)
 
 
 finalize:
-        MPI_Finalize();
         if (primary_errno == E_OK || primary_errno == E_HELP) {
+                MPI_Finalize();
                 return EXIT_SUCCESS;
         } else {
-                return EXIT_FAILURE;
+                MPI_Abort(MPI_COMM_WORLD, primary_errno);
         }
 }
