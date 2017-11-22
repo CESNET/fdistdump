@@ -1044,7 +1044,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
         }
 
         /* Parallel loop through all the files. */
-        #pragma omp for schedule(guided) nowait
+        #pragma omp for schedule(dynamic) nowait
         for (size_t i = 0; i < paths_cnt; ++i) {
                 /* Error on one of the threads. */
                 if (primary_errno != E_OK) {
