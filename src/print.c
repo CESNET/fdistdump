@@ -101,8 +101,8 @@ static char * error_code_to_str(error_code_t e1)
                 snprintf(msg, MAX_STR_LEN, "path");
                 break;
 
-        case E_IDX:
-                snprintf(msg, MAX_STR_LEN, "file index");
+        case E_BFINDEX:
+                snprintf(msg, MAX_STR_LEN, "bfindex");
                 break;
 
         default:

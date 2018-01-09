@@ -112,6 +112,7 @@ static void construct_master_task_ctx(struct master_task_ctx *mtc,
         mtc->shared.time_end = args->time_end;
 
         mtc->shared.use_fast_topn = args->use_fast_topn;
+        mtc->shared.use_bfindex = args->use_bfindex;
 
 
         /* Fill master specific content. */

@@ -42,7 +42,9 @@
 #include "slave.h"
 #include "path_array.h"
 #include "print.h"
-#include "file_index/file_index.h"
+#ifdef HAVE_LIBBFINDEX
+#include "bfindex.h"
+#endif  // HAVE_LIBBFINDEX
 
 #include <string.h> //strlen()
 #include <assert.h>
@@ -85,8 +87,10 @@ struct slave_task_ctx {
         /* Slave specific task context. */
         lnf_mem_t *aggr_mem; //LNF memory used for aggregation
         lnf_filter_t *filter; //LNF compiled filter expression
-        struct fidx_ip_tree_node *idx_tree; //indexing IP address tree (created from
-                                       //the LNF filter)
+#ifdef HAVE_LIBBFINDEX
+        struct bfindex_node *bfindex_root; //indexing IP address tree root
+                                           //(created from the LNF filter)
+#endif  // HAVE_LIBBFINDEX
 
         uint8_t *buff[2]; //two chunks of memory for the data buffers
         char *path_str; //file/directory/profile(s) path string
@@ -443,41 +447,46 @@ static void task_free(struct slave_task_ctx *stc)
         if (stc->aggr_mem) {
                 free_aggr_mem(stc->aggr_mem);
         }
-        if (stc->idx_tree){
-                fidx_destroy_tree(&stc->idx_tree);
+#ifdef HAVE_LIBBFINDEX
+        if (stc->bfindex_root){
+                bfindex_free(stc->bfindex_root);
         }
         free(stc->path_str);
+#endif  // HAVE_LIBBFINDEX
 }
 
 
-static error_code_t task_init_filter(lnf_filter_t **filter,
-                struct fidx_ip_tree_node **idx_tree, char *filter_str)
+#ifdef HAVE_LIBBFINDEX
+static error_code_t
+task_init_filter(lnf_filter_t **filter, char *filter_str,
+                 struct bfindex_node **bfindex_root, bool use_bfindex)
+#else
+static error_code_t
+task_init_filter(lnf_filter_t **filter, char *filter_str)
+#endif  // HAVE_LIBBFINDEX
 {
-        int secondary_errno;
+    int secondary_errno;
+    assert(filter && filter_str && strlen(filter_str) != 0);
 
+    /* Initialize filter. */
+    secondary_errno = lnf_filter_init_v2(filter, filter_str);  // use new filter
+    if (secondary_errno != LNF_OK) {
+        PRINT_ERROR(E_LNF, secondary_errno, "cannot initialise filter \"%s\"",
+                    filter_str);
+        return E_LNF;
+    }
 
-        assert(filter != NULL && filter_str != NULL && strlen(filter_str) != 0);
+#ifdef HAVE_LIBBFINDEX
+    assert(bfindex_root);
+    if (use_bfindex) {
+        const ff_t *const filter_tree = lnf_filter_ffilter_ptr(*filter);
+        assert(filter_tree && filter_tree->root);
+        *bfindex_root = bfindex_init(filter_tree->root);
+        // NULL is OK and error/warning message was produced in bfindex_init()
+    }
+#endif  // HAVE_LIBBFINDEX
 
-        /* Initialize filter. */
-        //secondary_errno = lnf_filter_init(filter, filter_str); //old filter
-        secondary_errno = lnf_filter_init_v2(filter, filter_str); //new filter
-        if (secondary_errno != LNF_OK) {
-                PRINT_ERROR(E_LNF, secondary_errno,
-                                "cannot initialise filter \"%s\"", filter_str);
-                return E_LNF;
-
-        }
-
-        //TODO: IF indexing
-        ff_t *filter_tree = (ff_t *)lnf_filter_ffilter_ptr(*filter);
-        if (fidx_get_tree((ff_node_t *)filter_tree->root, idx_tree) != E_OK) {
-                PRINT_ERROR(E_IDX, 0,
-                                "unable to create an indexing IP address tree");
-                //TURN OFF INDEXING, DESTROY TREE IF EXISTS
-                return E_LNF;
-        }
-
-        return E_OK;
+    return E_OK;
 }
 
 
@@ -507,11 +516,22 @@ static error_code_t task_receive_ctx(struct slave_task_ctx *stc)
                                 ROOT_PROC, MPI_COMM_WORLD);
 
                 filter_str[stc->shared.filter_str_len] = '\0'; //termination
-                primary_errno = task_init_filter(&stc->filter, &stc->idx_tree,
-                                filter_str);
+#ifdef HAVE_LIBBFINDEX
+                primary_errno = task_init_filter(&stc->filter, filter_str,
+                                                 &stc->bfindex_root,
+                                                 stc->shared.use_bfindex);
+                if (stc->bfindex_root) {
+                    PRINT_INFO("Bloom filter indexes enabled");
+                } else if (stc->shared.use_bfindex) {
+                    PRINT_INFO("Bloom filter indexes disabled (involuntarily)");
+                } else {
+                    PRINT_INFO("Bloom filter indexes disabled (voluntarily)");
+                }
                 //it is OK not to check primary_errno
+#else
+                primary_errno = task_init_filter(&stc->filter, filter_str);
+#endif  // HAVE_LIBBFINDEX
         }
-
 
         return primary_errno;
 }
@@ -1048,7 +1068,7 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
         for (size_t i = 0; i < paths_cnt; ++i) {
                 /* Error on one of the threads. */
                 if (primary_errno != E_OK) {
-                        goto my_continue; //OpenMP cannot break from for loop
+                        goto my_continue;
                 }
 
                 /* Open a flow file. */
@@ -1062,26 +1082,42 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                 /* Increment the private metadata summary counters. */
                 metadata_summ_update(&tc.metadata_summ, tc.file);
 
-                //TODO: IF indexing
-                if (stc->idx_tree) {
-                        if (fidx_ips_in_file(paths[i], stc->idx_tree) == false) {
-                                PRINT_DEBUG("file-indexing: skipping file \"%s\"",
-                                                paths[i]);
-                                goto my_continue;
+#ifdef HAVE_LIBBFINDEX
+                if (stc->bfindex_root) {  // Bloom filter indexing is enabled
+                    char *bfindex_file_path =
+                        bfindex_flow_to_index_path(paths[i]);
+                    if (bfindex_file_path) {
+                        PRINT_DEBUG("bfindex: using bfindex file \"%s\"",
+                                    bfindex_file_path);
+                        const bool contains = bfindex_contains(
+                                stc->bfindex_root, bfindex_file_path);
+                        free(bfindex_file_path);
+                        if (contains) {
+                            PRINT_INFO("bfindex: query returned \"required IP "
+                                       "address(es) possibly in file\", "
+                                       "processing file \"%s\"", paths[i]);
+                        } else {
+                            PRINT_INFO("bfindex: query returned \"required IP "
+                                       "address(es) definitely not in file\", "
+                                       "skipping file \"%s\"", paths[i]);
+                            goto my_continue;
                         }
+                    } else {
+                        PRINT_WARNING(E_BFINDEX, 0, "unable to convert flow "
+                                      "file name into bfindex file name");
+                    }
                 }
+#endif  // HAVE_LIBBFINDEX
 
                 /* Process the file according to the working mode. */
                 switch (stc->shared.working_mode) {
-                //According to GCC, #pragma omp flush may only be used in
-                //compound statements before #pragma.
-                #pragma omp flush //for stc->rec_limit_reached
-                case MODE_LIST:
+                case MODE_LIST: {
+                        #pragma omp flush //for stc->rec_limit_reached
                         if (!stc->rec_limit_reached) {
                                 primary_errno = task_send_file(stc, &tc);
                         }
                         break;
-
+                }
                 case MODE_SORT:
                         if (stc->shared.rec_limit == 0) {
                                 /* Local sort would be useless. */
@@ -1091,15 +1127,12 @@ static error_code_t process_parallel(struct slave_task_ctx *stc, char **paths,
                                 primary_errno = task_store_file(stc, &tc);
                         }
                         break;
-
                 case MODE_AGGR:
                         primary_errno = task_store_file(stc, &tc);
                         break;
-
                 case MODE_META:
                         /* Metadata already read. */
                         break;
-
                 default:
                         assert(!"unknown working mode");
                 }

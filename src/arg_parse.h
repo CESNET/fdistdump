@@ -62,6 +62,7 @@ struct cmdline_args {
         struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
+        bool use_bfindex;  // enables Bloom filter indexes
 
         struct output_params output_params; //output (printing) parameters
         progress_bar_type_t progress_bar_type;

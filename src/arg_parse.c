@@ -140,6 +140,7 @@ extern int secondary_errno;
 
 enum { //command line options, have to start above ASCII
         OPT_NO_FAST_TOPN = 256, //disable fast top-N algorithm
+        OPT_NO_BFINDEX,  // disable Bloom filter indexes
 
         OPT_OUTPUT_ITEMS, //output items (records, processed records summary,
                           //metadata summary)
@@ -738,10 +739,10 @@ static error_code_t set_stat(struct cmdline_args *args, char *stat_str)
 
 /** \brief Check and save filter expression string.
  *
- * Function checks filter by initializing it using libnf lnf_filter_init(). If
- * filter syntax is correct, pointer to filter string is stored in arguments
- * structure and E_OK is returned. Otherwise arguments structure remains
- * untouched and E_ARG is returned.
+ * Function checks filter by initializing it using libnf. If filter syntax is
+ * correct, pointer to filter string is stored in arguments structure and E_OK
+ * is returned. Otherwise arguments structure remains untouched and E_ARG is
+ * returned.
  *
  * \param[in,out] args Structure with parsed command line parameters and other
  *                   program settings.
@@ -754,8 +755,7 @@ static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
         lnf_filter_t *filter;
 
         /* Try to initialize filter. */
-        //TODO: try new filter
-        secondary_errno = lnf_filter_init(&filter, filter_str);
+        secondary_errno = lnf_filter_init_v2(&filter, filter_str);  // new fltr.
         if (secondary_errno != LNF_OK) {
                 PRINT_ERROR(E_ARG, secondary_errno,
                                 "cannot initialise filter \"%s\"", filter_str);
@@ -1019,6 +1019,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
 
                 /* Long only. */
                 {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+                {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
 
                 {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
                 {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
@@ -1051,6 +1052,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
 
         /* Set argument default values. */
         args->use_fast_topn = true;
+        args->use_bfindex = true;
         args->rec_limit = SIZE_MAX; //SIZE_MAX means record limit is unset
 
         /* Prevent all non-root processes from printing getopt() errors. */
@@ -1108,6 +1110,9 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
 
                 case OPT_NO_FAST_TOPN: //disable fast top-N algorithm
                         args->use_fast_topn = false;
+                        break;
+                case OPT_NO_BFINDEX:  // disable Bloom filter indexes
+                        args->use_bfindex = false;
                         break;
 
 
@@ -1405,7 +1410,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
         }
 
 
-        if (verbosity >= VERBOSITY_DEBUG) {
+        if (root_proc && verbosity >= VERBOSITY_DEBUG) {
                 static char fld_name_buff[LNF_INFO_BUFSIZE];
                 char begin[255], end[255];
                 char *path = args->path_str;
@@ -1434,7 +1439,7 @@ error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
                                         args->fields[i].ipv6_bits);
                 }
 
-                if(args->filter_str != NULL) {
+                if(args->filter_str) {
                         printf("filter: %s\n", args->filter_str);
                 }
 

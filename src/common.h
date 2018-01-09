@@ -58,8 +58,10 @@
 //TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
 #define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
-#define FLOW_FILE_NAME_FORMAT "nfcapd.%Y%m%d%H%M"
-#define FLOW_FILE_FORMAT (FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT)
+#define FLOW_FILE_NAME_PREFIX "lnf"
+#define FLOW_FILE_NAME_SUFFIX "%Y%m%d%H%M"
+#define FLOW_FILE_NAME_FORMAT FLOW_FILE_NAME_PREFIX "." FLOW_FILE_NAME_SUFFIX
+#define FLOW_FILE_FORMAT FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT
 
 
 /**
@@ -77,7 +79,7 @@ typedef enum { //error return codes
         E_INTERNAL, //internal
         E_ARG, //command line arguments
         E_PATH, //problem with access to file/directory
-        E_IDX, //indexing error
+        E_BFINDEX, //bloom filter indexing error
 } error_code_t;
 
 typedef enum { //working modes
@@ -146,7 +148,7 @@ struct field_info {
 };
 
 //XXX: reflect changes also in mpi_struct_shared_task_ctx
-#define STRUCT_SHARED_TASK_CTX_ELEMS 8
+#define STRUCT_SHARED_TASK_CTX_ELEMS 9
 struct shared_task_ctx {
         working_mode_t working_mode; //working mode
         struct field_info fields[LNF_FLD_TERM_]; //present LNF fields
@@ -160,6 +162,7 @@ struct shared_task_ctx {
         struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
+        bool use_bfindex;  //enables Bloom filter indexes
 };
 /**
  * @}
@@ -172,6 +175,9 @@ struct shared_task_ctx {
  */
 //size of staticly allocated array
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+// compile-time strlen for static strings (minus one for terminating null-byte)
+#define STRLEN_STATIC(str) (ARRAY_SIZE(str) - 1)
 
 //size of structure member
 #define MEMBER_SIZE(type, member) (sizeof (((type *)NULL)->member))

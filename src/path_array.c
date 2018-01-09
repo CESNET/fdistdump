@@ -41,7 +41,9 @@
 #include "common.h"
 #include "path_array.h"
 #include "print.h"
-#include "file_index/file_index.h"
+#ifdef HAVE_LIBBFINDEX
+#include "bfindex.h"
+#endif  // HAVE_LIBBFINDEX
 
 #include <stdlib.h>
 #include <errno.h>
@@ -175,18 +177,23 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
         while ((entry = readdir(dir)) != NULL) {
                 char new_path[PATH_MAX];
 
-                /* Dot starting/file-indexing filenames are ignored. */
-                if (entry->d_name[0] == '.' || strncmp(entry->d_name,
-                                        FIDX_FN_PREFIX,
-                                        sizeof (FIDX_FN_PREFIX)) == 0) {
-                        continue; //skip the file
+                /* Dot starting (hidden) files are ignored. */
+                if (entry->d_name[0] == '.') {
+                        continue;  // skip this file
                 }
+                /* bfindex files are ignored. */
+#ifdef HAVE_LIBBFINDEX
+                if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX ".",
+                            STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX ".")) == 0) {
+                        continue;  // skip this file
+                }
+#endif  // HAVE_LIBBFINDEX
                 /* Too long filenames are ignored. */
                 if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
                         errno = ENAMETOOLONG;
                         PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
-                        continue; //skip the file
+                        continue; //skip this file
                 }
 
                 /* Construct new path: append child to the parent. */

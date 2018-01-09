@@ -453,6 +453,18 @@ There are three conditions that have to be met to make this algorithm work:
 .RB ( -o )
 is one of traffic volume fields
 .RB ( bytes ,\  pkts ,\  outbytes ,\  outpkts \ and\  flows ).
+.TP
+.B --no-bfindex
+Disable Bloom filter indexes.
+A Bloom filter is a space-efficient probabilistic data structure that is used to test whether an element is a member of a set.
+False positive matches are possible, but false negatives are not -- in other words, a query returns either "possibly in set" or "definitely not in set".
+In this case, the set is a set of source and destination IP addresses in all records in the flow file and we want to know whether certain IP address is contained in the file or not.
+Bloom filter is only used in conjunction with a record filter containing one or more IP addresses.
+
+If enabled, together witch each flow file also index file is read.
+If the flow file name has the standard prefix "lnf.", the index file name is constructed by subtituting this prefix with "bfi.".
+Otherwise, the index file name is constructed by prefixing the flow file name with "bfi.".
+This feature uses the followinh Bloom filter index library: https://github.com/CESNET/bloom-filter-index.
 .\" Getting help subsection ---------------------
 .SS Getting help
 .TP

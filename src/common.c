@@ -117,6 +117,7 @@ void create_mpi_struct_shared_task_ctx(void)
                 STRUCT_TM_ELEMS, //time_begin
                 STRUCT_TM_ELEMS, //time_end
                 1, //use_fast_topn
+                1, //use_bfindex
                 /* NEW */
         };
         MPI_Aint displacements[STRUCT_SHARED_TASK_CTX_ELEMS] = {
@@ -128,6 +129,7 @@ void create_mpi_struct_shared_task_ctx(void)
                 offsetof(struct shared_task_ctx, time_begin),
                 offsetof(struct shared_task_ctx, time_end),
                 offsetof(struct shared_task_ctx, use_fast_topn),
+                offsetof(struct shared_task_ctx, use_bfindex),
                 /* offsetof(struct shared_task_ctx, NEW), */
         };
         MPI_Datatype types[STRUCT_SHARED_TASK_CTX_ELEMS] = {
@@ -139,6 +141,7 @@ void create_mpi_struct_shared_task_ctx(void)
                 MPI_INT, //time_begin
                 MPI_INT, //time_end
                 MPI_C_BOOL, //use_fast_topn
+                MPI_C_BOOL, //use_bfindex
                 /* NEW */
         };
 
