@@ -47,6 +47,7 @@
 #include <time.h> //struct tm
 #include <stdbool.h>
 #include <inttypes.h> //exact width integer types
+#include <assert.h>
 
 #include <libnf.h>
 
@@ -190,6 +191,16 @@ struct shared_task_ctx {
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX_ASSIGN(a, b) ((a) = (a) > (b) ? (a) : (b))
 #define MIN_ASSIGN(a, b) ((a) = (a) < (b) ? (a) : (b))
+
+// unsafe macros - double evaluation of arguments with side effects
+// the comma operator evaluates its first operand (assert which returns void)
+// and discards the result, and then evaluates the second operand and returns
+// this value (and type)
+// alegedly faster version: ((unsigned)(number - lower) <= (upper - lower))
+#define IN_RANGE_INCL(number, lower, upper) \
+    (assert(lower < upper), ((number) >= (lower) && (number) <= (upper)))
+#define IN_RANGE_EXCL(number, lower, upper) \
+    (assert(lower < upper), ((number) > (lower) && (number) < (upper)))
 
 //safe, but braced-group within expression is GCC extension forbidden by ISO C
 #if 0
