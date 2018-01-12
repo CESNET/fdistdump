@@ -82,7 +82,7 @@ static const char *usage_string =
 
 static const char *help_string =
 "MPI_options\n"
-"      See your MPI process manager documentation, e.g. mpiexec(1).\n"
+"      See your MPI process manager documentation, e.g., mpiexec(1).\n"
 "General options\n"
 "     Mandatory arguments to long options are mandatory for short options too.\n"
 "\n"
@@ -132,6 +132,8 @@ static const char *help_string =
 "Other options\n"
 "     --no-fast-topn\n"
 "            Disable fast top-N algorithm.\n"
+"     --no-bfindex\n"
+"            Disable Bloom filter indexes.\n"
 "\n"
 "Getting help\n"
 "     --help Print a help message and exit.\n"
