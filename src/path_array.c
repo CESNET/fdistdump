@@ -294,8 +294,7 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
         }
 
         strcat(path, last_path); //copy rest of the format string
-        PRINT_DEBUG("format: %s\tpath: %s", format, path);
-
+        PRINT_DEBUG("path preprocessor: `%s' -> `%s'", format, path);
 
         return true;
 }

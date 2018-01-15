@@ -37,11 +37,10 @@ Among other features, \fBfdistdump\fR allows you to list, sort and aggregate rec
 .\" OPTIONS section ------------------------------------------------------------
 .SH OPTIONS
 Non argument options that are duplicated on the command line are not harmful.
+For options that require an argument, each duplication will override the previous argument value.
 A short option may take a parameter of the form \fB-a\fI param\fR, a long option may take a parameter of the form \fB--arg=\fIparam\fR or \fB--arg\fI param\fR.
 Long option names may be abbreviated if the abbreviation is unique or is an exact match for some defined option.
 Mandatory arguments to long options are mandatory for short options too.
-.\" TODO: Following is not true for fields.
-.\" For options that require an argument, each duplication will override the previous argument value.
 .\" MPI_options subsection ---------------------
 .SS MPI_options
 .B fdistdump
@@ -135,7 +134,6 @@ This may be used to read different files by each slave from a shared storage.
 
 .\" General options subsection ---------------------
 .SS General options
-.\" TODO: field overwriting
 .TP
 .BR -a , \ --aggregation=\fIfield\fR[,...]
 Aggregate flow records together by any number of \fIfield\fRs.

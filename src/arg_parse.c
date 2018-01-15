@@ -52,6 +52,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <limits.h> //PATH_MAX, NAME_MAX
+#include <ctype.h>
 
 #include <getopt.h>
 #include <libnf.h>
@@ -63,11 +64,13 @@
 #define TIME_DELIM " \t\n\v\f\r"  // whitespace
 #define FIELDS_DELIM ","          // libnf fields delimiter
 
+#define FILE_SEPARATOR 0x1C       // ASCII File Separator character
+
 #define DEFAULT_LIST_FIELDS "first,packets,bytes,srcip,dstip,srcport,dstport,proto"
 #define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
 #define DEFAULT_AGGR_FIELDS "duration,flows,packets,bytes,bps,pps,bpp"
-#define DEFAULT_STAT_SORT_KEY LNF_FLD_AGGR_FLOWS
-#define DEFAULT_STAT_REC_LIMIT 10
+#define DEFAULT_STAT_SORT_KEY "flows"
+#define DEFAULT_STAT_REC_LIMIT "10"
 
 #define MIN_IP_BITS 0
 #define MAX_IPV4_BITS 32
@@ -166,6 +169,44 @@ enum { //command line options, have to start above ASCII
         OPT_VERSION, //print version
 };
 
+// variables for getopt_long() setup
+static const char *const short_opts = "a:f:l:o:s:t:T:v:";
+static const struct option long_opts[] = {
+    // long and short options
+    {"aggregation", required_argument, NULL, 'a'},
+    {"filter", required_argument, NULL, 'f'},
+    {"limit", required_argument, NULL, 'l'},
+    {"order", required_argument, NULL, 'o'},
+    {"statistic", required_argument, NULL, 's'},
+    {"time-point", required_argument, NULL, 't'},
+    {"time-range", required_argument, NULL, 'T'},
+    {"verbosity", required_argument, NULL, 'v'},
+
+    // long options only
+    {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+    {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
+
+    {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
+    {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
+    {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
+    {"output-ts-localtime", no_argument, NULL, OPT_OUTPUT_TS_LOCALTIME},
+    {"output-volume-conv", required_argument, NULL, OPT_OUTPUT_VOLUME_CONV},
+    {"output-tcpflags-conv", required_argument, NULL, OPT_OUTPUT_TCP_FLAGS_CONV},
+    {"output-addr-conv", required_argument, NULL, OPT_OUTPUT_IP_ADDR_CONV},
+    {"output-proto-conv", required_argument, NULL, OPT_OUTPUT_IP_PROTO_CONV},
+    {"output-duration-conv", required_argument, NULL, OPT_OUTPUT_DURATION_CONV},
+
+    {"fields", required_argument, NULL, OPT_FIELDS},
+    {"progress-bar-type", required_argument, NULL, OPT_PROGRESS_BAR_TYPE},
+    {"progress-bar-dest", required_argument, NULL, OPT_PROGRESS_BAR_DEST},
+
+    {"help", no_argument, NULL, OPT_HELP},
+    {"version", no_argument, NULL, OPT_VERSION},
+
+    {0, 0, 0, 0}  // termination required by getopt_long()
+};
+
+
 
 static const char *const date_formats[] = {
         /* Date formats. */
@@ -190,6 +231,247 @@ static const char *const utc_strings[] = {
         "UT",
         "UTC",
 };
+
+/**
+ * @defgroup str_to_int_group Family of functions converting string to integers
+ *                            of various length and signedness.
+ * @{
+ */
+
+/**
+ * @brief Convert a signed decimal integer from a string to a long long integer.
+ *
+ * Wrapper to the strtoll() function.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_llint(const char *const string, long long int *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    errno = 0;  // clear previous errors
+    char *endptr = NULL;
+    *res = strtoll(string, &endptr, 10);
+    assert(endptr);
+    if (*endptr != '\0') { // if **endptr is '\0', the entire string is valid
+        return "invalid characters";
+    // LLONG_MIN and LLONG_MAX may be valid values!
+    //} else if (*res == LLONG_MIN) {
+    //    return "would case underflow";
+    //} else if (*res == LLONG_MAX) {
+    //    return "would case overflow";
+    } else if (errno != 0) {  // ERANGE on over/underflow, EINVAL on inval. base
+        return strerror(errno);
+    } else {  // conversion was successful
+        return NULL;
+    }
+}
+
+/**
+ * @brief Convert a signed decimal integer from a string to a long integer.
+ *
+ * Wrapper to the strtol() function.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_lint(const char *const string, long int *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    long long int tmp_res;
+    const char *const error_string = str_to_llint(string, &tmp_res);
+    if (error_string) {
+        return error_string;
+    }
+
+    // conversion to long long int was successful, try conversion to long int
+    if (!IN_RANGE_INCL(tmp_res, LONG_MIN, LONG_MAX)) {
+        errno = ERANGE;
+        return strerror(errno);
+    }
+
+    // conversion to was successful
+    *res = tmp_res;
+    return NULL;
+}
+
+/**
+ * @brief Convert a signed decimal integer from a string to an integer.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_int(const char *const string, int *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    long long int tmp_res;
+    const char *const error_string = str_to_llint(string, &tmp_res);
+    if (error_string) {
+        return error_string;
+    }
+
+    // conversion to long long int was successful, try conversion to int
+    if (!IN_RANGE_INCL(tmp_res, INT_MIN, INT_MAX)) {
+        errno = ERANGE;
+        return strerror(errno);
+    }
+
+    // conversion was successful
+    *res = tmp_res;
+    return NULL;
+}
+
+/**
+ * @brief Convert an unsigned decimal integer from a string to a long long
+ *        unsigned integer.
+ *
+ * Wrapper to the strtoull() function.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_lluint(const char *const string, long long unsigned int *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    // skip all initial white space and then check for minus sign
+    const char *neg_check = string;
+    while (isspace(*neg_check)) {
+        neg_check++;
+    }
+    if (*neg_check == '-') {
+        return "negative value";
+    }
+
+    errno = 0;  // clear previous errors
+    char *endptr = NULL;
+    *res = strtoull(string, &endptr, 10);
+    assert(endptr);
+    if (*endptr != '\0') { // if **endptr is '\0', the entire string is valid
+        return "invalid characters";
+    // ULLONG_MAX may be a valid value!
+    //} else if (*res == ULLONG_MAX) {
+    //    return "would case overflow";
+    } else if (errno != 0) {  // ERANGE on overflow, EINVAL on invalid base
+        return strerror(errno);
+    } else {  // conversion was successful
+        return NULL;
+    }
+}
+
+/**
+ * @brief Convert an unsigned decimal integer from a string to a long unsigned
+ *        integer.
+ *
+ * Wrapper to the strtoul() function.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_luint(const char *const string, long unsigned int *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    long long unsigned int tmp_res;
+    const char *const error_string = str_to_lluint(string, &tmp_res);
+    if (error_string) {
+        return error_string;
+    }
+
+    // conversion to long long unsigned int was successful, try conversion to
+    // long unsigned int
+    if (tmp_res > ULONG_MAX) {
+        errno = ERANGE;
+        return strerror(errno);
+    }
+
+    // conversion was successful
+    *res = tmp_res;
+    return NULL;
+}
+
+/**
+ * @brief Convert an unsigned decimal integer from a string to an unsigned
+ *        integer.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_uint(const char *const string, unsigned int *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    long long unsigned int tmp_res;
+    const char *const error_string = str_to_lluint(string, &tmp_res);
+    if (error_string) {
+        return error_string;
+    }
+
+    // conversion to long long unsigned int was successful, try conversion to
+    // unsigned int
+    if (tmp_res > UINT_MAX) {
+        errno = ERANGE;
+        return strerror(errno);
+    }
+
+    // conversion was successful
+    *res = tmp_res;
+    return NULL;
+}
+
+/**
+ * @brief Convert an unsigned decimal integer from a string to size_t.
+ *
+ * @param[in] string Non null and non empty string to convert.
+ * @param[out] res Pointer to a conversion destination variable.
+ *
+ * @return NULL on success, read-only error string on error.
+ */
+inline static const char *
+str_to_size_t(const char *const string, size_t *res)
+{
+    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
+
+    long long unsigned int tmp_res;
+    const char *const error_string = str_to_lluint(string, &tmp_res);
+    if (error_string) {
+        return error_string;
+    }
+
+    // conversion to long long unsigned int was successful, try conversion to
+    // size_t
+    if (tmp_res > SIZE_MAX) {
+        errno = ERANGE;
+        return strerror(errno);
+    }
+
+    // conversion was successful
+    *res = tmp_res;
+    return NULL;
+}
+
+/**  @} */  // str_to_int_group
 
 
 /**
@@ -224,6 +506,10 @@ fields_id_to_str(const int field_id)
  * computed fields LNF_FLD_CALC_* (e.g., LNF_FLD_FIRST and LNF_FLD_LAST for
  * LNF_FLD_CALC_DURATION, LNF_FLD_DOCTETS and LNF_FLD_CALC_DURATION for
  * LNF_FLD_CALC_BPS, ...) are handled by libnf.
+ *
+ * TODO: --fields srcport,srcport without an aggregation causes
+ *       WARNING: command line argument: field 'srcport' already set as an
+ *       aggregation key
  *
  * @param[out] field_info Pointer to the structure to fill with the new field.
  * @param[in] field_id ID of the new ordinary field.
@@ -527,7 +813,8 @@ fields_print(const struct field_info fields[])
 /**  @} */  // fields_group
 
 
-/** \brief Convert string into tm structure.
+/**
+ * @brief Convert string into tm structure.
  *
  * Function tries to parse time string and fills tm with appropriate values on
  * success. String is split into tokens according to TIME_DELIM delimiters. Each
@@ -547,10 +834,10 @@ fields_print(const struct field_info fields[])
  * parsed, E_OK is returned. On error, content of tm structure is undefined and
  * E_ARG is returned.
  *
- * \param[in] time_str Time string, usually gathered from command line.
- * \param[out] utc Set if one of utc_strings[] is found.
- * \param[out] tm Time structure filled with parsed-out time and date.
- * \return Error code. E_OK or E_ARG.
+ * @param[in] time_str Time string, usually gathered from command line.
+ * @param[out] utc Set if one of utc_strings[] is found.
+ * @param[out] tm Time structure filled with parsed-out time and date.
+ * @return Error code. E_OK or E_ARG.
  */
 static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
 {
@@ -888,46 +1175,39 @@ parse_sort_spec(struct field_info fields[], char *sort_spec)
 
 
 /**
- * @brief Parse statistic specification string and save the results.
+ * @brief Parse statistic specification string.
  *
  * Statistic is only shortcut for aggregation, sort and limit. Therefore,
  * statistic string is expected in "fields[#sort_spec]" format. If sort spec
- * isn't present, DEFAULT_STAT_SORT_KEY is used. For the description of
- * sort_spec see \ref parse_sort_spec.
+ * isn't present, DEFAULT_STAT_SORT_KEY is used.
  *
- * @param[in,out] fields Array of field_info structures to be filled.
- * @param[in] stat_spec Statistic specification string, usually gathered from
+ * @param[in] stat_optarg Statistic specification string, usually gathered from
  *                      the command line.
- *
- * @return E_OK on success, E_ARG otherwise.
+ * @param[out] aggr_optarg Pointer to the aggregation optarg string destination.
+ * @param[out] sort_optarg Pointer to the sort optarg string destination.
+ * @param[out] limit_optarg Pointer to the limit optarg string destination.
  */
-static error_code_t
-parse_stat_spec(struct field_info fields[], char *stat_spec)
+static void
+parse_stat_spec(char *stat_optarg, char *aggr_optarg[], char *sort_optarg[],
+                char *limit_optarg[])
 {
-    assert(fields && stat_spec && stat_spec[0] != '\0');
+    assert(stat_optarg && stat_optarg[0] != '\0' && aggr_optarg && sort_optarg
+           && limit_optarg);
 
-    PRINT_DEBUG("args: parsing stat spec '%s'", stat_spec);
-    error_code_t ecode;
-    char *const delim_pos = strchr(stat_spec, STAT_DELIM);  // find first
+    PRINT_DEBUG("args: stat spec: parsing '%s'", stat_optarg);
+    *aggr_optarg = stat_optarg;
+
+    char *const delim_pos = strchr(stat_optarg, STAT_DELIM);  // find first
     if (delim_pos) {  // delimiter found, sort spec should follow
         *delim_pos = '\0';  // to distinguish between the fields and the rest
-        char *const sort_spec = delim_pos + 1;
-        PRINT_DEBUG("args: stat spec delimiter found, using '%s' as a fields spec and '%s' as a sort spec",
-                    stat_spec, sort_spec);
-        ecode = parse_sort_spec(fields, delim_pos + 1);
-        if (ecode != E_OK) {
-            return ecode;
-        }
+        *sort_optarg = delim_pos + 1;
     } else {  // delimiter not found, sort spec not specified; use the defaults
-        PRINT_DEBUG("args: stat spec delimiter not found, using whole stat spec as a fields spec and default sort key and direction");
-        ecode = fields_add_sort_key(fields + DEFAULT_STAT_SORT_KEY,
-                                    DEFAULT_STAT_SORT_KEY,
-                                    LNF_SORT_NONE);
-        assert(ecode == E_OK);
+        *sort_optarg = DEFAULT_STAT_SORT_KEY;
     }
 
-    // add fields as aggregation keys
-    return fields_add_from_str(fields, stat_spec, true);
+    *limit_optarg = DEFAULT_STAT_REC_LIMIT;
+    PRINT_DEBUG("args: stat spec: aggr spec = '%s', sort spec = '%s', limit spec = '%s'",
+                *aggr_optarg, *sort_optarg, *limit_optarg);
 }
 
 
@@ -958,47 +1238,6 @@ static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
 
         lnf_filter_free(filter);
         args->filter_str = filter_str;
-
-        return E_OK;
-}
-
-
-/** \brief Check, parse and save limit string.
- *
- * Function converts limit string into unsigned integer. If string is correct
- * and conversion was successful, args->rec_limit is set and E_OK is returned.
- * On error (overflow, invalid characters, negative value, ...) arguments
- * structure is kept untouched and E_ARG is returned.
- *
- * \param[in,out] args Structure with parsed command line parameters and other
- *                   program settings.
- * \param[in] limit_str Limit string, usually gathered from command line.
- * \return Error code. E_OK or E_ARG.
- */
-static error_code_t set_limit(struct cmdline_args *args, char *limit_str)
-{
-        char *endptr;
-        long int limit;
-
-        errno = 0; //erase possible previous error number
-        limit = strtol(limit_str, &endptr, 0);
-
-        /* Check for various possible errors. */
-        if (errno != 0) {
-                PRINT_ERROR(E_ARG, 0, "invalid limit '%s': %s", limit_str,
-                                strerror(errno));
-                return E_ARG;
-        }
-        if (*endptr != '\0') { //remaining characters
-                PRINT_ERROR(E_ARG, 0, "invalid limit '%s'", limit_str);
-                return E_ARG;
-        }
-        if (limit < 0) { //negatve limit
-                PRINT_ERROR(E_ARG, 0, "negative limit '%s'", limit_str);
-                return E_ARG;
-        }
-
-        args->rec_limit = limit; //will never reach SIZE_MAX (hopefully)
 
         return E_OK;
 }
@@ -1169,491 +1408,436 @@ static error_code_t set_progress_bar_type(progress_bar_type_t *type,
         return E_OK;
 }
 
-static error_code_t set_verbosity(char *level_str)
+error_code_t
+arg_parse(struct cmdline_args *args, int argc, char *const argv[],
+          bool root_proc)
 {
-        char *endptr;
-        long int level;
+    error_code_t ecode = E_OK;
 
-        errno = 0; //erase possible previous error number
-        level = strtol(level_str, &endptr, 0);
+    // set default values for certain arguments
+    args->use_fast_topn = true;
+    args->use_bfindex = true;
+    args->rec_limit = SIZE_MAX;  // SIZE_MAX means record limit is unset
 
-        /* Check for various possible errors. */
-        if (errno != 0 || *endptr != '\0' || level < VERBOSITY_QUIET ||
-                        level > VERBOSITY_DEBUG) {
-                PRINT_ERROR(E_ARG, 0, "invalid verbosity level '%s', valid values are from range [%d,%d]",
-                                level_str, VERBOSITY_QUIET, VERBOSITY_DEBUG);
-                return E_ARG;
+    // revent all non-root processes from printing getopt_long() errors
+    if (!root_proc) {
+        opterr = 0;
+    }
+
+    char *aggr_optarg = NULL;
+    char *filter_optarg = NULL;
+    char *limit_optarg = NULL;
+    char *sort_optarg = NULL;
+    char *time_point_optarg = NULL;
+    char *time_range_optarg = NULL;
+    char *verbosity_optarg = NULL;
+    char *ordinary_fields_optarg = NULL;
+    // loop through all the command-line arguments
+    while (true) {
+        const int opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
+        if (opt == -1) {
+            break;  // all options processed successfully
         }
 
-        verbosity = level;
+        switch (opt) {
+        case 'a':  // aggregation
+            aggr_optarg = optarg;
+            break;
+        case 'f':  // filter expression
+            filter_optarg = optarg;
+            break;
+        case 'l':  // record limit
+            limit_optarg = optarg;
+            break;
+        case 'o':  // sort/order
+            sort_optarg = optarg;
+            break;
+        case 's':  // statistic shortcut
+            parse_stat_spec(optarg, &aggr_optarg, &sort_optarg, &limit_optarg);
+            break;
+        case 't':  // time point
+            time_point_optarg = optarg;
+            break;
+        case 'T':  // time range
+            time_range_optarg = optarg;
+            break;
+        case 'v': //verbosity
+            verbosity_optarg = optarg;
+            break;
 
-        return E_OK;
-}
+        case OPT_NO_FAST_TOPN:  // disable fast top-N algorithm
+            args->use_fast_topn = false;
+            break;
+        case OPT_NO_BFINDEX:    // disable Bloom filter indexes
+            args->use_bfindex = false;
+            break;
 
+        // output format affecting options
+        case OPT_OUTPUT_ITEMS:
+            ecode = set_output_items(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_FORMAT:
+            ecode = set_output_format(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_TS_CONV:
+            ecode = set_output_ts_conv(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_TS_LOCALTIME:
+            args->output_params.ts_localtime = true;
+            break;
+        case OPT_OUTPUT_VOLUME_CONV:
+            ecode = set_output_volume_conv(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_TCP_FLAGS_CONV:
+            ecode = set_output_tcp_flags_conv(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_IP_ADDR_CONV:
+            ecode = set_output_ip_addr_conv(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_IP_PROTO_CONV:
+            ecode = set_output_ip_proto_conv(&args->output_params, optarg);
+            break;
+        case OPT_OUTPUT_DURATION_CONV:
+            ecode = set_output_duration_conv(&args->output_params, optarg);
+            break;
 
-error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
-                bool root_proc)
-{
-        error_code_t primary_errno = E_OK;
-        int opt;
-        int sort_key = LNF_FLD_ZERO_;
-        size_t path_str_len = 0;
-        bool have_fields = false;  // libnf fields are specified
+        case OPT_FIELDS:
+            ordinary_fields_optarg = optarg;
+            break;
+        case OPT_PROGRESS_BAR_TYPE:
+            ecode = set_progress_bar_type(&args->progress_bar_type, optarg);
+            break;
+        case OPT_PROGRESS_BAR_DEST:
+            args->progress_bar_dest = optarg;
+            break;
 
-        const char *short_opts = "a:f:l:o:s:t:T:v:";
-        const struct option long_opts[] = {
-                /* Long and short. */
-                {"aggregation", required_argument, NULL, 'a'},
-                {"filter", required_argument, NULL, 'f'},
-                {"limit", required_argument, NULL, 'l'},
-                {"order", required_argument, NULL, 'o'},
-                {"statistic", required_argument, NULL, 's'},
-                {"time-point", required_argument, NULL, 't'},
-                {"time-range", required_argument, NULL, 'T'},
-                {"verbosity", required_argument, NULL, 'v'},
+        case OPT_HELP:  // help
+            if (root_proc) {
+                printf("%s\n\n", usage_string);
+                printf("%s", help_string);
+            }
+            return E_HELP;
 
-                /* Long only. */
-                {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
-                {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
+        case OPT_VERSION:  // version
+            if (root_proc) {
+                printf("%s\n", PACKAGE_STRING);
+            }
+            return E_HELP;
 
-                {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
-                {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
-                {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
-                {"output-ts-localtime", no_argument, NULL,
-                        OPT_OUTPUT_TS_LOCALTIME},
-                {"output-volume-conv", required_argument, NULL,
-                        OPT_OUTPUT_VOLUME_CONV},
-                {"output-tcpflags-conv", required_argument, NULL,
-                        OPT_OUTPUT_TCP_FLAGS_CONV},
-                {"output-addr-conv", required_argument, NULL,
-                        OPT_OUTPUT_IP_ADDR_CONV},
-                {"output-proto-conv", required_argument, NULL,
-                        OPT_OUTPUT_IP_PROTO_CONV},
-                {"output-duration-conv", required_argument, NULL,
-                        OPT_OUTPUT_DURATION_CONV},
-
-                {"fields", required_argument, NULL, OPT_FIELDS},
-                {"progress-bar-type", required_argument, NULL,
-                        OPT_PROGRESS_BAR_TYPE},
-                {"progress-bar-dest", required_argument, NULL,
-                        OPT_PROGRESS_BAR_DEST},
-
-                {"help", no_argument, NULL, OPT_HELP},
-                {"version", no_argument, NULL, OPT_VERSION},
-
-                {0, 0, 0, 0} //termination required by getopt_long()
-        };
-
-
-        /* Set argument default values. */
-        args->use_fast_topn = true;
-        args->use_bfindex = true;
-        args->rec_limit = SIZE_MAX; //SIZE_MAX means record limit is unset
-
-        /* Prevent all non-root processes from printing getopt() errors. */
-        if (!root_proc) {
-                opterr = 0;
+        default:  // '?' or '0'
+            return E_ARG;
         }
 
-        /* Loop through all the command-line arguments. */
-        while (true) {
-                opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
-                if (opt == -1) {
-                        break; //all options processed successfully
-                }
-
-                switch (opt) {
-                case 'a': //aggregation
-                        args->working_mode = MODE_AGGR;
-                        primary_errno = fields_add_from_str(args->fields,
-                                        optarg, true);
-                        break;
-
-                case 'f': //filter expression
-                        primary_errno = set_filter(args, optarg);
-                        break;
-
-                case 'l': //record limit
-                        primary_errno = set_limit(args, optarg);
-                        break;
-
-                case 'o': //order
-                        //don't overwrite aggregation mode
-                        if (args->working_mode == MODE_LIST) {
-                                args->working_mode = MODE_SORT;
-                        }
-                        primary_errno = parse_sort_spec(args->fields, optarg);
-                        break;
-
-                case 's': //statistic shortcut
-                        args->working_mode = MODE_AGGR;
-                        primary_errno = parse_stat_spec(args->fields, optarg);
-
-                        // rf record limit is unset, set it to the defailt
-                        if (args->rec_limit == SIZE_MAX) {
-                            args->rec_limit = DEFAULT_STAT_REC_LIMIT;
-                        }
-                        break;
-
-                case 't': //time point
-                        primary_errno = set_time_point(args, optarg);
-                        break;
-
-                case 'T': //time range
-                        primary_errno = set_time_range(args, optarg);
-                        break;
-
-                case 'v': //verbosity
-                        primary_errno = set_verbosity(optarg);
-                        break;
-
-
-                case OPT_NO_FAST_TOPN: //disable fast top-N algorithm
-                        args->use_fast_topn = false;
-                        break;
-                case OPT_NO_BFINDEX:  // disable Bloom filter indexes
-                        args->use_bfindex = false;
-                        break;
-
-
-                case OPT_OUTPUT_ITEMS:
-                        primary_errno = set_output_items(&args->output_params,
-                                        optarg);
-                        break;
-
-                case OPT_OUTPUT_FORMAT:
-                        primary_errno = set_output_format(&args->output_params,
-                                        optarg);
-                        break;
-
-                case OPT_OUTPUT_TS_CONV:
-                        primary_errno = set_output_ts_conv(&args->output_params,
-                                        optarg);
-                        break;
-
-                case OPT_OUTPUT_TS_LOCALTIME:
-                        args->output_params.ts_localtime = true;
-                        break;
-
-                case OPT_OUTPUT_VOLUME_CONV:
-                        primary_errno = set_output_volume_conv(
-                                        &args->output_params, optarg);
-                        break;
-
-                case OPT_OUTPUT_TCP_FLAGS_CONV:
-                        primary_errno = set_output_tcp_flags_conv(
-                                        &args->output_params, optarg);
-                        break;
-
-                case OPT_OUTPUT_IP_ADDR_CONV:
-                        primary_errno = set_output_ip_addr_conv(
-                                        &args->output_params, optarg);
-                        break;
-
-                case OPT_OUTPUT_IP_PROTO_CONV:
-                        primary_errno = set_output_ip_proto_conv(
-                                        &args->output_params, optarg);
-                        break;
-
-                case OPT_OUTPUT_DURATION_CONV:
-                        primary_errno = set_output_duration_conv(
-                                        &args->output_params, optarg);
-                        break;
-
-
-                case OPT_FIELDS:
-                        primary_errno = fields_add_from_str(args->fields,
-                                        optarg, false);
-                        have_fields = true;
-                        break;
-
-                case OPT_PROGRESS_BAR_TYPE:
-                        primary_errno = set_progress_bar_type(
-                                        &args->progress_bar_type, optarg);
-                        break;
-
-                case OPT_PROGRESS_BAR_DEST:
-                        args->progress_bar_dest = optarg;
-                        break;
-
-
-                case OPT_HELP: //help
-                        if (root_proc) {
-                                printf("%s\n\n", usage_string);
-                                printf("%s", help_string);
-                        }
-                        return E_HELP;
-
-                case OPT_VERSION: //version
-                        if (root_proc) {
-                                printf("%s\n", PACKAGE_STRING);
-                        }
-                        return E_HELP;
-
-
-                default: /* '?' or '0' */
-                        return E_ARG;
-                }
-
-                if (primary_errno != E_OK) {
-                        return primary_errno;
-                }
+        if (ecode != E_OK) {
+            return ecode;
         }
+    }  // while (true) loop through all the command-line arguments
 
-
-        /*
-         * Non-option arguments are paths. Combine them into one string
-         * separated by the "file Separator" (0x1C) character for better MPI
-         * handling.
-         */
-        if (optind == argc) { //at least one path is mandatory
-                PRINT_ERROR(E_ARG, 0, "missing path");
-                return E_ARG;
+    ////////////////////////////////////////////////////////////////////////////
+    // parse and set verbosity level (early to affect also argument parsing)
+    if (verbosity_optarg) {
+        const char *const conversion_err = str_to_int(verbosity_optarg,
+                                                      (int *)&verbosity);
+        if (conversion_err) {
+            PRINT_ERROR(E_ARG, 0, "invalid verbosity level `%s': %s",
+                        verbosity_optarg, conversion_err);
+            return E_ARG;
         }
-
-        for (int i = optind; i < argc; ++i) { //loop through all non-option args
-                if (strchr(argv[i], 0x1C) != NULL) {
-                        PRINT_ERROR(E_ARG, 0, "file separator character (0x1C) is forbidden in path string",
-                                    argv[i]);
-                        return E_ARG;
-                }
-                path_str_len += strlen(argv[i]) + 1; //one more for sep or '\0'
+        if (!IN_RANGE_INCL(verbosity, VERBOSITY_QUIET, VERBOSITY_DEBUG)) {
+            PRINT_ERROR(E_ARG, 0, "invalid verbosity level `%s': allowed range is [%d,%d]",
+                        verbosity_optarg, VERBOSITY_QUIET, VERBOSITY_DEBUG);
+            return E_ARG;
         }
+        PRINT_DEBUG("args: setting verbosity level to debug");
+    }
 
-        args->path_str = calloc(path_str_len, sizeof (char)); //implicit null
-        if (args->path_str == NULL) {
-                PRINT_ERROR(E_MEM, 0, "calloc()");
-                return E_MEM;
+    // parse aggregation and sort option argument options
+    if (aggr_optarg) {  // aggregation mode with optional sorting
+        args->working_mode = MODE_AGGR;
+        ecode = fields_add_from_str(args->fields, aggr_optarg, true);
+        if (ecode != E_OK) {
+            return ecode;
         }
-
-        for (int i = optind; i < argc; ++i) { //loop through all non-option args
-                strcat(args->path_str, argv[i]); //copy path
-                if (i != argc - 1) { //not the last path, add separator
-                        args->path_str[strlen(args->path_str)] = 0x1C;
-                }
+        if (sort_optarg) {
+            PRINT_DEBUG("args: using aggregation mode with sorting");
+            ecode = parse_sort_spec(args->fields, sort_optarg);
+            if (ecode != E_OK) {
+                return ecode;
+            }
+        } else {
+            PRINT_DEBUG("args: using aggregation mode without sorting");
         }
-
-
-        /* If record limit was not set, disable record limit. */
-        if (args->rec_limit == SIZE_MAX) {
-                args->rec_limit = 0;
+    } else if (sort_optarg) {  // sort mode
+        PRINT_DEBUG("args: using sorting mode");
+        args->working_mode = MODE_SORT;
+        ecode = parse_sort_spec(args->fields, sort_optarg);
+        if (ecode != E_OK) {
+            return ecode;
         }
+    } else {  // listing mode
+        PRINT_DEBUG("args: using listing mode");
+        args->working_mode = MODE_LIST;
+    }
 
-        /* If progress bar type was not set, enable basic progress bar. */
-        if (args->progress_bar_type == PROGRESS_BAR_UNSET) {
-                args->progress_bar_type = PROGRESS_BAR_TOTAL;
+    // parse record limit argument option
+    if (limit_optarg) {  // record limit specified
+        const char *const conversion_err = str_to_size_t(limit_optarg,
+                                                         &args->rec_limit);
+        if (conversion_err) {
+            PRINT_ERROR(E_ARG, 0, "record limit `%s': %s", limit_optarg,
+                        conversion_err);
+            return E_ARG;
         }
+    } else {  // record limit not specified, disable record limit
+        args->rec_limit = 0;
+    }
 
-        /*
-         * Enable metadata-only mode if neither records nor prorcessed summary
-         * is desired.
-         */
-        if (args->output_params.print_processed_summ == OUTPUT_ITEM_NO &&
-                        args->output_params.print_records == OUTPUT_ITEM_NO) {
-                args->working_mode = MODE_META;
+    // check filter validity
+    if (filter_optarg) {
+        ecode = set_filter(args, filter_optarg);
+        if (ecode) {
+            return ecode;
         }
+    }
 
-        /* Set some mode specific defaluts. */
+    // parse time point and time range argument options
+    if (time_point_optarg && time_range_optarg) {
+        PRINT_ERROR(E_ARG, 0, "time point and time range are mutually exclusive");
+        return E_ARG;
+    } else if (time_point_optarg) {
+        ecode = set_time_point(args, time_point_optarg);
+        if (ecode) {
+            return ecode;
+        }
+    } else if (time_range_optarg) {
+        ecode = set_time_range(args, time_range_optarg);
+        if (ecode) {
+            return ecode;
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    /*
+     * Non-option arguments are paths. Combine them into one path string,
+     * separate them by the "File Separator" (0x1C) character.
+     */
+    if (optind == argc) {  // at least one path is mandatory
+        PRINT_ERROR(E_ARG, 0, "missing path");
+        return E_ARG;
+    }
+
+    // loop through all non-option args and search for the forbidden separator
+    size_t path_str_len = 0;
+    for (int i = optind; i < argc; ++i) {
+        if (strchr(argv[i], FILE_SEPARATOR)) {
+            PRINT_ERROR(E_ARG, 0, "File Separator character (0x%X) is forbidden in the path string",
+                        FILE_SEPARATOR, argv[i]);
+            return E_ARG;
+        }
+        path_str_len += strlen(argv[i]) + 1;  // + 1 for the separator or '\0'
+    }
+
+    // allocate memory for the path string
+    args->path_str = calloc(path_str_len, sizeof (*args->path_str));
+    if (!args->path_str) {
+        PRINT_ERROR(E_MEM, 0, "path string allocation");
+        return E_MEM;
+    }
+
+    // loop through all non-option args and copy them into the path string
+    for (int i = optind; i < argc; ++i) {
+        strcat(args->path_str, argv[i]);
+        if (i != argc - 1) {  //not the last option, add separator
+            args->path_str[strlen(args->path_str)] = FILE_SEPARATOR;
+        }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    // enable metadata-only mode if neither records nor
+    // processed-records-summary is desired
+    if (args->output_params.print_processed_summ == OUTPUT_ITEM_NO
+            && args->output_params.print_records == OUTPUT_ITEM_NO)
+    {
+        args->working_mode = MODE_META;
+    }
+
+    // if progress bar type was not set, enable basic progress bar
+    if (args->progress_bar_type == PROGRESS_BAR_UNSET) {
+        args->progress_bar_type = PROGRESS_BAR_TOTAL;
+    }
+
+    // parse ordinary fields option argument
+    if (ordinary_fields_optarg) {
+        ecode = fields_add_from_str(args->fields, ordinary_fields_optarg,
+                                    false);
+        if (ecode != E_OK) {
+            return ecode;
+        }
+    } else {  // ordinary fields not specidied, use default values
         switch (args->working_mode) {
         case MODE_LIST:
-                if (!have_fields) {
-                        char tmp[] = DEFAULT_LIST_FIELDS;  // modifiable copy
-                        primary_errno = fields_add_from_str(args->fields, tmp,
-                                                            false);
-                        assert(primary_errno == E_OK);
-                }
-                break;
-
+        {
+            char tmp[] = DEFAULT_LIST_FIELDS;  // modifiable copy
+            ecode = fields_add_from_str(args->fields, tmp, false);
+            assert(ecode == E_OK);
+            break;
+        }
         case MODE_SORT:
-                if (!have_fields) {
-                        char tmp[] = DEFAULT_SORT_FIELDS;
-                        primary_errno = fields_add_from_str(args->fields, tmp,
-                                                            false);
-                        assert(primary_errno == E_OK);
-                }
-                break;
-
+        {
+            char tmp[] = DEFAULT_SORT_FIELDS;
+            ecode = fields_add_from_str(args->fields, tmp, false);
+            assert(ecode == E_OK);
+            break;
+        }
         case MODE_AGGR:
-                if (!have_fields) {
-                        char tmp[] = DEFAULT_AGGR_FIELDS;
-                        primary_errno = fields_add_from_str(args->fields, tmp,
-                                                            false);
-                        assert(primary_errno == E_OK);
-                }
-
-                /* Find sort key in fields. */
-                for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
-                        if (args->fields[i].flags & LNF_SORT_FLAGS) {
-                                sort_key = args->fields[i].id;
-                                break;
-                        }
-                }
-
-                /* Fast top-N makes sense only under certain conditions. Reasons
-                 * to disable fast top-N algorithm are:
-                 * - user request by command line argument
-                 * - no record limit (all records would be exchanged anyway)
-                 * - sort key isn't one of traffic volume fields (data octets,
-                 *   packets, out bytes, out packets and aggregated flows)
-                 */
-                if (args->rec_limit == 0 || sort_key < LNF_FLD_DOCTETS ||
-                                sort_key > LNF_FLD_AGGR_FLOWS) {
-                        args->use_fast_topn = false;
-                }
-
-                break;
-
+        {
+            char tmp[] = DEFAULT_AGGR_FIELDS;
+            ecode = fields_add_from_str(args->fields, tmp, false);
+            assert(ecode == E_OK);
+            break;
+        }
         case MODE_META:
-                break;
-
+            break;
         default:
-                assert(!"unknown working mode");
+            assert(!"unknown working mode");
+        }
+    }
+
+    // set default output format and conversion parameters
+    if (args->output_params.format == OUTPUT_FORMAT_UNSET) {
+        args->output_params.format = OUTPUT_FORMAT_PRETTY;
+    }
+    switch (args->output_params.format) {
+    case OUTPUT_FORMAT_PRETTY:
+        if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
+            args->output_params.print_records = OUTPUT_ITEM_YES;
+        }
+        if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
+            args->output_params.print_processed_summ = OUTPUT_ITEM_YES;
+        }
+        if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
+            args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
         }
 
+        if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
+            args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
+            args->output_params.ts_conv_str = "%F %T";
+        }
+        if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
+            args->output_params.volume_conv = OUTPUT_VOLUME_CONV_METRIC_PREFIX;
+        }
+        if (args->output_params.tcp_flags_conv == OUTPUT_TCP_FLAGS_CONV_UNSET) {
+            args->output_params.tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_STR;
+        }
+        if (args->output_params.ip_addr_conv == OUTPUT_IP_ADDR_CONV_UNSET) {
+            args->output_params.ip_addr_conv = OUTPUT_IP_ADDR_CONV_STR;
+        }
+        if (args->output_params.ip_proto_conv == OUTPUT_IP_PROTO_CONV_UNSET) {
+            args->output_params.ip_proto_conv = OUTPUT_IP_PROTO_CONV_STR;
+        }
+        if (args->output_params.duration_conv == OUTPUT_DURATION_CONV_UNSET) {
+            args->output_params.duration_conv = OUTPUT_DURATION_CONV_STR;
+        }
+        break;
 
-        /* Set default output format and conversion parameters. */
-        if (args->output_params.format == OUTPUT_FORMAT_UNSET) {
-                args->output_params.format = OUTPUT_FORMAT_PRETTY;
+    case OUTPUT_FORMAT_CSV:
+        if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
+            args->output_params.print_records = OUTPUT_ITEM_YES;
+        }
+        if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
+            args->output_params.print_processed_summ = OUTPUT_ITEM_NO;
+        }
+        if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
+            args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
         }
 
-        switch (args->output_params.format) {
-        case OUTPUT_FORMAT_PRETTY:
-                if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
-                        args->output_params.print_records = OUTPUT_ITEM_YES;
-                }
-                if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
-                        args->output_params.print_processed_summ = OUTPUT_ITEM_YES;
-                }
-                if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
-                        args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
-                }
+        if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
+            args->output_params.ts_conv = OUTPUT_TS_CONV_NONE;
+        }
+        if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
+            args->output_params.volume_conv = OUTPUT_VOLUME_CONV_NONE;
+        }
+        if (args->output_params.tcp_flags_conv == OUTPUT_TCP_FLAGS_CONV_UNSET) {
+            args->output_params.tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_NONE;
+        }
+        if (args->output_params.ip_addr_conv == OUTPUT_IP_ADDR_CONV_UNSET) {
+            args->output_params.ip_addr_conv = OUTPUT_IP_ADDR_CONV_NONE;
+        }
+        if (args->output_params.ip_proto_conv == OUTPUT_IP_PROTO_CONV_UNSET) {
+            args->output_params.ip_proto_conv = OUTPUT_IP_PROTO_CONV_NONE;
+        }
+        if (args->output_params.duration_conv == OUTPUT_DURATION_CONV_UNSET) {
+            args->output_params.duration_conv = OUTPUT_DURATION_CONV_NONE;
+        }
+        break;
+    default:
+        assert(!"unkwnown output parameters format");
+    }
 
-                if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
-                        args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
-                        args->output_params.ts_conv_str = "%F %T";
-                }
-
-                if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
-                        args->output_params.volume_conv =
-                                OUTPUT_VOLUME_CONV_METRIC_PREFIX;
-                }
-
-                if (args->output_params.tcp_flags_conv ==
-                                OUTPUT_TCP_FLAGS_CONV_UNSET) {
-                        args->output_params.tcp_flags_conv =
-                                OUTPUT_TCP_FLAGS_CONV_STR;
-                }
-
-                if (args->output_params.ip_addr_conv ==
-                                OUTPUT_IP_ADDR_CONV_UNSET) {
-                        args->output_params.ip_addr_conv =
-                                OUTPUT_IP_ADDR_CONV_STR;
-                }
-
-                if (args->output_params.ip_proto_conv ==
-                                OUTPUT_IP_PROTO_CONV_UNSET) {
-                        args->output_params.ip_proto_conv =
-                                OUTPUT_IP_PROTO_CONV_STR;
-                }
-
-                if (args->output_params.duration_conv ==
-                                OUTPUT_DURATION_CONV_UNSET) {
-                        args->output_params.duration_conv =
-                                OUTPUT_DURATION_CONV_STR;
-                }
-
+    ////////////////////////////////////////////////////////////////////////////
+    /*
+     * Reasons to forcibly disable the fast Top-N algorithm are:
+     *   - no record limit specified (all records would be exchanged anyway),
+     *   - sorting is disabled or sort key is not one of traffic volume fields
+     *     (data octets, packets, out bytes, out packets and aggregated flows).
+     */
+    if (args->working_mode == MODE_AGGR) {
+        // find sort key among fields
+        int sort_key = LNF_FLD_ZERO_;
+        for (size_t i = LNF_FLD_ZERO_; i < LNF_FLD_TERM_; ++i) {
+            if (args->fields[i].flags & LNF_SORT_FLAGS) {
+                sort_key = i;
                 break;
+            }
+        }
+        if (!IN_RANGE_INCL(sort_key, LNF_FLD_DOCTETS, LNF_FLD_AGGR_FLOWS)
+                || !args->rec_limit)
+        {
+            args->use_fast_topn = false;
+        }
+    }
 
-        case OUTPUT_FORMAT_CSV:
-                if (args->output_params.print_records == OUTPUT_ITEM_UNSET) {
-                        args->output_params.print_records = OUTPUT_ITEM_YES;
-                }
-                if (args->output_params.print_processed_summ == OUTPUT_ITEM_UNSET) {
-                        args->output_params.print_processed_summ = OUTPUT_ITEM_NO;
-                }
-                if (args->output_params.print_metadata_summ == OUTPUT_ITEM_UNSET) {
-                        args->output_params.print_metadata_summ = OUTPUT_ITEM_NO;
-                }
+    ////////////////////////////////////////////////////////////////////////////
+    if (root_proc && verbosity >= VERBOSITY_DEBUG) {
+        char begin[255], end[255];
+        char *path = args->path_str;
+        int c;
 
-                if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
-                        args->output_params.ts_conv = OUTPUT_TS_CONV_NONE;
-                }
-
-                if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
-                        args->output_params.volume_conv = OUTPUT_VOLUME_CONV_NONE;
-                }
-
-                if (args->output_params.tcp_flags_conv ==
-                                OUTPUT_TCP_FLAGS_CONV_UNSET) {
-                        args->output_params.tcp_flags_conv =
-                                OUTPUT_TCP_FLAGS_CONV_NONE;
-                }
-
-                if (args->output_params.ip_addr_conv ==
-                                OUTPUT_IP_ADDR_CONV_UNSET) {
-                        args->output_params.ip_addr_conv =
-                                OUTPUT_IP_ADDR_CONV_NONE;
-                }
-
-                if (args->output_params.ip_proto_conv ==
-                                OUTPUT_IP_PROTO_CONV_UNSET) {
-                        args->output_params.ip_proto_conv =
-                                OUTPUT_IP_PROTO_CONV_NONE;
-                }
-
-                if (args->output_params.duration_conv ==
-                                OUTPUT_DURATION_CONV_UNSET) {
-                        args->output_params.duration_conv =
-                                OUTPUT_DURATION_CONV_NONE;
-                }
-
-                break;
-        default:
-                assert(!"unkwnown output parameters format");
+        printf("------------------------------------------------------\n");
+        printf("mode: %s\n", working_mode_to_str(args->working_mode));
+        if (args->working_mode == MODE_AGGR && args->use_fast_topn) {
+            printf("flags: using fast top-N algorithm\n");
         }
 
+        printf("fields:\n");
+        fields_print(args->fields);
 
-        if (root_proc && verbosity >= VERBOSITY_DEBUG) {
-                char begin[255], end[255];
-                char *path = args->path_str;
-                int c;
+        if(args->filter_str) {
+            printf("filter: %s\n", args->filter_str);
+        }
 
-                printf("------------------------------------------------------\n");
-                printf("mode: %s\n", working_mode_to_str(args->working_mode));
-                if (args->working_mode == MODE_AGGR && args->use_fast_topn) {
-                        printf("flags: using fast top-N algorithm\n");
-                }
-
-                printf("fields:\n");
-                fields_print(args->fields);
-
-                if(args->filter_str) {
-                        printf("filter: %s\n", args->filter_str);
-                }
-
-                printf("paths:\n\t");
-                while ((c = *path++)) {
-                        if (c == 0x1C) { //substitute separator with end of line
-                                putchar('\n');
-                                putchar('\t');
-                        } else {
-                                putchar(c);
-                        }
-                }
+        printf("paths:\n\t");
+        while ((c = *path++)) {
+            if (c == 0x1C) { //substitute separator with end of line
                 putchar('\n');
-
-                strftime(begin, sizeof(begin), "%c", &args->time_begin);
-                strftime(end, sizeof(end), "%c", &args->time_end);
-                printf("time range: %s - %s\n", begin, end);
-                printf("------------------------------------------------------\n\n");
+                putchar('\t');
+            } else {
+                putchar(c);
+            }
         }
+        putchar('\n');
 
+        strftime(begin, sizeof(begin), "%c", &args->time_begin);
+        strftime(end, sizeof(end), "%c", &args->time_end);
+        printf("time range: %s - %s\n", begin, end);
+        printf("------------------------------------------------------\n\n");
+    }
 
-        return E_OK;
+    return E_OK;
 }
 
-
-void arg_free(struct cmdline_args *args)
+void
+arg_free(struct cmdline_args *args)
 {
         free(args->path_str);
 }

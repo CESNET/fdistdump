@@ -94,7 +94,7 @@ static char * error_code_to_str(error_code_t e1)
                 break;
 
         case E_ARG:
-                snprintf(msg, MAX_STR_LEN, "command line argument");
+                snprintf(msg, MAX_STR_LEN, "command line arguments");
                 break;
 
         case E_PATH:
