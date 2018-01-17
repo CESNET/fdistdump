@@ -82,13 +82,14 @@ EXTRA_DIST+=tests/advanced/tests_setup.sh tests/advanced/diff_results.sh
 EXTRA_DIST+=examples
 
 # add a target for creating an RPM package
-.PHONY: rpm
-rpm:
-	make clean;
-	make dist;
-	rm -rf rpmbuild;
-	mkdir -p rpmbuild/{RPMS,SRPMS,SPECS,SOURCES,BUILD};
-	cp fdistdump.spec rpmbuild/SPECS;
-	mv fdistdump-@VERSION@.tar.gz rpmbuild/SOURCES;
-	rpmbuild -ba --noclean rpmbuild/SPECS/fdistdump.spec
-	rpmbuild -bl rpmbuild/SPECS/fdistdump.spec
+.PHONY: rpm clean-rpm
+clean-rpm:
+	rm -rf rpmbuild
+
+# make sure no MPI modules are loaded before running this targer
+rpm: clean-rpm clean dist
+	mkdir -p rpmbuild/{RPMS,SRPMS,SPECS,SOURCES,BUILD}
+	cp @PACKAGE@.spec rpmbuild/SPECS
+	cp @PACKAGE@-@VERSION@.tar.gz rpmbuild/SOURCES
+	rpmbuild --define "_topdir `pwd`/rpmbuild" -ba --noclean rpmbuild/SPECS/@PACKAGE@.spec
+	rpmbuild --define "_topdir `pwd`/rpmbuild" -bl rpmbuild/SPECS/@PACKAGE@.spec
