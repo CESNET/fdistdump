@@ -1,4 +1,4 @@
-#fdistdump binary
+# fdistdump binary
 bin_PROGRAMS=fdistdump
 fdistdump_SOURCES=src/main.c \
 		  src/master.c src/master.h \
@@ -12,7 +12,7 @@ if ENABLE_BFINDEX
 fdistdump_SOURCES+=src/bfindex.c src/bfindex.h
 endif  # ENABLE_BFINDEX
 
-#define variables for tests
+# define variables for the tests
 TESTS=
 check_PROGRAMS=
 AM_CPPFLAGS=-I./src
@@ -31,7 +31,7 @@ ADVANCED_TESTS=tests/advanced/create_test_data.test \
 	       tests/advanced/stats_filter.test \
 	       tests/advanced/cleanup_test_data.sh
 
-#basic tests and its binaries
+# basic tests and its binaries
 if ENABLE_BASIC_TESTS
 TESTS+=$(BASIC_TESTS)
 check_PROGRAMS+=test_mpi_init \
@@ -59,24 +59,36 @@ test_mem_setup_SOURCES=tests/mem_setup.c \
 		       tests/test_common.c tests/test_common.h \
 		       src/common.c \
 		       src/arg_parse.c
-endif #ENABLE_BASIC_TESTS
+endif  # ENABLE_BASIC_TESTS
 
-#advanced tests and its binaries
+# advanced tests and its binaries
 if ENABLE_ADVANCED_TESTS
 TESTS+=$(ADVANCED_TESTS)
 check_PROGRAMS+=test_create_test_data
 
 test_create_test_data_SOURCES=tests/advanced/create_test_data.c
-endif #ENABLE_ADVANCED_TESTS
+endif  # ENABLE_ADVANCED_TESTS
 
 
-#add some files to the distribution package
-##manual page
+# add some files to the distribution package
+## manual page
 dist_man_MANS=doc/man/fdistdump.1
-##README.md, licence
+## README.md, licence
 EXTRA_DIST=README.md LICENSE
-##test scripts
+## test scripts
 EXTRA_DIST+=$(BASIC_TESTS) $(ADVANCED_TESTS)
 EXTRA_DIST+=tests/advanced/tests_setup.sh tests/advanced/diff_results.sh
-##examples
+## examples
 EXTRA_DIST+=examples
+
+# add a target for creating an RPM package
+.PHONY: rpm
+rpm:
+	make clean;
+	make dist;
+	rm -rf rpmbuild;
+	mkdir -p rpmbuild/{RPMS,SRPMS,SPECS,SOURCES,BUILD};
+	cp fdistdump.spec rpmbuild/SPECS;
+	mv fdistdump-@VERSION@.tar.gz rpmbuild/SOURCES;
+	rpmbuild -ba --noclean rpmbuild/SPECS/fdistdump.spec
+	rpmbuild -bl rpmbuild/SPECS/fdistdump.spec
