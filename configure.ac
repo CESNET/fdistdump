@@ -38,8 +38,7 @@ C_WARN+=" -Wmissing-include-dirs"  # a user-supplied include directory (-I) does
 C_WARN+=" -Wshadow"  # a local variable or type declaration shadows something
 C_WARN+=" -Wdouble-promotion"  # a value of type "float" is implicitly promoted
                                # to "double"
-C_WARN+=" -Wswitch -Wswitch-bool -Wswitch-default -Wswitch-enum \
--Wswitch-unreachable"  # switch statement related warnings
+C_WARN+=" -Wswitch -Wswitch-default -Wswitch-enum"  # switch related warnings
 C_WARN+=" -Wfloat-equal"  # if floating-point values are used in equality
                           # comparisons
 C_WARN+=" -Wundef"  # an undefined identifier is evaluated in an "#if" directive
@@ -152,7 +151,7 @@ echo
 echo "-------------------------------------------------------------------------"
 echo "$PACKAGE $VERSION"
 echo
-echo "Compilation:"
+echo "Build environment:"
 # compiler
 echo "  CC      : $CC"
 # extra flags to give to the C preprocessor and programs that use it
@@ -169,6 +168,12 @@ echo "  LDFLAGS : $LDFLAGS"
 echo "  LDLIBS  : $LDLIBS"
 # automake uses $LIBS instead of LDLIBS
 echo "  LIBS    : $LIBS"
+echo
+echo "MPI environment:"
+echo "  MPI_COMPILER: $MPI_COMPILER"
+echo "  MPI_HOME    : $MPI_HOME"
+echo "  MPI_INCLUDE : $MPI_INCLUDE"
+echo "  MPI_SUFFIX  : $MPI_SUFFIX"
 echo
 echo "Libraries:"
 echo -n "  libnf  : "; test "$enable_libnf" != "no" && echo "yes" || echo "no"

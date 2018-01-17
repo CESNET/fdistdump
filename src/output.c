@@ -39,17 +39,6 @@
  */
 
 
-/*
- * XXX: Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED
- * can use undefined s6_addr32" GNU C library bug (fixed in version 2.25).
- * https://sourceware.org/bugzilla/show_bug.cgi?id=16421
- *
- * BSD_SOURCE and _SVID_SOURCE are deprecated aliases for _DEFAULT_SOURCE.
- */
-#if defined (__GNU_LIBRARY__) && __GLIBC__ <= 2 && __GLIBC_MINOR__ < 25
-#    define _SVID_SOURCE
-#endif
-
 #include "common.h"
 #include "output.h"
 #include "print.h"
@@ -57,8 +46,17 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
-
+/*
+ * Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED
+ * can use undefined s6_addr32" GNU C library bug (fixed in version 2.25).
+ * https://sourceware.org/bugzilla/show_bug.cgi?id=16421
+ */
+#if __GLIBC__ <= 2 && __GLIBC_MINOR__ < 25
+#define __USE_MISC
 #include <arpa/inet.h> //inet_ntop(), ntohl()
+#else
+#include <arpa/inet.h> //inet_ntop(), ntohl()
+#endif
 
 
 #define PRETTY_PRINT_SEP " "
