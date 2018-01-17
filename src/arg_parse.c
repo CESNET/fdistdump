@@ -1770,6 +1770,9 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             args->output_params.duration_conv = OUTPUT_DURATION_CONV_NONE;
         }
         break;
+
+    case OUTPUT_FORMAT_UNSET:
+        assert(!"illegal output parameters format");
     default:
         assert(!"unkwnown output parameters format");
     }

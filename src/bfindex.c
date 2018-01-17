@@ -257,10 +257,23 @@ build_oper_node(const ff_node_t *ff_node)
     case FF_OP_OR:
         node_type = NODE_TYPE_OPER_OR;
         break;
-    default:
+    case FF_OP_UNDEF:
+    case FF_OP_NOT:
+    case FF_OP_IN:
+    case FF_OP_YES:
+    case FF_OP_NOOP:
+    case FF_OP_EQ:
+    case FF_OP_LT:
+    case FF_OP_GT:
+    case FF_OP_ISSET:
+    case FF_OP_ISNSET:
+    case FF_OP_EXIST:
+    case FF_OP_TERM_:
         PRINT_DEBUG("bfindex: build: skipping other node");
         global_ecode = BFINDEX_E_OK;
         return NULL;
+    default:
+        assert(!"unknown ff_node_t.oper");
     }
 
     struct bfindex_node *const node = malloc(sizeof (*node));
@@ -303,10 +316,30 @@ build_node(const ff_node_t *ff_node)
         return build_addr_node(ff_node);
     case FF_TYPE_UNSUPPORTED:  // operator node (probably)
         return build_oper_node(ff_node);
-    default:                   // filter node of some another type
+    case FF_TYPE_UNSIGNED:
+    case FF_TYPE_UNSIGNED_BIG:
+    case FF_TYPE_SIGNED:
+    case FF_TYPE_SIGNED_BIG:
+    case FF_TYPE_UINT8:
+    case FF_TYPE_UINT16:
+    case FF_TYPE_UINT32:
+    case FF_TYPE_UINT64:
+    case FF_TYPE_INT8:
+    case FF_TYPE_INT16:
+    case FF_TYPE_INT32:
+    case FF_TYPE_INT64:
+    case FF_TYPE_DOUBLE:
+    case FF_TYPE_MAC:
+    case FF_TYPE_STRING:
+    case FF_TYPE_MPLS:
+    case FF_TYPE_TIMESTAMP:
+    case FF_TYPE_TIMESTAMP_BIG:
+    case FF_TYPE_TERM_:
         PRINT_DEBUG("bfindex: build: skipping unknown node");
         global_ecode = BFINDEX_E_OK;
         return NULL;
+    default:                   // filter node of some another type
+        assert(!"unknown ff_node_t.type");
     }
 }
 
@@ -338,6 +371,9 @@ bfindex_tree_contains(const bfi_index_ptr_t index_ptr,
             return bfi_addr_is_stored(index_ptr,
                                       (const unsigned char *)node->addr.data,
                                       sizeof (node->addr));
+
+        case NODE_TYPE_UNSET:
+            assert(!"illegal node type");
         default:
             assert(!"unknown node type");
     }

@@ -105,6 +105,8 @@ static char * error_code_to_str(error_code_t e1)
                 snprintf(msg, MAX_STR_LEN, "bfindex");
                 break;
 
+        case E_HELP:
+                assert(!"illegal error code");
         default:
                 assert(!"unknown error code");
         };

@@ -308,6 +308,8 @@ static const char * timestamp_to_str(const uint64_t *ts)
                                 PRIu64, msec);
                 break;
 
+        case OUTPUT_TS_CONV_UNSET:
+                assert(!"illegal timestamp conversion");
         default:
                 assert(!"unknown timestamp conversion");
         }
@@ -343,6 +345,8 @@ static const char * double_volume_to_str(const double *volume)
                 }
                 break;
 
+        case OUTPUT_VOLUME_CONV_UNSET:
+                assert(!"illegal volume conversion");
         default:
                 assert(!"unknown volume conversion");
         }
@@ -385,6 +389,8 @@ static const char * volume_to_str(const uint64_t *volume)
                 }
                 break;
 
+        case OUTPUT_VOLUME_CONV_UNSET:
+                assert(!"illegal volume conversion");
         default:
                 assert(!"unknown volume conversion");
         }
@@ -417,6 +423,8 @@ static const char * tcp_flags_to_str(const uint8_t *flags)
                 global_str[idx] = '\0';
                 break;
 
+        case OUTPUT_TCP_FLAGS_CONV_UNSET:
+                assert(!"illegal IP protocol conversion");
         default:
                 assert(!"unknown IP protocol conversion");
         }
@@ -442,6 +450,8 @@ static const char * ip_proto_to_str(const uint8_t *proto)
 
                 return ret;
 
+        case OUTPUT_IP_PROTO_CONV_UNSET:
+                assert(!"illegal ip protocol conversion");
         default:
                 assert(!"unknown ip protocol conversion");
         }
@@ -476,6 +486,8 @@ static const char * duration_to_str(const uint64_t *duration)
                 break;
         }
 
+        case OUTPUT_DURATION_CONV_UNSET:
+                assert(!"illegal duration conversion");
         default:
                 assert(!"unknown duration conversion");
         }
@@ -517,6 +529,8 @@ static const char * mylnf_addr_to_str(const lnf_ip_t *addr)
 
                 break;
 
+        case OUTPUT_IP_ADDR_CONV_UNSET:
+                assert(!"illegal IP address conversion");
         default:
                 assert(!"unknown IP address conversion");
         }
@@ -656,6 +670,8 @@ static const char * mylnf_brec_to_str(const lnf_brec1_t *brec)
                                 field_to_str(LNF_FLD_AGGR_FLOWS, &brec->flows));
                 break;
 
+        case OUTPUT_FORMAT_UNSET:
+                assert(!"illegal output format");
         default:
                 assert(!"unknown output format");
         }
@@ -791,6 +807,8 @@ static void print_field(const char *string, size_t string_width,
                 printf("%s%c" , string, CSV_SEP);
                 break;
 
+        case OUTPUT_FORMAT_UNSET:
+                assert(!"illegal output format");
         default:
                 assert(!"unknown output format");
         }
@@ -1008,6 +1026,8 @@ void print_processed_summ(const struct processed_summ *s, double duration)
                                 double_volume_to_str(&flows_per_sec));
                 break;
 
+        case OUTPUT_FORMAT_UNSET:
+                assert(!"illegal output format");
         default:
                 assert(!"unknown output format");
         }
@@ -1073,6 +1093,8 @@ void print_metadata_summ(const struct metadata_summ *s)
 
                 break;
 
+        case OUTPUT_FORMAT_UNSET:
+                assert(!"illegal output format");
         default:
                 assert(!"unknown output format");
         }

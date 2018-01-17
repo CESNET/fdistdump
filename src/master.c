@@ -234,6 +234,9 @@ static void progress_bar_print(void)
                 putc('}', pbc->out_stream);
                 break;
 
+        case PROGRESS_BAR_NONE:
+        case PROGRESS_BAR_UNSET:
+                assert(!"illegal progress bar type");
         default:
                 assert(!"unknown progress bar type");
                 break;
