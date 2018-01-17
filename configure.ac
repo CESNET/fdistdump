@@ -38,13 +38,12 @@ C_WARN+=" -Wmissing-include-dirs"  # a user-supplied include directory (-I) does
 C_WARN+=" -Wshadow"  # a local variable or type declaration shadows something
 C_WARN+=" -Wdouble-promotion"  # a value of type "float" is implicitly promoted
                                # to "double"
-C_WARN+=" -Wswitch-default"  # switch does not have a default case
-C_WARN+=" -Wswitch-enum"  # switch has an index of enumerated type and lacks a
-                          # case for one or more of the named codes of that enum
+C_WARN+=" -Wswitch -Wswitch-bool -Wswitch-default -Wswitch-enum \
+-Wswitch-unreachable"  # switch statement related warnings
 C_WARN+=" -Wfloat-equal"  # if floating-point values are used in equality
                           # comparisons
 C_WARN+=" -Wundef"  # an undefined identifier is evaluated in an "#if" directive
-C_WARN+=" -Wformat=2"
+C_WARN+=" -Wformat=2 -Wno-format-y2k"  # disable buggy Y2K warnings
 
 C_OTHER="-fstack-protector-strong"  # emit code to check for buffer overflows
 

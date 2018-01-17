@@ -178,7 +178,7 @@ void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
 
         off += snprintf(res + off, MAX_STR_LEN - off, "\n");
         /* Finally print string res. */
-        fprintf(stream, res);
+        fputs(res, stream);
 }
 /**
  * @}

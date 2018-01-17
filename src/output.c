@@ -302,8 +302,10 @@ static const char * timestamp_to_str(const uint64_t *ts)
                 sec = *ts / 1000;
                 msec = *ts % 1000;
 
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
                 off = strftime(global_str, sizeof (global_str),
                                 output_params.ts_conv_str, timeconv(&sec));
+#pragma GCC diagnostic warning "-Wformat-nonliteral"
                 snprintf(global_str + off, sizeof (global_str) - off, ".%.3"
                                 PRIu64, msec);
                 break;
