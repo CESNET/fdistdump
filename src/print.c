@@ -1,4 +1,4 @@
-/** Implementation of console message printing (debug,info,warning, error).
+/** Implementation of console message printing (debug, info, warning, error).
  */
 
 /*
@@ -115,70 +115,74 @@ static char * error_code_to_str(error_code_t e1)
 }
 
 
-void print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
-                const char *func, const int line, ...)
+void
+print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
+          const char *func, const int line, ...)
 {
-        FILE *stream = stderr;
-        va_list arg_list;
+    FILE *const stream = stderr;
 
-        char res[MAX_STR_LEN];
-        size_t off = 0;
+    char str[MAX_STR_LEN];
+    char *str_term = str;
+    size_t remaining = MAX_STR_LEN;
 
-        /* Add prefix for every verbosity. */
-        off += snprintf(res + off, MAX_STR_LEN - off, "%s: ", prefix);
+    // initialize with prefix for every verbosity level
+    SNPRINTF_APPEND(str_term, remaining, "%s: ", prefix);
 
-        /* Add fdistdump error info. */
-        if (e1 != E_OK) {
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s: ",
-                                error_code_to_str(e1));
+    // append fdistdump error info
+    if (e1 != E_OK) {
+        SNPRINTF_APPEND(str_term, remaining, "%s: ", error_code_to_str(e1));
 
-                /* Add external (libnf) error info. */
-                if (e1 == E_LNF && e2 == LNF_ERR_OTHER_MSG) {
-                        char lnf_error_str[LNF_MAX_STRING];
-
-                        lnf_error(lnf_error_str, LNF_MAX_STRING);
-                        off += snprintf(res + off, MAX_STR_LEN - off, "%s: ",
-                                        lnf_error_str);
-                }
+        // append external error info (libnf)
+        if (e1 == E_LNF && e2 == LNF_ERR_OTHER_MSG) {
+            char lnf_error_str[LNF_MAX_STRING];
+            lnf_error(lnf_error_str, LNF_MAX_STRING);
+            SNPRINTF_APPEND(str_term, remaining, "%s: ", lnf_error_str);
         }
+    }
 
-        /* Add additional string from format (first in arg_list) and varargs. */
-        va_start(arg_list, line);
-        off += vsnprintf(res + off, MAX_STR_LEN - off,
-                        va_arg(arg_list, const char *), arg_list);
-        va_end(arg_list);
+    // append user string based on the format (first in arg_list) and va_args
+    va_list arg_list;
+    va_start(arg_list, line);
+    const char *format_str = va_arg(arg_list, const char *);
+    const size_t would_write = vsnprintf(str_term, remaining, format_str,
+                                         arg_list);
+    if (would_write >= remaining) {  // the output was truncated
+        remaining = 0;
+    } else {  // the output was not truncated
+        str_term += would_write;
+        remaining -= would_write;
+    }
+    va_end(arg_list);
 
-        /* Add location MPI and OpenMP info only for debug verbosity. */
-        if (verbosity >= VERBOSITY_DEBUG) {
-                char mpi_processor_name[MPI_MAX_PROCESSOR_NAME + 1];
-                int mpi_processor_name_len;
-                int mpi_world_rank;
-                int mpi_world_size;
+    // add location, MPI, and OpenMP string only for the debug verbosity level
+    if (verbosity >= VERBOSITY_DEBUG) {
+        // append location information
+        SNPRINTF_APPEND(str_term, remaining, "\t[location: %s:%s():%d]", file,
+                        func, line);
 
-                MPI_Comm_rank(MPI_COMM_WORLD, &mpi_world_rank);
-                MPI_Comm_size(MPI_COMM_WORLD, &mpi_world_size);
-                MPI_Get_processor_name(mpi_processor_name,
-                                &mpi_processor_name_len);
-                mpi_processor_name[mpi_processor_name_len] = '\0';
+        // append MPI information
+        int mpi_world_rank;
+        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_world_rank);
+        int mpi_world_size;
+        MPI_Comm_size(MPI_COMM_WORLD, &mpi_world_size);
+        char mpi_processor_name[MPI_MAX_PROCESSOR_NAME + 1];
+        int mpi_processor_name_len;
+        MPI_Get_processor_name(mpi_processor_name, &mpi_processor_name_len);
+        mpi_processor_name[mpi_processor_name_len] = '\0';
+        SNPRINTF_APPEND(str_term, remaining, " [MPI: %d/%d %s]", mpi_world_rank,
+                        mpi_world_size, mpi_processor_name);
 
-                off += snprintf(res + off, MAX_STR_LEN - off,
-                                "\t[location: %s:%s():%d]", file, func, line);
-                off += snprintf(res + off, MAX_STR_LEN - off,
-                                " [MPI: %d/%d %s]", mpi_world_rank,
-                                mpi_world_size, mpi_processor_name);
 #ifdef _OPENMP
-                if (omp_in_parallel()) {
-                        off += snprintf(res + off, MAX_STR_LEN - off,
-                                        " [OpenMP: %d/%d]",
-                                        omp_get_thread_num(),
-                                        omp_get_num_threads());
-                }
-#endif //_OPENMP
+        if (omp_in_parallel()) {  // append OpenMP information
+            SNPRINTF_APPEND(str_term, remaining, " [OpenMP: %d/%d]",
+                            omp_get_thread_num(), omp_get_num_threads());
         }
+#endif  // _OPENMP
+    }
 
-        off += snprintf(res + off, MAX_STR_LEN - off, "\n");
-        /* Finally print string res. */
-        fputs(res, stream);
+    // append newline and print string from the beginning
+    SNPRINTF_APPEND(str_term, remaining, "%s", "\n");
+    fputs(str, stream);
 }
 /**
  * @}

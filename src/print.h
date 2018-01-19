@@ -58,7 +58,51 @@ typedef enum {
 extern verbosity_t verbosity;
 
 
-/** \breif Print error/warning/info/debug macros.
+/**
+* @brief Wrapper for a safer string appending using snprintf(). UNSAFE MACRO!
+*
+* The functions snprintf() and vsnprintf() do not write more than size bytes
+* (including the terminating null byte). The main reason behind this macro is
+* that if the output was truncated due to this limit, then THE RETURN VALUE IS
+* THE NUMBER OF CHARACTERS (EXCLUDING THE TERMINATING NULL BYTE) WHICH WOULD
+* HAVE BEEN WRITTEN to the final string if enough space had been available.
+* Thus, a return value of size or more means that the output was truncated.
+*
+* Both str_term and remaining_size are modified in each call:
+* If the added string did not have to be truncated, then str_term pointer is
+* moved to point to the new first terminating null byte and remaining_size size
+* is decreased by the length of the added string.
+* If snprintf() could not write all the bytes (the added string had to be
+* truncated) or completely skipped, remaining_size is set to 0 so the future
+* expansions of SNPRINTF_APPEND would not case buffer overflow.
+*
+* The usage should be something like:
+* char *const string = calloc(STR_LEN, sizeof (*string));
+* char *str_term = string;  // to prevent loss of the original pointer
+* size_t str_size = STR_LEN;
+* SNPRINTF_APPEND(str_term, str_size, "some format", ...);
+* SNPRINTF_APPEND(str_term, str_size, "some other format", ...);
+*
+* @param[in,out] str_term Pointer to the place in the string, where the
+*                         appending should start. Usually, it is the first
+*                         terminating null byte.
+* @param[in,out] remaining_size Number of bytes remaining in the string.
+* @param[in] format Format string to pass to snprintf().
+* @param[in] ... Additional argument corresponding to the format string.
+*/
+#define SNPRINTF_APPEND(str_term, remaining_size, format, ...) \
+    do { \
+        const size_t _would_write = snprintf(str_term, remaining_size, format, \
+                                             __VA_ARGS__); \
+        if (_would_write >= remaining_size) {  /* the output was truncated */ \
+            remaining_size = 0; \
+        } else {  /* the output was not truncated */ \
+            str_term += _would_write; \
+            remaining_size -= _would_write; \
+        } \
+    } while (false)
+
+/** \brief Print error/warning/info/debug macros.
  *
  * \param[in] e1     fdistdump error code.
  * \param[in] e2     External error code (e.g. code returned by libnf).
@@ -97,7 +141,7 @@ extern verbosity_t verbosity;
         } while (0)
 
 
-/** \breif Print error/warning/info/debug message.
+/** \brief Print error/warning/info/debug message.
  *
  * Function prints everything to the string first and than prints that string
  * to the output by a single call of fprintf(). This is a try to prevent MPI to

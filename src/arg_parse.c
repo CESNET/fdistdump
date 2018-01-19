@@ -72,6 +72,8 @@
 #define DEFAULT_STAT_SORT_KEY "flows"
 #define DEFAULT_STAT_REC_LIMIT "10"
 
+#define DEFAULT_PRETTY_TS_CONV "%F %T"
+
 #define MIN_IP_BITS 0
 #define MAX_IPV4_BITS 32
 #define MAX_IPV6_BITS 128
@@ -1721,7 +1723,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
 
         if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
             args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
-            args->output_params.ts_conv_str = "%F %T";
+            args->output_params.ts_conv_str = DEFAULT_PRETTY_TS_CONV;
         }
         if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
             args->output_params.volume_conv = OUTPUT_VOLUME_CONV_METRIC_PREFIX;

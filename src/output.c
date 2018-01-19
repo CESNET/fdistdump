@@ -271,50 +271,48 @@ typedef const char *(*field_to_str_t)(const void *);
 static const char * field_to_str(int field, const void *data);
 
 
-/** \brief Convert timestamp in uint64_t to string.
+/**
+ * @brief Convert a timestamp in uint64_t to string.
  *
- * Timestamp is composed from Unix time (number of seconds that have elapsed
- * since 1.1.1970 UTC) and milliseconds. Seconds are multiplied by 1000,
- * afterward milliseconds are added.
+ * Timestamp is composed of Unix time (number of seconds that have elapsed since
+ * 1.1.1970 UTC) and additional milliseconds elapsed since the last full second.
  *
- * \param[in] ts Seconds and milliseconds in one uint64_t variable.
- * \return String timestamp representation. Static memory.
+ * @param[in] ts Unix time extended to a milliseconds precision.
+ *
+ * @return Textual representation of the timestamp (in static memory).
  */
-static const char * timestamp_to_str(const uint64_t *ts)
+static const char *
+timestamp_to_str(const uint64_t *ts)
 {
-        time_t sec;
-        uint64_t msec;
-        size_t off;
-        struct tm *(*timeconv)(const time_t *);
-
-        timeconv = output_params.ts_localtime ? localtime : gmtime;
-
-        switch (output_params.ts_conv) {
-        case OUTPUT_TS_CONV_NONE:
-                snprintf(global_str, sizeof (global_str), "%" PRIu64, *ts);
-                break;
-
-        case OUTPUT_TS_CONV_STR:
-                assert(output_params.ts_conv_str != NULL);
-
-                sec = *ts / 1000;
-                msec = *ts % 1000;
-
+    switch (output_params.ts_conv) {
+    case OUTPUT_TS_CONV_NONE:
+        snprintf(global_str, sizeof (global_str), "%" PRIu64, *ts);
+        break;
+    case OUTPUT_TS_CONV_STR: {
+        assert(output_params.ts_conv_str);
+        struct tm *(*const timeconv)(const time_t *) =
+            output_params.ts_localtime ? localtime : gmtime;
+        const time_t sec = *ts / 1000;
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
-                off = strftime(global_str, sizeof (global_str),
-                                output_params.ts_conv_str, timeconv(&sec));
+        const size_t written = strftime(global_str, sizeof (global_str),
+                                        output_params.ts_conv_str,
+                                        timeconv(&sec));
 #pragma GCC diagnostic warning "-Wformat-nonliteral"
-                snprintf(global_str + off, sizeof (global_str) - off, ".%.3"
-                                PRIu64, msec);
-                break;
-
-        case OUTPUT_TS_CONV_UNSET:
-                assert(!"illegal timestamp conversion");
-        default:
-                assert(!"unknown timestamp conversion");
+        if (written == 0) {
+            return "too long";
         }
+        const uint64_t msec = *ts % 1000;
+        snprintf(global_str + written, sizeof (global_str) - written,
+                 ".%.3" PRIu64, msec);
+        break;
+    }
+    case OUTPUT_TS_CONV_UNSET:
+        assert(!"illegal timestamp conversion");
+    default:
+        assert(!"unknown timestamp conversion");
+    }
 
-        return global_str;
+    return global_str;
 }
 
 static const char * double_volume_to_str(const double *volume)
@@ -594,89 +592,84 @@ static const char * string_to_str(const char *str)
         return global_str;
 }
 
-/** \brief Convert lnf_brec1_t structure to string.
+/**
+ * @brief Convert the lnf_brec1_t structure to the textual representation.
  *
- * \param[in] brec lnf basic record 1.
- * \return String containing lnf_brec1_t representation. Static memory.
+ * @param[in] brec lnf basic record 1.
+ *
+ * @return Textual representation of the record (in static memory).
  */
-static const char * mylnf_brec_to_str(const lnf_brec1_t *brec)
+static const char *
+mylnf_brec_to_str(const lnf_brec1_t *brec)
 {
-        static char res[MAX_STR_LEN];
-        size_t off = 0;
+    static char res[MAX_STR_LEN];
+    char *str_term = res;
+    size_t remaining = sizeof (res);
 
-        switch (output_params.format) {
-        case OUTPUT_FORMAT_PRETTY:
-                off += snprintf(res + off, MAX_STR_LEN - off, "%-27s",
-                                field_to_str(LNF_FLD_FIRST, &brec->first));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%-27s",
-                                field_to_str(LNF_FLD_LAST, &brec->last));
+    switch (output_params.format) {
+    case OUTPUT_FORMAT_PRETTY:
+        SNPRINTF_APPEND(str_term, remaining, "%-27s",
+                        field_to_str(LNF_FLD_FIRST, &brec->first));
+        SNPRINTF_APPEND(str_term, remaining, "%-27s",
+                        field_to_str(LNF_FLD_LAST, &brec->last));
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%-6s",
-                                field_to_str(LNF_FLD_PROT, &brec->prot));
+        SNPRINTF_APPEND(str_term, remaining, "%-6s",
+                        field_to_str(LNF_FLD_PROT, &brec->prot));
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%17s:",
-                                field_to_str(LNF_FLD_SRCADDR, &brec->srcaddr));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%-7s",
-                                field_to_str(LNF_FLD_SRCPORT, &brec->srcport));
+        SNPRINTF_APPEND(str_term, remaining, "%17s:",
+                        field_to_str(LNF_FLD_SRCADDR, &brec->srcaddr));
+        SNPRINTF_APPEND(str_term, remaining, "%-7s",
+                        field_to_str(LNF_FLD_SRCPORT, &brec->srcport));
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%17s:",
-                                field_to_str(LNF_FLD_DSTADDR, &brec->dstaddr));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%-7s",
-                                field_to_str(LNF_FLD_DSTPORT, &brec->dstport));
-
-
-                off += snprintf(res + off, MAX_STR_LEN - off, "%13s",
-                                field_to_str(LNF_FLD_DOCTETS, &brec->bytes));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%13s",
-                                field_to_str(LNF_FLD_DPKTS, &brec->pkts));
-                off += snprintf(res + off, MAX_STR_LEN - off, "%13s",
-                                field_to_str(LNF_FLD_AGGR_FLOWS, &brec->flows));
-                break;
-
-        case OUTPUT_FORMAT_CSV:
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_FIRST, &brec->first),
-                                CSV_SEP);
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_LAST, &brec->last),
-                                CSV_SEP);
-
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_PROT, &brec->prot),
-                                CSV_SEP);
-
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_SRCADDR, &brec->srcaddr),
-                                CSV_SEP);
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_SRCPORT, &brec->srcport),
-                                CSV_SEP);
-
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_DSTADDR, &brec->dstaddr),
-                                CSV_SEP);
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_DSTPORT, &brec->dstport),
-                                CSV_SEP);
+        SNPRINTF_APPEND(str_term, remaining, "%17s:",
+                        field_to_str(LNF_FLD_DSTADDR, &brec->dstaddr));
+        SNPRINTF_APPEND(str_term, remaining, "%-7s",
+                        field_to_str(LNF_FLD_DSTPORT, &brec->dstport));
 
 
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_DOCTETS, &brec->bytes),
-                                CSV_SEP);
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s%c",
-                                field_to_str(LNF_FLD_DPKTS, &brec->pkts),
-                                CSV_SEP);
-                off += snprintf(res + off, MAX_STR_LEN - off, "%s",
-                                field_to_str(LNF_FLD_AGGR_FLOWS, &brec->flows));
-                break;
+        SNPRINTF_APPEND(str_term, remaining, "%13s",
+                        field_to_str(LNF_FLD_DOCTETS, &brec->bytes));
+        SNPRINTF_APPEND(str_term, remaining, "%13s",
+                        field_to_str(LNF_FLD_DPKTS, &brec->pkts));
+        SNPRINTF_APPEND(str_term, remaining, "%13s",
+                        field_to_str(LNF_FLD_AGGR_FLOWS, &brec->flows));
+        break;
 
-        case OUTPUT_FORMAT_UNSET:
-                assert(!"illegal output format");
-        default:
-                assert(!"unknown output format");
-        }
+    case OUTPUT_FORMAT_CSV:
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_FIRST, &brec->first), CSV_SEP);
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_LAST, &brec->last), CSV_SEP);
 
-        return res;
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_PROT, &brec->prot), CSV_SEP);
+
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_SRCADDR, &brec->srcaddr), CSV_SEP);
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_SRCPORT, &brec->srcport), CSV_SEP);
+
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_DSTADDR, &brec->dstaddr), CSV_SEP);
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_DSTPORT, &brec->dstport), CSV_SEP);
+
+
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_DOCTETS, &brec->bytes), CSV_SEP);
+        SNPRINTF_APPEND(str_term, remaining, "%s%c",
+                        field_to_str(LNF_FLD_DPKTS, &brec->pkts), CSV_SEP);
+        SNPRINTF_APPEND(str_term, remaining, "%s",
+                        field_to_str(LNF_FLD_AGGR_FLOWS, &brec->flows));
+        break;
+
+    case OUTPUT_FORMAT_UNSET:
+        assert(!"illegal output format");
+    default:
+        assert(!"unknown output format");
+}
+
+    return res;
 }
 
 
