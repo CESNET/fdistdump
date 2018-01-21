@@ -18,9 +18,13 @@ operating systems are not tested.
 ## Prerequisites
 * [libnf](https://github.com/VUTBR/libnf "libnf GitHub page")
 \- C interface for processing nfdump files.
-* [MPI](http://www.mpi-forum.org/ "Message Passing Interface Forum") - Message
-Passing Interface. fdistdump requires implementation supporting standard MPI-2.0
-or newer (Open MPI, MPICH2, MPICH3, MVAPICH2, Intel® MPI Library, ...).
+* [MPI](http://www.mpi-forum.org/ "Message Passing Interface Forum")
+\- Message Passing Interface. fdistdump requires implementation supporting
+standard MPI-2.0 or newer (Open MPI, MPICH2, MPICH3, MVAPICH2, Intel® MPI
+Library, ...).
+* [bloom-filter-index](https://github.com/CESNET/bloom-filter-index "bloom-filter-index GitHub page")
+(optional) - A library for indexing IP addresses in flow records using Bloom
+filters. To disable, use `--disable-bfindex` option for the configure script.
 
 ## Building and installing
 fdistdump is built with GNU build system (Autotools). You can obtain source
@@ -44,17 +48,23 @@ sudo make install
 ```
 
 ### From the repository
-We are using the openSUSE Build Service to build our RPM and DEB packages for
-several distributions and architectures. Check out the [project page](https://build.opensuse.org/project/show/home:jwrona)
-or go directly to the [repository download page](http://download.opensuse.org/repositories/home:/jwrona/).
+We are using Copr (a Fedora community build service) to create our repositories
+for several distributions and architectures. Check out the
+[CESNET group page](https://copr.fedorainfracloud.org/groups/g/CESNET/coprs/).
+To install fdistdump, you will need an
+[@CESNET/fdistdump repository](https://copr.fedorainfracloud.org/coprs/g/CESNET/fdistdump/)
+and a
+[@CESNET/NEMEA repository](https://copr.fedorainfracloud.org/coprs/g/CESNET/NEMEA/),
+which contains some dependencies (libnf and bloom-filter-index libraries).
 
-Example for CentOS 7:
 ```Shell
-curl http://download.opensuse.org/repositories/home:/jwrona/CentOS_7/home:jwrona.repo > /etc/yum.repos.d/jwrona.repo
-yum install fdistdump-openmpi  #version compiled against Open MPI
-yum install fdistdump-mpich    #version compiled against MPICH
-module load mpi/openmpi-x86_64 #load environment for the Open MPI version
-module load mpi/mpich-x86_64   #load environment for the MPICH version
+yum install yum-plugin-copr
+yum copr enable @CESNET/fdistdump
+yum copr enable @CESNET/NEMEA
+yum install fdistdump-mpich     # version compiled against MPICH
+yum install fdistdump-openmpi   # version compiled against Open MPI
+module load mpi/mpich-x86_64    # load environment for the MPICH version
+module load mpi/openmpi-x86_64  # load environment for the Open MPI version
 ```
 
 ### Building tests
