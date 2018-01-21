@@ -766,6 +766,8 @@ static error_code_t
 fields_add_from_str(struct field_info fields[], char *fields_str,
                     bool are_aggr_keys)
 {
+    assert(fields && fields_str);
+
     error_code_t ecode = E_OK;
 
     char *saveptr = NULL;
