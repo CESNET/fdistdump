@@ -119,7 +119,6 @@ struct output_params {
 void output_setup(struct output_params op, const struct field_info *fi);
 
 void print_rec(const uint8_t *data);
-const char * sprint_rec(const uint8_t *data);
 
 error_code_t print_mem(lnf_mem_t *mem, size_t limit);
 void print_processed_summ(const struct processed_summ *s, double duration);

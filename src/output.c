@@ -869,28 +869,6 @@ void print_rec(const uint8_t *data)
         }
 }
 
-const char * sprint_rec(const uint8_t *data)
-{
-        static char string[MAX_STR_LEN];
-        size_t string_len = 0;
-        size_t off = 0;
-
-        string[0] = '\0';
-
-        /* Loop through the fields in one record. */
-        for (size_t i = 0; i < fields_cnt; ++i) {
-                strcpy(string + string_len,
-                                field_to_str(fields[i].id, data + off));
-                off += fields[i].size;
-                string_len = strlen(string);
-                string[string_len++] = ' ';
-        }
-        string[string_len - 1] = '\0';
-
-        return string;
-}
-
-
 error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 {
         lnf_rec_t *rec; //record = line
