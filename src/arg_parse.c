@@ -294,11 +294,13 @@ str_to_lint(const char *const string, long int *res)
         return error_string;
     }
 
+#if LLONG_MIN != LONG_MIN || LLONG_MAX != LONG_MAX
     // conversion to long long int was successful, try conversion to long int
     if (!IN_RANGE_INCL(tmp_res, LONG_MIN, LONG_MAX)) {
         errno = ERANGE;
         return strerror(errno);
     }
+#endif
 
     // conversion to was successful
     *res = tmp_res;
@@ -324,11 +326,13 @@ str_to_int(const char *const string, int *res)
         return error_string;
     }
 
+#if LLONG_MIN != INT_MIN || LLONG_MAX != INT_MAX
     // conversion to long long int was successful, try conversion to int
     if (!IN_RANGE_INCL(tmp_res, INT_MIN, INT_MAX)) {
         errno = ERANGE;
         return strerror(errno);
     }
+#endif
 
     // conversion was successful
     *res = tmp_res;
@@ -398,12 +402,14 @@ str_to_luint(const char *const string, long unsigned int *res)
         return error_string;
     }
 
+#if ULLONG_MAX != ULONG_MAX
     // conversion to long long unsigned int was successful, try conversion to
     // long unsigned int
     if (tmp_res > ULONG_MAX) {
         errno = ERANGE;
         return strerror(errno);
     }
+#endif
 
     // conversion was successful
     *res = tmp_res;
@@ -430,12 +436,14 @@ str_to_uint(const char *const string, unsigned int *res)
         return error_string;
     }
 
+#if ULLONG_MAX != UINT_MAX
     // conversion to long long unsigned int was successful, try conversion to
     // unsigned int
     if (tmp_res > UINT_MAX) {
         errno = ERANGE;
         return strerror(errno);
     }
+#endif
 
     // conversion was successful
     *res = tmp_res;
