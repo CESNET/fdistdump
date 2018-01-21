@@ -18,38 +18,51 @@ AC_PROG_MAKE_SET
 AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
 AM_PROG_CC_C_O  # required by subdir-objects
 
-## check for OpenMP (after compiler is known)
+
+################################################################################
+# Setup flags for the C compiler and preprocessor.
+#
+# AX_APPEND_COMPILE_FLAGS: for every flag, it is checked whether the compiler
+# works with the flag. If it does, the flag is added to the current language's
+# flags (e.g. CFLAGS).
+
+# use only C11 (ISO/IEC 9899:2011) and POSIX 200809L (IEEE 1003.1-2008)
+AX_APPEND_COMPILE_FLAGS([-std=c11 -D_POSIX_C_SOURCE=200809L])
+
+# Try to find a compiler option that enables most reasonable warnings. The
+# flags are added to the current language's flags (e.g. CFLAGS).
+AX_CFLAGS_WARN_ALL
+# enable even more warnings
+AX_APPEND_COMPILE_FLAGS([-Wextra -Wpedantic])
+# uninitialized variables that are initialized with themselves
+AX_APPEND_COMPILE_FLAGS([-Winit-self])
+# a pointer is cast such that the required alignment of the target is increased
+AX_APPEND_COMPILE_FLAGS([-Wcast-align])
+# a pointer is cast so as to remove a type qualifier from the target type
+AX_APPEND_COMPILE_FLAGS([-Wcast-qual])
+# a user-supplied include directory (-I) does not exist
+AX_APPEND_COMPILE_FLAGS([-Wmissing-include-dirs])
+# a local variable or type declaration shadows something
+AX_APPEND_COMPILE_FLAGS([-Wshadow])
+# the switch statement related warnings
+AX_APPEND_COMPILE_FLAGS([-Wswitch  -Wswitch-bool  -Wswitch-default \
+                         -Wswitch-enum -Wswitch-unreachable])
+# if floating-point values are used in equality comparisons
+AX_APPEND_COMPILE_FLAGS([-Wfloat-equal])
+# a value of type "float" is implicitly promoted to "double"
+AX_APPEND_COMPILE_FLAGS([-Wdouble-promotion])
+# an undefined identifier is evaluated in an "#if" directive
+AX_APPEND_COMPILE_FLAGS([-Wundef])
+# format warnings, disable buggy Y2K warnings
+AX_APPEND_COMPILE_FLAGS([-Wformat=2 -Wno-format-y2k])
+# emit code to check for buffer overflows
+AX_APPEND_COMPILE_FLAGS([-fstack-protector -fstack-protector-strong])
+
+# check for OpenMP
 AC_OPENMP  # sets OPENMP_CFLAGS to the C flags needed for supporting OpenMP
-
-
-# setup flags for the C compiler and preprocessor
-C_STD="-std=c11 -D_POSIX_C_SOURCE=200809L"  # use only C11 (ISO/IEC 9899:2011)
-                                            # and POSIX 200809L (IEEE 1003.1-2008)
-C_WARN="-Wall -Wextra -Wpedantic"
-C_WARN+=" -Wfatal-errors"  # abort on the first error
-C_WARN+=" -Winit-self"  # uninitialized variables that are initialized with
-                        # themselves
-C_WARN+=" -Wcast-align"  # a pointer is cast such that the required
-                         # alignment of the target is increased
-C_WARN+=" -Wcast-qual"  # a pointer is cast so as to remove a type qualifier
-                        # from the target type
-C_WARN+=" -Wmissing-include-dirs"  # a user-supplied include directory (-I) does
-                                   # not exist
-C_WARN+=" -Wshadow"  # a local variable or type declaration shadows something
-C_WARN+=" -Wdouble-promotion"  # a value of type "float" is implicitly promoted
-                               # to "double"
-C_WARN+=" -Wswitch -Wswitch-default -Wswitch-enum"  # switch related warnings
-C_WARN+=" -Wfloat-equal"  # if floating-point values are used in equality
-                          # comparisons
-C_WARN+=" -Wundef"  # an undefined identifier is evaluated in an "#if" directive
-C_WARN+=" -Wformat=2 -Wno-format-y2k"  # disable buggy Y2K warnings
-
-C_OTHER="-fstack-protector-strong"  # emit code to check for buffer overflows
-
-## construct preprocessor/compiler flags using the new custom flags and the
-## original flags (original are last to eventually overwrite the custom flags)
-CPPFLAGS="$OPENMP_CFLAGS $CPPFLAGS"
-CFLAGS="$C_STD $C_WARN $C_OTHER $OPENMP_CFLAGS $CFLAGS"
+AX_APPEND_LINK_FLAGS([$OPENMP_CFLAGS])
+AX_APPEND_COMPILE_FLAGS([$OPENMP_CFLAGS])
+################################################################################
 
 # test for particular system features
 ## arrange for 64-bit file offsets, known as large-file support (needed for
