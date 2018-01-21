@@ -15,7 +15,7 @@ AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 
 ## check for an MPI compiler
-AC_PROG_CC([mpicc mpic++ mpicxx mpiCC])
+AX_PROG_CC_MPI([], [], [AC_MSG_ERROR([no C MPI compiler found])])
 AM_PROG_CC_C_O  # required by subdir-objects
 
 
