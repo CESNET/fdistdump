@@ -4,11 +4,11 @@
 # preamble #####################################################################
 # shared
 Name:           fdistdump
-Version:        0.2.2
-Release:        2%{?dist}
+Version:        0.3.0
+Release:        1%{?dist}
 Summary:        Distributed IP flow files processing tool
 
-License:        GPLv2+
+License:        BSD
 URL:            https://github.com/CESNET/fdistdump
 Source0:        %{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 
@@ -136,6 +136,10 @@ make --directory="${MPI_COMPILER}" install uninstall-man DESTDIR=%{buildroot}
 
 # changelog section ############################################################
 %changelog
+* Mon Jan 22 2018 Jan Wrona <wrona@cesnet.cz> - 0.3.0-1
+- Incremented the minor version number (0.2.2 -> 0.3.0).
+- Change the license from GPL to BSD.
+
 * Sun Jan 21 2018 Jan Wrona <wrona@cesnet.cz> - 0.2.2-2
 - Fix missing build dependencies: gcc autoconf automake libtool make.
 - Add new build dependency: bloom_filter_indexes. Support for Bloom filter base
