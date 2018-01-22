@@ -1,9 +1,4 @@
-/**
- * \file common.h
- * \brief Common fdistdump prototypes, macros, data types, enumerations, etc.
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+/** Various macros and declarations needed in multiple translation units.
  */
 
 /*
@@ -43,8 +38,8 @@
  *
  */
 
-#ifndef COMMON_H
-#define COMMON_H
+#pragma once
+
 
 #include "config.h"
 
@@ -52,8 +47,10 @@
 #include <time.h> //struct tm
 #include <stdbool.h>
 #include <inttypes.h> //exact width integer types
+#include <assert.h>
 
 #include <libnf.h>
+
 
 #define ROOT_PROC 0 //MPI root processor number
 #define MAX_STR_LEN 1024 //maximum length of a general string
@@ -62,8 +59,10 @@
 //TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
 #define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
-#define FLOW_FILE_NAME_FORMAT "lnf.%Y%m%d%H%M%S"
-#define FLOW_FILE_FORMAT (FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT)
+#define FLOW_FILE_NAME_PREFIX "lnf"
+#define FLOW_FILE_NAME_SUFFIX "%Y%m%d%H%M%S"
+#define FLOW_FILE_NAME_FORMAT FLOW_FILE_NAME_PREFIX "." FLOW_FILE_NAME_SUFFIX
+#define FLOW_FILE_FORMAT FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT
 
 
 /**
@@ -81,6 +80,7 @@ typedef enum { //error return codes
         E_INTERNAL, //internal
         E_ARG, //command line arguments
         E_PATH, //problem with access to file/directory
+        E_BFINDEX, //bloom filter indexing error
 } error_code_t;
 
 typedef enum { //working modes
@@ -149,7 +149,7 @@ struct field_info {
 };
 
 //XXX: reflect changes also in mpi_struct_shared_task_ctx
-#define STRUCT_SHARED_TASK_CTX_ELEMS 8
+#define STRUCT_SHARED_TASK_CTX_ELEMS 9
 struct shared_task_ctx {
         working_mode_t working_mode; //working mode
         struct field_info fields[LNF_FLD_TERM_]; //present LNF fields
@@ -163,6 +163,7 @@ struct shared_task_ctx {
         struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
+        bool use_bfindex;  //enables Bloom filter indexes
 };
 /**
  * @}
@@ -176,6 +177,9 @@ struct shared_task_ctx {
 //size of staticly allocated array
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+// compile-time strlen for static strings (minus one for terminating null-byte)
+#define STRLEN_STATIC(str) (ARRAY_SIZE(str) - 1)
+
 //size of structure member
 #define MEMBER_SIZE(type, member) (sizeof (((type *)NULL)->member))
 
@@ -187,6 +191,16 @@ struct shared_task_ctx {
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX_ASSIGN(a, b) ((a) = (a) > (b) ? (a) : (b))
 #define MIN_ASSIGN(a, b) ((a) = (a) < (b) ? (a) : (b))
+
+// unsafe macros - double evaluation of arguments with side effects
+// the comma operator evaluates its first operand (assert which returns void)
+// and discards the result, and then evaluates the second operand and returns
+// this value (and type)
+// alegedly faster version: ((unsigned)(number - lower) <= (upper - lower))
+#define IN_RANGE_INCL(number, lower, upper) \
+    (assert(lower < upper), ((number) >= (lower) && (number) <= (upper)))
+#define IN_RANGE_EXCL(number, lower, upper) \
+    (assert(lower < upper), ((number) > (lower) && (number) < (upper)))
 
 //safe, but braced-group within expression is GCC extension forbidden by ISO C
 #if 0
@@ -213,44 +227,6 @@ struct shared_task_ctx {
  * \return Static string at most MAX_STR_LEN long.
  */
 char * working_mode_to_str(working_mode_t working_mode);
-
-
-/** \brief Print error message.
- *
- * Print detailed error information to stderr. Provided format is prefixed by
- * error cause and MPI process info.
- *
- * \param[in] prim_errno Primary errno.
- * \param[in] sec_errno Secondary errno.
- * \param[in] format Format string passed to vfprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_err(error_code_t prim_errno, int sec_errno,
-                const char *format, ...);
-
-/** \brief Print warning message.
- *
- * Print detailed warning information to stderr. Provided format is prefixed by
- * warning cause and MPI process info.
- *
- * \param[in] prim_errno Primary errno.
- * \param[in] sec_errno Secondary errno.
- * \param[in] format Format string passed to vfprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_warn(error_code_t prim_errno, int sec_errno,
-                const char *format, ...);
-
-/** \brief Print debug message.
- *
- * If DEBUG is defined, print provided debug string to stdout. Format is
- * prefixed by MPI process info. If DEBUG is not defined, function will do
- * nothing.
- *
- * \param[in] format Format string passed to vfprintf().
- * \param[in] va_list Variable argument list passed to vfprintf().
- */
-void print_debug(const char *format, ...);
 
 
 /** \brief Construct MPI structure mpi_struct_shared_task_ctx.
@@ -316,5 +292,3 @@ time_t mktime_utc(struct tm *tm);
 
 int field_get_type(int field);
 size_t field_get_size(int field);
-
-#endif //COMMON_H

@@ -1,9 +1,4 @@
-/**
- * \file master.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+/** Master process query declarations.
  */
 
 /*
@@ -43,8 +38,8 @@
  *
  */
 
-#ifndef MASTER_H
-#define MASTER_H
+#pragma once
+
 
 #include "common.h"
 #include "arg_parse.h"
@@ -58,5 +53,3 @@
  * \return Error code.
  */
 error_code_t master(int world_size, const struct cmdline_args *args);
-
-#endif //MASTER_H

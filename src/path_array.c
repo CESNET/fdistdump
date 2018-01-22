@@ -1,9 +1,4 @@
-/**
- * \file path_array.c
- * \brief
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2016
+/** Preprocessing and generating array of paths from string or time range.
  */
 
 /*
@@ -45,6 +40,10 @@
 
 #include "common.h"
 #include "path_array.h"
+#include "print.h"
+#ifdef HAVE_LIBBFINDEX
+#include "bfindex.h"
+#endif  // HAVE_LIBBFINDEX
 
 #include <stdlib.h>
 #include <errno.h>
@@ -82,7 +81,7 @@ static error_code_t add_file(struct path_array_ctx *pac, const char *name)
                 new_names = realloc(pac->names,
                                 pac->names_size * 2 * sizeof (*pac->names));
                 if (new_names == NULL) { //failure
-                        print_err(E_MEM, 0, "realloc()");
+                        PRINT_ERROR(E_MEM, 0, "realloc()");
                         return E_MEM;
                 } else { //success
                         pac->names = new_names;
@@ -93,7 +92,7 @@ static error_code_t add_file(struct path_array_ctx *pac, const char *name)
         /* Allocate space for the name and copy it there. */
         pac->names[pac->names_cnt] = strdup(name);
         if (pac->names[pac->names_cnt] == NULL) {
-                print_err(E_MEM, 0, "strdup()");
+                PRINT_ERROR(E_MEM, 0, "strdup()");
                 return E_MEM;
         } else {
                 pac->names_cnt++;
@@ -123,7 +122,7 @@ static error_code_t fill_from_time(struct path_array_ctx *pac,
                 if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
                                         &ctx) == 0) {
                         errno = ENAMETOOLONG;
-                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
                         continue;
                 }
@@ -134,7 +133,7 @@ static error_code_t fill_from_time(struct path_array_ctx *pac,
 
                 /* Check file existence. */
                 if (stat(path, &stat_buff) != 0) {
-                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
                 } else {
                         primary_errno = add_file(pac, path);
@@ -159,7 +158,7 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
 
         /* Detect file type. */
         if (stat(path, &stat_buff) != 0) {
-                print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
+                PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
                 return E_OK; //not a fatal error
         }
 
@@ -170,7 +169,7 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
 
         dir = opendir(path);
         if (dir == NULL) {
-                print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
+                PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
                 return E_OK; //not a fatal error
         }
 
@@ -178,16 +177,23 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
         while ((entry = readdir(dir)) != NULL) {
                 char new_path[PATH_MAX];
 
-                /* Dot starting filenames are ignored. */
+                /* Dot starting (hidden) files are ignored. */
                 if (entry->d_name[0] == '.') {
-                        continue;
+                        continue;  // skip this file
                 }
+                /* bfindex files are ignored. */
+#ifdef HAVE_LIBBFINDEX
+                if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX ".",
+                            STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX ".")) == 0) {
+                        continue;  // skip this file
+                }
+#endif  // HAVE_LIBBFINDEX
                 /* Too long filenames are ignored. */
                 if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
                         errno = ENAMETOOLONG;
-                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
-                        continue;
+                        continue; //skip this file
                 }
 
                 /* Construct new path: append child to the parent. */
@@ -233,7 +239,7 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
 
 
         if (strlen(format) >= PATH_MAX) {
-                print_warn(E_PATH, 0, "conversion specifier too long, "
+                PRINT_WARNING(E_PATH, 0, "conversion specifier too long, "
                                 "skipping \"%s\"", format);
                 return false;
         }
@@ -247,7 +253,7 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
 
                 while (isdigit(*last_path) && last_path++); //skip all digits
                 if (*last_path++ != ':') { //check for terminating colon
-                        print_warn(E_PATH, 0, "invalid conversion specifier, "
+                        PRINT_WARNING(E_PATH, 0, "invalid conversion specifier, "
                                         "skipping \"%s\"", format);
                         return false;
                 }
@@ -272,13 +278,13 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
                                         PATH_MAX - strlen(path));
                         if (errno != 0) {
                                 errno = ENAMETOOLONG;
-                                print_warn(E_PATH, errno, "%s \"%s\"",
+                                PRINT_WARNING(E_PATH, errno, "%s \"%s\"",
                                                 strerror(errno), format);
                                 return false;
                         }
                         break;
                 default:
-                        print_warn(E_PATH, 0, "unknown conversion specifier, "
+                        PRINT_WARNING(E_PATH, 0, "unknown conversion specifier, "
                                         "skipping \"%s\"", format);
                         return false;
                 }
@@ -288,8 +294,7 @@ static bool path_preprocessor(const char *format, char path[PATH_MAX])
         }
 
         strcat(path, last_path); //copy rest of the format string
-        print_debug("<path_preprocessor> format: %s\tpath: %s", format, path);
-
+        PRINT_DEBUG("path preprocessor: `%s' -> `%s'", format, path);
 
         return true;
 }
@@ -307,7 +312,7 @@ char ** path_array_gen(char *paths, const struct tm begin,
 
         pac.names = malloc(PATH_ARRAY_INIT_SIZE * sizeof (*pac.names));
         if (pac.names == NULL) {
-                print_err(E_MEM, 0, "malloc()");
+                PRINT_ERROR(E_MEM, 0, "malloc()");
                 return NULL;
         } else {
                 pac.names_size = PATH_ARRAY_INIT_SIZE;
@@ -328,7 +333,7 @@ char ** path_array_gen(char *paths, const struct tm begin,
 
                 /* Check for file existence and other errors. */
                 if (stat(path, &stat_buff) != 0) {
-                        print_warn(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
                                         path);
                         continue; //skip path
                 }

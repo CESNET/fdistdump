@@ -1,6 +1,6 @@
 .\" Man page for fdistdump
 .\" Author: Jan Wrona, <wrona@cesnet.cz>
-.TH FDISTDUMP 1 "2017-7-27" "0.2.2" "fdistdump manual"
+.TH FDISTDUMP 1 "2018-1-22" "0.3.0" "fdistdump manual"
 .\" NAME section ---------------------------------------------------------------
 .SH NAME
 fdistdump \- a tool to query IP flow files using single or distributed system
@@ -23,6 +23,8 @@ fdistdump \- a tool to query IP flow files using single or distributed system
 .IR time_spec ]
 .RB [ -T
 .IR begin [# end ]]
+.RB [ -v
+.IR level ]
 .IR path \ ...
 .\" DESCRIPTION section --------------------------------------------------------
 .SH DESCRIPTION
@@ -35,11 +37,10 @@ Among other features, \fBfdistdump\fR allows you to list, sort and aggregate rec
 .\" OPTIONS section ------------------------------------------------------------
 .SH OPTIONS
 Non argument options that are duplicated on the command line are not harmful.
+For options that require an argument, each duplication will override the previous argument value.
 A short option may take a parameter of the form \fB-a\fI param\fR, a long option may take a parameter of the form \fB--arg=\fIparam\fR or \fB--arg\fI param\fR.
 Long option names may be abbreviated if the abbreviation is unique or is an exact match for some defined option.
 Mandatory arguments to long options are mandatory for short options too.
-.\" TODO: Following is not true for fields.
-.\" For options that require an argument, each duplication will override the previous argument value.
 .\" MPI_options subsection ---------------------
 .SS MPI_options
 .B fdistdump
@@ -129,29 +130,15 @@ Conversion specifiers:
 .TP
 .B h
 The conversion specifier is converted into the hostname of the node.
-This is often used to read different files by each slave from a shared storage.
+This may be used to read different files by each slave from a shared storage.
 
 .\" General options subsection ---------------------
 .SS General options
-.\" TODO: address prefixes, field overwriting
 .TP
 .BR -a , \ --aggregation=\fIfield\fR[,...]
-Aggregate flow records together by any number of
-.IR field s.
-Option argument is comma separated list of
-.IR field s,
-at least one
-.I field
-is mandatory.
-Set of supported
-.IR field s
-depends on your version of
-.B libnf
-library.
-.B libnf
-comes with
-.B libnf-info
-executable, which prints list of implemented fields and their meaning.
+Aggregate flow records together by any number of \fIfield\fRs.
+Option argument is comma separated list of \fIfield\fRs, at least one \fIfield\fR is mandatory.
+For more informations about valid \fIfield\fR strings see the \fB--fields\fR argument description.
 .TP
 .BR -f , \ --filter=\fIfilter
 Process only
@@ -180,25 +167,21 @@ On the other hand, without aggregation, this may vastly reduce the number of pro
 .TP
 .BR -o , \ --order=\fIfield\fR[#\fIdirection\fR]
 Set record sort order.
-Sort key is specified by
-.IR field .
-Sort
-.I direction
-is either
-.BR asc \ or \ desc
-string, which are abbreviations for ascending and descending direction, respectively.
+Sort key is specified by \fIfield\fR.
+Sort \fIdirection\fR is either \fBasc\fR or \fBdesc\fR string, which are abbreviations for ascending and descending direction, respectively.
+For more informations about valid \fIfield\fR strings see the \fB--fields\fR argument description.
 .TP
 .BR -s , \ --statistic=\fIstatistic
 Shortcut for aggregation (\fB-a\fR), sort (\fB-o\fR) and record limit (\fB-l\fR).
-Option argument string \fIstatistic \fRis composed of \fB-a \fRargument, optional slash followed by \fB-o \fRargument.
+Option argument string \fIstatistic \fRis composed of a \fB-a \fRargument and an optional # symbol followed by a \fB-o \fRargument.
 Formally written
-.IR statistic \ is\  aggregation_field [,...]/[ sort_field [# sort_direction ]].
+.IR statistic \ is\  aggregation_key_field [,...][# sort_field [# sort_direction ]].
 
 If
 .I sort_field
 is not present,
 .B flows
-is default sort key.
+is the default sort key.
 Default record limit is
 .B 10
 and may by changed by an explicit
@@ -227,7 +210,7 @@ The UTC flag is either \fBU\fR or \fBUTC\fR string. If the UTC flag is present, 
 
 If no date is given, today is assumed if the given hour is lesser than the current hour and yesterday is assumed if it is more.
 If no time is given, midnight is assumed.
-If only the weekday is given, today is assumed if the given day is less or equal to the current day and last week if it is more.
+If only the weekday is given, this week is assumed if the given day is less or equal to the current day and last week if it is more.
 If only the month is given, the current year is assumed if the given month is less or equal to the current month and last year if it is more and no year is given.
 
 .TP
@@ -248,6 +231,13 @@ Beginning time is aligned to the beginning of the rotation interval, ending time
        begin  end                           begin        end
 .RE
 .fi
+.TP
+.BR -v , \ --verbosity=\fIlevel
+Set verbosity level to \fIlevel\fR.
+The higher the number, the more information is printed.
+Level 0 shows no messages (quite mode), level 1 shows errors, level 2 shows warnings, level 3 shows info messages and level 4 shows debug messages.
+All messages of this kind are printed to the \fBstderr\fR stream.
+Default level is 2, i.e. show errors and warnings.
 .\" Controlling the output subsection ---------------------
 .SS Controlling the output
 .TP
@@ -256,7 +246,7 @@ Set output items.
 \fIitem_list\fR is comma-separated list of the output items.
 Output items are \fBrecords\fR (\fBr\fR), \fBprocessed-records-summary\fR (\fBp\fR) and \fBmetadata-summary\fR (\fBm\fR), you can use a full names or the abbreviated forms.
 \fBrecords\fR means result of the query, \fBprocessed-records-summary\fR is the summary of the records that were processed during the query (i.e. \fIfilter\fR matching records).
-At the beginning of each flow file, there is a header containing sums of the \fBflows\fR, \fBpkts\fR and \fBbytes\fR fields of all the records in that file.
+At the beginning of each flow file, there is a header containing sums of the \fBflows\fR, \fBpackets\fR and \fBbytes\fR fields of all the records in that file.
 Those sums are further divided according to the transport protocols TCP, UDP, ICMP.
 \fBmetadata-summary\fR output item will read and print those metadata counters.
 Using \fBmetadata-summary\fR as a single output item is very fast and efficent.
@@ -306,7 +296,7 @@ function) before output conversion is performed.
 .BI --output-volume-conv= volume_conversion
 Set volume output conversion format.
 Volume fields are
-.BR bytes ,\  pkts ,\  outbytes ,\  outpkts ,\  flows ,\  bsp ,\  pps \ and\  bpp .
+.BR bytes ,\  packets ,\  outbytes ,\  outpackets ,\  flows ,\  bsp ,\  pps \ and\  bpp .
 This conversion is also applied to the summary.
 
 .I volume_conversion
@@ -388,28 +378,33 @@ raw integer is printed. Using
 duration is converted into HH:MM:SS.MS string.
 .TP
 .BI --fields= field \fR[,...]
-Set the list of printed fields. Format of the argument is the same as for
-.B -a
-option.
+Set the list of printed fields.
+Option argument is comma separated list of \fIfield\fRs.
+If the option argument is empty, no fields are added.
+
+Valid text representation of a single item is \fIfield\fR[/[\fIIPv4 bits\fR][/[\fIIPv6 bits\fR]]], e.g., srcip or srcip/24 or srcip/24/64 or srcip//.
+If slashes are not part of the string, bits default to the whole IP address.
+If slashes are part of the string but bits are not, bits default to 0.
+Bits are accepted for every field, but only makes sense for IP addresses.
+Set of supported \fBfield\fRs depends on your version of \fBlibnf\fR library.
+To discover currently supported fields, \fBlibnf\fR comes with \fBlibnf-info\fR executable, which prints out list of currently supported fields and their meaning.
+
 Without enabled aggregation, default fields are
-.BR first ,\  pkts ,\  bytes ,\  srcip ,\  dstip ,\  srcport ,\  dstport \ and\  proto ,
+.BR first ,\  packets ,\  bytes ,\  srcip ,\  dstip ,\  srcport ,\  dstport \ and\  proto ,
 with aggregation enabled, default fields are
-.BR duration ,\  flows ,\  pkts ,\  bytes ,\  bps ,\  pps \ and\  bpp
+.BR duration ,\  flows ,\  packets ,\  bytes ,\  bps ,\  pps \ and\  bpp
 plus aggregation keys.
 
 Without aggregation, you can add every valid field.
 Just keep in mind, that the more fields are present, the more data have to processed and transferred from slaves to master.
-With
-.B nfdump
-file format, it isn't possible to determine if the field is present in the flow record or not.
+With \fBnfdump\fR file format, it isn't possible to determine if the field is present in the flow record or not.
 If the desired field isn't present, it will be printed as zero (or what the specified output conversion creates from zero).
 
-With aggregation, this can be a little tricky. You can add only some fields without actually making the field aggregation key.
+With aggregation, this can be a little tricky.
+You can add only some fields without actually making the field an aggregation key.
 Those fields are
-.BR first ,\  last ,\  received ,\  bytes ,\  pkts ,\  outbytes ,\  outpkts ,\  flows ,\  tcpflags ,\  eventtime ,\  duration ,\  bps ,\  pps \ and\  bpp .
-If any other
-.I field
-is present in the list, it will be used as aggregation key.
+.BR first ,\  last ,\  received ,\  bytes ,\  packets ,\  outbytes ,\ outpackets ,\  flows ,\  tcpflags ,\  eventtime ,\  duration ,\  bps ,\  pps \ and\  bpp .
+If any other \fIfield\fR is present in the list, it will be used as an aggregation key.
 .TP
 .BI --progress-bar-type= progress_bar_type
 Set progress bar type.
@@ -443,7 +438,19 @@ There are three conditions that have to be met to make this algorithm work:
 3. sort key
 .RB ( -o )
 is one of traffic volume fields
-.RB ( bytes ,\  pkts ,\  outbytes ,\  outpkts \ and\  flows ).
+.RB ( bytes ,\  packets ,\  outbytes ,\  outpackets \ and\  flows ).
+.TP
+.B --no-bfindex
+Disable Bloom filter indexes.
+A Bloom filter is a space-efficient probabilistic data structure that is used to test whether an element is a member of a set.
+False positive matches are possible, but false negatives are not -- in other words, a query returns either "possibly in set" or "definitely not in set".
+In this case, the set is a set of source and destination IP addresses in all records in the flow file and we want to know whether certain IP address is contained in the file or not.
+Bloom filter is only used in conjunction with a record filter containing one or more IP addresses.
+
+If enabled, together witch each flow file also index file is read.
+If the flow file name has the standard prefix "lnf.", the index file name is constructed by subtituting this prefix with "bfi.".
+Otherwise, the index file name is constructed by prefixing the flow file name with "bfi.".
+This feature uses the followinh Bloom filter index library: https://github.com/CESNET/bloom-filter-index.
 .\" Getting help subsection ---------------------
 .SS Getting help
 .TP
@@ -491,7 +498,7 @@ Launch two \fBfdistdump\fR processes on local node, one master and one slave.
 Slave process will read both specified flow files concurrently and print all records in both files.
 .nf
 \&  \fB$ mpiexec -n 2 fdistdump /netflow/flow_file1 /netflow/flow_file2\fR
-\&  first                       bytes     pkts     srcport     dstport     srcip              dstip             proto
+\&  first                       bytes     packets     srcport     dstport     srcip              dstip             proto
 \&  2015-01-19 22:59:17.387     841       5        57942       80          192.245.102.46     54.210.89.244     TCP
 \&  2015-01-19 22:59:27.094     41        1        61746       5631        48.91.65.181       78.132.4.32       TCP
 \&  2015-01-19 22:59:27.675     104       2        55865       13242       100.4.71.246       192.245.161.140   TCP
@@ -509,7 +516,7 @@ But as you can see, summary shows 129000 flows processed records.
 This is not incorrect, 129000 records were actually processed and only the first 100 were printed.
 .nf
 \&  \fB$ mpiexec -n 2 fdistdump -l 100 flow_dir/\fR
-\&  first                       bytes      pkts     srcport     dstport     srcip              dstip            proto
+\&  first                       bytes      packets     srcport     dstport     srcip              dstip            proto
 \&  2015-01-20 07:08:58.186     27.1 k     29       28974       1115        172.173.129.10     99.28.15.205     TCP
 \&  2015-01-20 07:09:22.010     346        2        51413       23705       20.107.222.24      172.173.14.68    UDP
 \&  2015-01-20 07:08:58.058     54.3 k     58       14627       1115        172.173.129.10     99.28.15.205     TCP
@@ -544,7 +551,7 @@ Sort key is \fBbytes\fR, which has implicit descending sort direction.
 Record limit is 5, therefore 5 records with largest \fBbytes\fR values are printed.
 .nf
 \&  \fB$ mpiexec --hostfile hf.txt fdistdump -o bytes -l 5 --output-items=records flow_dir/\fR
-\&  first                       bytes       pkts        srcport     dstport     srcip               dstip               proto
+\&  first                       bytes       packets        srcport     dstport     srcip               dstip               proto
 \&  2015-01-20 07:10:02.020     161.7 M     118.3 k     27032       27032       54.98.60.154        192.245.92.125      UDP
 \&  2015-01-20 21:40:02.639     111.5 M     78.5 k      80          29835       172.21.3.117        203.136.78.254      TCP
 \&  2015-01-20 17:48:50.191     103.6 M     69.1 k      60594       50554       172.173.118.99      192.121.195.133     TCP
@@ -558,7 +565,7 @@ Records with the same aggregation key (\fBsrcport\fR in this example) are aggreg
 Output record order is undefined.
 .nf
 \&  \fB$ mpiexec -n 2 fdistdump -a srcport flow_dir/\fR
-\&  first                       last                        bytes       pkts       flows     srcport     duration         bps         pps       bpp
+\&  first                       last                        bytes       packets       flows     srcport     duration         bps         pps       bpp
 \&  2015-01-19 22:59:22.597     2015-01-19 23:59:15.862     2.9 M       47.3 k     544       62125       00:59:53.265     6.4 k       13.2      60.0
 \&  2015-01-19 22:54:34.369     2015-01-19 23:59:57.297     2.0 G       6.1 M      2.2 M     0           01:05:22.928     4.1 M       1.6 k     325.0
 \&  2015-01-19 22:59:16.469     2015-01-19 23:59:13.363     881.3 k     4.8 k      954       50232       00:59:56.894     2.0 k       1.3       181.0
@@ -576,8 +583,8 @@ Shell pathnames globbing in this case has exactly same effect as path specified 
 Records are aggregated according to two keys, source IP address and protocol.
 Result is sorted by number of flows (direction is explicitly specified as descending) and only first 10 records are printed.
 .nf
-\&  \fB$ mpiexec -n 3 fdistdump -a srcip,proto -o flows#desc -l 10 --fields=first,bytes,pkts,flows flow_dir/*\fR
-\&  first                       bytes       pkts        flows       srcip               proto
+\&  \fB$ mpiexec -n 3 fdistdump -a srcip,proto -o flows#desc -l 10 --fields=first,bytes,packets,flows flow_dir/*\fR
+\&  first                       bytes       packets        flows       srcip               proto
 \&  2015-01-19 22:59:21.976     233.8 M     5.7 M       5.7 M       42.9.199.188        TCP  
 \&  2015-01-19 22:59:22.836     66.3 M      1.6 M       1.6 M       108.131.134.164     TCP  
 \&  2015-01-19 22:58:26.705     364.5 M     3.5 M       1.3 M       192.245.161.141     TCP  
@@ -617,7 +624,7 @@ This query will process only a single flow file on each slave, the one which inc
 The time specification is in the local time of the Czech Republic and it's during daylight saving time (CEST time zone, UTC+2), however record timestamps are in the UTC as you can see on \fBfirst\fR values.
 .nf
 \&  \fB$ mpiexec --hostfile hf.txt fdistdump -t "2015-01-19 10:02" profile_dir/\fR
-\&  first                       bytes      pkts     srcport     dstport     srcip              dstip            proto
+\&  first                       bytes      packets     srcport     dstport     srcip              dstip            proto
 \&  2015-01-19 08:00:00.186     27.1 k     29       28974       1115        172.173.129.10     99.28.15.205     TCP
 \&  2015-01-19 08:00:01.010     346        2        51413       23705       20.107.222.24      172.173.14.68    UDP
 \&  2015-01-19 08:00:01.058     54.3 k     58       14627       1115        172.173.129.10     99.28.15.205     TCP
@@ -632,7 +639,7 @@ Following time range is from 2015-01-19 10:00 to 12:00 in local time of the Czec
 Aggregation key is \fBbytes\fR field, records with the same bytes value are merged together.
 .nf
 \&  \fB$ mpiexec --hostfile hf.txt fdistdump -l 3 -s bytes -T "2015-01-19 10:00#2015-01-19 12:00" profile_dir/\fR
-\&  first                       last                        bytes     pkts       flows      duration         bps     pps       bpp
+\&  first                       last                        bytes     packets       flows      duration         bps     pps       bpp
 \&  2015-01-20 08:58:54.770     2015-01-20 10:59:50.970     92        58.3 M     57.8 M     02:00:56.200     0.1     8.0 k     0.0
 \&  2015-01-20 08:58:48.334     2015-01-20 10:59:50.829     184       57.8 M     28.9 M     02:01:02.495     0.2     8.0 k     0.0
 \&  2015-01-20 08:59:23.615     2015-01-20 10:59:50.989     40        24.3 M     24.3 M     02:00:27.374     0.0     3.4 k     0.0
@@ -681,7 +688,7 @@ This can be solved by an \fBUTC\fR flag, which says that your time specifier is 
 Usage of CSV output format.
 .nf
 \&  \fB$ mpiexec -n 2 fdistdump -o first --output-format=csv flow_file\fR
-\&  first,bytes,pkts,srcport,dstport,srcip,dstip,proto
+\&  first,bytes,packets,srcport,dstport,srcip,dstip,proto
 \&  1421708354242,180,3,41657,23,0:0:0:1896806481,0:0:0:2887049676,6
 \&  1421708357387,841,5,57942,80,0:0:0:3237307950,0:0:0:919755252,6
 \&  <output omitted>

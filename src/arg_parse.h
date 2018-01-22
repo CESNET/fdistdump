@@ -1,8 +1,4 @@
-/**
- * \file arg_parse.h
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \date 2015
+/** Argument parsing declarations.
  */
 
 /*
@@ -42,8 +38,8 @@
  *
  */
 
-#ifndef ARG_PARSE_H
-#define ARG_PARSE_H
+#pragma once
+
 
 #include "common.h"
 #include "output.h"
@@ -66,6 +62,7 @@ struct cmdline_args {
         struct tm time_end; //end of the time range
 
         bool use_fast_topn; //enables fast top-N algorithm
+        bool use_bfindex;  // enables Bloom filter indexes
 
         struct output_params output_params; //output (printing) parameters
         progress_bar_type_t progress_bar_type;
@@ -73,29 +70,27 @@ struct cmdline_args {
 };
 
 
-/** \brief Parse command line arguments and fill parameters structure.
+/**
+ * @brief  Parse command line arguments and fill parameters structure.
  *
- * If all arguments are successfully parsed and stored, E_OK is returned.
- * If help or version was required, help string is printed and E_HELP is
- * returned.
- * On error (invalid options or arguments, ...), error string is printed and
- * E_ARG is returned.
+ * @param[out] args Structure with parsed command line argument and other
+ *                  program settings.
+ * @param argc Command line argument vector size.
+ * @param argv Command line argument vector.
+ * @param root_proc True if process is root, false otherwise.
  *
- * \param[out] params Structure with parsed command line parameters and other
- *                   program settings.
- * \param[in] argc Argument count.
- * \param[in] argv Command line argument strings.
- * \param[in] root_proc True if process is root, false otherwise.
- * \return Error code. E_OK, E_HELP or E_ARG.
+ * @return E_OK on success, E_HELP if help or usage strings were printed, E_ARG
+ *         otherwise.
  */
-error_code_t arg_parse(struct cmdline_args *args, int argc, char **argv,
-                bool root_proc);
+error_code_t
+arg_parse(struct cmdline_args *args, int argc, char *const argv[],
+          bool root_proc);
 
-/** \brief Free parameters structure allocated by arg_parse().
+/**
+ * @brief Free parameters structure allocated by arg_parse().
  *
- * \param[in] params Structure with parsed command line parameters and other
- *                   program settings.
+ * @param[in] args Structure with parsed command line argument and other program
+ *                 settings.
  */
-void arg_free(struct cmdline_args *args);
-
-#endif //ARG_PARSE_H
+void
+arg_free(struct cmdline_args *args);

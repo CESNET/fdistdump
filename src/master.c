@@ -1,9 +1,4 @@
-/**
- * \file master.c
- * \brief
- * \author Jan Wrona, <wrona@cesnet.cz>
- * \author Pavel Krobot, <Pavel.Krobot@cesnet.cz>
- * \date 2015
+/** Master process query functionality.
  */
 
 /*
@@ -46,6 +41,7 @@
 #include "common.h"
 #include "master.h"
 #include "output.h"
+#include "print.h"
 
 #include <string.h> //strlen()
 #include <stdbool.h>
@@ -116,6 +112,7 @@ static void construct_master_task_ctx(struct master_task_ctx *mtc,
         mtc->shared.time_end = args->time_end;
 
         mtc->shared.use_fast_topn = args->use_fast_topn;
+        mtc->shared.use_bfindex = args->use_bfindex;
 
 
         /* Fill master specific content. */
@@ -138,7 +135,7 @@ static error_code_t mem_write_callback(uint8_t *data, size_t data_len,
                 secondary_errno = lnf_rec_fset(mwcd->rec, mwcd->fields[i].id,
                                 data + off);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_rec_fset()");
+                        PRINT_ERROR(E_LNF, secondary_errno, "lnf_rec_fset()");
                         return E_LNF;
                 }
 
@@ -147,7 +144,7 @@ static error_code_t mem_write_callback(uint8_t *data, size_t data_len,
 
         secondary_errno = lnf_mem_write(mwcd->mem, mwcd->rec);
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_write()");
+                PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_write()");
                 return E_LNF;
         }
 
@@ -160,7 +157,7 @@ static error_code_t mem_write_raw_callback(uint8_t *data, size_t data_len,
         secondary_errno = lnf_mem_write_raw((lnf_mem_t *)user, (char *)data,
                         data_len);
         if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_write_raw()");
+                PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_write_raw()");
                 return E_LNF;
         }
 
@@ -237,6 +234,9 @@ static void progress_bar_print(void)
                 putc('}', pbc->out_stream);
                 break;
 
+        case PROGRESS_BAR_NONE:
+        case PROGRESS_BAR_UNSET:
+                assert(!"illegal progress bar type");
         default:
                 assert(!"unknown progress bar type");
                 break;
@@ -271,7 +271,7 @@ static error_code_t progress_bar_init(progress_bar_type_t type, char *dest,
         pbc->files_slave_sum = calloc(slave_cnt, sizeof (size_t));
         if (pbc->files_slave_cur == NULL || pbc->files_slave_sum == NULL) {
                 secondary_errno = 0;
-                print_err(E_MEM, secondary_errno, "malloc()");
+                PRINT_ERROR(E_MEM, secondary_errno, "malloc()");
                 return E_MEM;
         }
 
@@ -285,7 +285,7 @@ static error_code_t progress_bar_init(progress_bar_type_t type, char *dest,
         } else { //destination is file
                 pbc->out_stream = fopen(dest, "w");
                 if (pbc->out_stream == NULL) {
-                        print_warn(E_ARG, 0, "invalid progress bar destination "
+                        PRINT_WARNING(E_ARG, 0, "invalid progress bar destination "
                                         "\"%s\": %s", dest, strerror(errno));
                         pbc->type = PROGRESS_BAR_NONE; //disable progress bar
                 }
@@ -337,7 +337,8 @@ static void progress_bar_finish(void)
         if (pbc->out_stream != stdout && pbc->out_stream != stderr &&
                         pbc->out_stream != NULL &&
                         fclose(pbc->out_stream) == EOF) {
-                print_warn(E_INTERNAL, 0, "progress bar: %s", strerror(errno));
+                PRINT_WARNING(E_INTERNAL, 0, "progress bar: %s",
+                                strerror(errno));
         }
 }
 
@@ -353,7 +354,7 @@ static error_code_t fast_topn_bcast_all(lnf_mem_t *mem)
         if (secondary_errno == LNF_EOF) {
                 goto send_terminator; //no records in memory, no problem
         } else if (secondary_errno != LNF_OK) {
-                print_err(E_LNF, secondary_errno, "lnf_mem_first_c()");
+                PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_first_c()");
                 return E_LNF;
         }
 
@@ -363,7 +364,7 @@ static error_code_t fast_topn_bcast_all(lnf_mem_t *mem)
                                 (char *)rec_buff, &rec_len, LNF_MAX_RAW_LEN);
                 assert(secondary_errno != LNF_EOF);
                 if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno,
+                        PRINT_ERROR(E_LNF, secondary_errno,
                                         "lnf_mem_read_raw_c()");
                         return E_LNF;
                 }
@@ -376,7 +377,7 @@ static error_code_t fast_topn_bcast_all(lnf_mem_t *mem)
                 if (secondary_errno == LNF_EOF) {
                         break; //all records successfully sent
                 } else if (secondary_errno != LNF_OK) {
-                        print_err(E_LNF, secondary_errno, "lnf_mem_next_c()");
+                        PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_next_c()");
                         return E_LNF;
                 }
         }
@@ -453,7 +454,7 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
         buff_mem = malloc(2 * XCHG_BUFF_SIZE * slave_cnt * sizeof (*buff_mem));
         if (buff_mem == NULL) {
                 secondary_errno = 0;
-                print_err(E_MEM, secondary_errno, "malloc()");
+                PRINT_ERROR(E_MEM, secondary_errno, "malloc()");
                 return E_MEM;
         }
 
@@ -576,8 +577,8 @@ static error_code_t irecv_loop(size_t slave_cnt, size_t rec_limit,
 free_db_mem:
         free(buff_mem);
 
-        print_debug("<irecv_loop> processed %zu records, received %zu B",
-                        rec_cntr, byte_cntr);
+        PRINT_DEBUG("processed %zu records, received %zu B", rec_cntr,
+                        byte_cntr);
         return primary_errno;
 }
 
@@ -638,7 +639,7 @@ static error_code_t mode_sort_main(const struct master_task_ctx *mtc)
         secondary_errno = lnf_rec_init(&mwcd.rec);
         if (secondary_errno != LNF_OK) {
                 primary_errno = E_LNF;
-                print_err(primary_errno, secondary_errno, "lnf_rec_init()");
+                PRINT_ERROR(primary_errno, secondary_errno, "lnf_rec_init()");
                 goto free_aggr_mem;
         }
 

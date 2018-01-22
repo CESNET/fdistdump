@@ -1,73 +1,68 @@
-#use the Trusty beta build environment
+---
+# use the Ubuntu Trusty Sudo-enabled VM build environment
 sudo: required
 dist: trusty
 
 language: c
 
 compiler:
-- gcc
-- clang
+    - gcc
+    - clang
 
 env:
-        global:
-        #don't waste travis resources, limit threads
+    global:
+        # don't waste travis resources, limit threads count
         - OMP_NUM_THREADS=4
-        #coverity related
+        # coverity related
         - secure: "ZPncDzOLt2e9rb3wCrycqPJHNNtPDjEwJ61dspYbmcLBflHBzoAwTLp3e2UH8p1PufOsf4nNj2SA27Fm47/V0lRZ4TPllwsAzKmWSjVlGWczjpIFT/TMFt6B1rDZ+RLF7J2PQW8t2ZAOJ5wqpHobHijcVtSz4wfiRsGY5Yiavbs0bdGo+CDTl+o8uGqQW5kU66H+C9wBvt2y5WKyp2HnDfojOk7Cp6+Ti5Kcox1AuhwyuQT2iXkmWwKUnTLDuqfHH0kUAnLZMGCAnsg5xnfPKr4/+SZ4QvTnK+Pk8uO6O6Mx3/n3fPyo9i6Gy+Ks7+BGSB173T45CUbWyLd1tu7KSdb2s24lUvK582t4yQ7SJzNnEDg1ENgP9TfjFuLFBEkdlWSVjP4XjrXVujKFzX9hAa2iaquPvFiWvLM6D+a+PVrbuWicRjTpewGFavk0p+Ik+ltFOQMlEcG7P/3iIQZgOF/FQHGYIt3ByOahDUmbyWKQ8DBDc+xPwqlnnDPev/3RIIoAiQPMy/qsJqbCMV8CWmtrMhpSRJdmwtv1n0gpx0DWc7m5Qp/Z1rnmYMmS5Di2oOFm1xfCiLtjX8JLuUlq2rrLrvKiF15CcckpHMmsClv/GztcVNdKCzGx2TcQPDF98SJ0An0bz+Lcao/9OTaBFVtMf2W8edYApAQVzJ82Ex4="
-        matrix:
-        #travis doesn't support 2D env matrix (https://github.com/travis-ci/travis-ci/issues/1519)
+    matrix:
+        # travis doesn't support 2D env matrix
+        # (https://github.com/travis-ci/travis-ci/issues/1519)
         - MPI=openmpi
         - MPI=openmpi OPENMP="--disable-openmp"
         - MPI=mpich
         - MPI=mpich OPENMP="--disable-openmp"
 
-#matrix:
-#        exclude:
-#        #clang < 3.7 doesn't fully support OpenMP
-#        - compiler: clang
-#          env: MPI=openmpi
-#        - compiler: clang
-#          env: MPI=mpich
-
-
 before_install:
-#update, upgrade and install common prerequisites
-- sudo apt-get -qq update
-- sudo apt-get -qq install gcc automake autoconf libtool
-#install dependencies
-- travis/install_dependencies.sh
+    # update, upgrade, and install common prerequisites
+    - sudo apt-get -qq update
+    - sudo apt-get -qq install autoconf autoconf-archive automake libtool
+    - sudo apt-get -qq install gcc make
+    # install fdistdump's dependencies
+    - travis/install_dependencies.sh
 
-- export OMPI_CC="${CC}" #CC set by travis as OMPI underlying compiler
-- export MPICH_CC="${CC}" #CC set by travis as MPICH underlying compiler
-- unset CC #otherwise ./configure would not set mpicc as a CC
+    - export OMPI_CC="$CC"   # CC set by travis as OMPI underlying compiler
+    - export MPICH_CC="$CC"  # CC set by travis as MPICH underlying compiler
+    - unset CC  # otherwise ./configure would not set mpicc as a CC
 
 install:
-- autoreconf -i
-- ./configure "${OPENMP}"
-- make
+    - autoreconf -i
+    - ./configure "$OPENMP"
+    - make
 
-#before_script:
+# before_script:
 
 script:
-- make check
-- make distcheck
+    - make check
+    - make distcheck
 
-#after_success:
+# after_success:
+
 after_failure:
-- ./tests/print_logs.sh
+    - ./tests/print_logs.sh
 
-#after_script:
+# after_script:
 
 notifications:
-        email: false
+    email: false
 
-#coverity related
+# coverity related
 addons:
-        coverity_scan:
-                project:
-                        name: "CESNET/fdistdump"
-                        description: "Build submitted via Travis CI"
-                notification_email: wrona@cesnet.cz
-                build_command_prepend: "./configure; make clean"
-                build_command:   "make -j 4"
-                branch_pattern: coverity_scan
+    coverity_scan:
+        project:
+            name: "CESNET/fdistdump"
+            description: "Build submitted via Travis CI"
+        notification_email: wrona@cesnet.cz
+        build_command_prepend: "./configure; make clean"
+        build_command: "make -j 4"
+        branch_pattern: coverity_scan

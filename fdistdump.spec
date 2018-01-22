@@ -4,11 +4,11 @@
 # preamble #####################################################################
 # shared
 Name:           fdistdump
-Version:        0.2.2
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Distributed IP flow files processing tool
 
-License:        GPLv2+
+License:        BSD
 URL:            https://github.com/CESNET/fdistdump
 Source0:        %{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 
@@ -39,8 +39,10 @@ independent files.
 # preamble for the Open MPI subpackage
 %package        openmpi
 Summary:        Distributed IP flow files processing tool, compiled against Open MPI
+BuildRequires:  gcc autoconf autoconf-archive automake libtool make
 BuildRequires:  libnf-devel
 BuildRequires:  openmpi-devel
+BuildRequires:  bloom_filter_indexes
 # require explicitly to guarantee the pickup of the right runtime
 Requires:       openmpi
 Requires:       %{name}-common = %{version}-%{release}
@@ -55,8 +57,10 @@ to apply powerful record filter. This package is compiled against Open MPI.
 # preamble for the MPICH subpackage
 %package        mpich
 Summary:        Distributed IP flow files processing tool, compiled against MPICH
+BuildRequires:  gcc autoconf autoconf-archive automake libtool make
 BuildRequires:  libnf-devel
 BuildRequires:  mpich-devel
+BuildRequires:  bloom_filter_indexes
 # require explicitly to guarantee the pickup of the right runtime
 Requires:       mpich
 Requires:       %{name}-common = %{version}-%{release}
@@ -132,6 +136,16 @@ make --directory="${MPI_COMPILER}" install uninstall-man DESTDIR=%{buildroot}
 
 # changelog section ############################################################
 %changelog
+* Mon Jan 22 2018 Jan Wrona <wrona@cesnet.cz> - 0.3.0-1
+- Incremented the minor version number (0.2.2 -> 0.3.0).
+- Change the license from GPL to BSD.
+
+* Sun Jan 21 2018 Jan Wrona <wrona@cesnet.cz> - 0.2.2-2
+- Fix missing build dependencies: gcc autoconf automake libtool make.
+- Add new build dependency: bloom_filter_indexes. Support for Bloom filter base
+  indexes has been integrated into fdistdump using bloom-filter-index library
+  (https://github.com/CESNET/bloom-filter-index).
+
 * Thu Jul 27 2017 Jan Wrona <wrona@cesnet.cz> - 0.2.2-1
 - Incremented the patch version number (0.2.1 -> 0.2.2).
 
