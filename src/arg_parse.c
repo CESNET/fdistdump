@@ -523,13 +523,18 @@ fields_id_to_str(const int field_id)
  *
  * @param[out] field_info Pointer to the structure to fill with the new field.
  * @param[in] field_id ID of the new ordinary field.
+ * @param[in] ipv4_bits Use ony first bits of the IPv4 address; [0, 32].
+ * @param[in] ipv6_bits Use ony first bits of the IPv6 address; [0, 128].
  *
  * @return E_OK on success, E_ARG on failure.
  */
 static error_code_t
-fields_add_ordinary(struct field_info *field_info, const int field_id)
+fields_add_ordinary(struct field_info *field_info, int field_id, int ipv4_bits,
+                    int ipv6_bits)
 {
     assert(field_info && IN_RANGE_EXCL(field_id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
+    assert(IN_RANGE_INCL(ipv4_bits, MIN_IP_BITS, MAX_IPV4_BITS));
+    assert(IN_RANGE_INCL(ipv6_bits, MIN_IP_BITS, MAX_IPV6_BITS));
 
     // test aliases
     if (IN_RANGE_INCL(field_id, LNF_FLD_DPKTS_ALIAS, LNF_FLD_DSTADDR_ALIAS)
@@ -554,6 +559,10 @@ fields_add_ordinary(struct field_info *field_info, const int field_id)
                                      sizeof (aggr_func));
         assert(ret == LNF_OK);
         field_info->flags |= aggr_func;  // OR with sort flags
+        // set IPv4/IPv6 bits, otherwise libnf memory would clear IP address
+        // fields which is undesired with pure sorting mode
+        field_info->ipv4_bits = ipv4_bits;
+        field_info->ipv6_bits = ipv6_bits;
     }
 
     return E_OK;
@@ -642,16 +651,20 @@ fields_add_aggr_key(struct field_info *field_info, int field_id, int ipv4_bits,
  * @param[in] field_id ID of the new sort key field.
  * @param[in] direction Sort direction -- ascending, descending, or
  *                      LNF_SORT_NONE for default direction of the given field.
+ * @param[in] ipv4_bits Use ony first bits of the IPv4 address; [0, 32].
+ * @param[in] ipv6_bits Use ony first bits of the IPv6 address; [0, 128].
  *
  * @return E_OK on success, E_ARG on failure.
  */
 static error_code_t
-fields_add_sort_key(struct field_info *field_info, int field_id, int
-                    direction)
+fields_add_sort_key(struct field_info *field_info, int field_id, int direction,
+                    int ipv4_bits, int ipv6_bits)
 {
     assert(field_info && IN_RANGE_EXCL(field_id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
     assert(direction == LNF_SORT_NONE || direction == LNF_SORT_ASC
            || direction == LNF_SORT_DESC);
+    assert(IN_RANGE_INCL(ipv4_bits, MIN_IP_BITS, MAX_IPV4_BITS));
+    assert(IN_RANGE_INCL(ipv6_bits, MIN_IP_BITS, MAX_IPV6_BITS));
 
     // this function may be called only once
     static int sort_key_set = false;
@@ -693,6 +706,10 @@ fields_add_sort_key(struct field_info *field_info, int field_id, int
     }
     field_info->id = field_id;
     field_info->flags |= direction;  // merge with aggregation flags
+    // set IPv4/IPv6 bits, otherwise libnf memory would clear IP address fields
+    // which is undesired with pure sorting mode
+    field_info->ipv4_bits = ipv4_bits;
+    field_info->ipv6_bits = ipv6_bits;
 
     return E_OK;
 }
@@ -706,9 +723,9 @@ fields_add_sort_key(struct field_info *field_info, int field_id, int
  * makes sense for IP address fields.
  *
  * @param[in] field_str Field in its text representation.
- * @param[out] field_id Parsed field ID. Always set.
- * @param[out] ipv4_bits Parsed IPv4 bits. Only set if not NULL.
- * @param[out] ipv6_bits Parsed IPv6 bits. Only set if not NULL.
+ * @param[out] field_id Parsed field ID.
+ * @param[out] ipv4_bits Parsed IPv4 bits for IP address fields, 0 otherwise.
+ * @param[out] ipv6_bits Parsed IPv6 bits for IP address fields, 0 otherwise.
  *
  * @return E_OK on success, E_ARG on failure.
  */
@@ -716,7 +733,7 @@ static error_code_t
 fields_parse_str(const char field_str[], int *field_id, int *ipv4_bits,
                  int *ipv6_bits)
 {
-    assert(field_str && field_id);
+    assert(field_str && field_id && ipv4_bits && ipv6_bits);
 
     int ipv4_bits_in;
     int ipv6_bits_in;
@@ -739,12 +756,8 @@ fields_parse_str(const char field_str[], int *field_id, int *ipv4_bits,
 
     // everything went fine, set output variables
     *field_id = field_id_in;
-    if (ipv4_bits) {
-        *ipv4_bits = ipv4_bits_in;
-    }
-    if (ipv6_bits) {
-        *ipv6_bits = ipv6_bits_in;
-    }
+    *ipv4_bits = ipv4_bits_in;
+    *ipv6_bits = ipv6_bits_in;
 
     return E_OK;
 }
@@ -787,7 +800,8 @@ fields_add_from_str(struct field_info fields[], char *fields_str,
             ecode = fields_add_aggr_key(fields + field_id, field_id, ipv4_bits,
                                         ipv6_bits);
         } else {
-            ecode = fields_add_ordinary(fields + field_id, field_id);
+            ecode = fields_add_ordinary(fields + field_id, field_id, ipv4_bits,
+                                        ipv6_bits);
         }
 
         if (ecode != E_OK) {
@@ -1177,12 +1191,15 @@ parse_sort_spec(struct field_info fields[], char *sort_spec)
 
     // parse sort key from string; netmask is pointless in case of sort key
     int field_id;
-    ecode = fields_parse_str(sort_spec, &field_id, NULL, NULL);
+    int ipv4_bits;
+    int ipv6_bits;
+    ecode = fields_parse_str(sort_spec, &field_id, &ipv4_bits, &ipv6_bits);
     if (ecode != E_OK) {
         return ecode;
     }
 
-    return fields_add_sort_key(fields + field_id, field_id, direction);
+    return fields_add_sort_key(fields + field_id, field_id, direction,
+                               ipv4_bits, ipv6_bits);
 }
 
 
