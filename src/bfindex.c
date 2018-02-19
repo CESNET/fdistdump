@@ -183,7 +183,7 @@ build_addr_node(const ff_node_t *ff_node)
 
     struct bfindex_node *const node = malloc(sizeof (*node));
     if (!node) {
-        PRINT_ERROR(E_MEM, 0, "bfindex: build: node allocation");
+        PRINT_ERROR(E_MEM, 0, "build: node allocation");
         global_ecode = BFINDEX_E_MEM;
         return NULL;
     }
@@ -226,8 +226,7 @@ prune_oper_subtree(struct bfindex_node *node)
             && (memcmp(&node->left->addr, &node->right->addr,
                 sizeof (node->left->addr)) == 0)) {
         // both child nodes are not empty and contains the same address
-        PRINT_DEBUG("bfindex: reduce: using left child node directly because "
-                    "left and right child nodes are the same");
+        PRINT_DEBUG("bfindex: reduce: using left child node directly because left and right child nodes are the same");
         free(node->right);
         return node->left;
     }
@@ -278,7 +277,7 @@ build_oper_node(const ff_node_t *ff_node)
 
     struct bfindex_node *const node = malloc(sizeof (*node));
     if (!node) {
-        PRINT_ERROR(E_MEM, 0, "bfindex: build: node allocation");
+        PRINT_ERROR(E_MEM, 0, "build: node allocation");
         global_ecode = BFINDEX_E_MEM;
         return NULL;
     }
@@ -422,13 +421,10 @@ bfindex_init(const ff_node_t *filter_root)
 
     struct bfindex_node *const bfindex_root = build_node(filter_root);
     if (!bfindex_root) {
-        PRINT_WARNING(E_BFINDEX, 0, "bfindex: init: file indexes cannot be "
-                                    "used due to unsuitable filter");
+        PRINT_INFO("bfindex: init: file indexes cannot be used due to unsuitable filter");
         return NULL;
     } else if (global_ecode != BFINDEX_E_OK) {
-        PRINT_WARNING(E_BFINDEX, 0, "bfindex: init: file indexes will not be "
-                                    "used due to error during operator/address "
-                                    "tree initialization");
+        PRINT_WARNING(E_BFINDEX, 0, "init: file indexes will not be used due to error during operator/address tree initialization");
         bfindex_free(bfindex_root);
         return NULL;
     } else {
@@ -489,7 +485,7 @@ bfindex_flow_to_index_path(const char *flow_file_path)
             + file_name_len  // (rest of the) original file name
             + 1);  // terminating null-byte
     if (!index_path) {
-        PRINT_ERROR(E_MEM, 0, "bfindex: path string allocation");
+        PRINT_ERROR(E_MEM, 0, "path string allocation");
         return NULL;
     }
     strncpy(index_path, dir_name, dir_name_len);
@@ -509,9 +505,8 @@ bfindex_contains(const struct bfindex_node *bfindex_node,
     bfi_index_ptr_t index_ptr;
     bfi_ecode_t bfi_ecode = bfi_load_index(&index_ptr, index_file_path);
     if (bfi_ecode != BFI_E_OK) {
-        PRINT_WARNING(E_BFINDEX, 0, "bfindex: contains: unable to load file "
-                      "\"%s\': %s",index_file_path,
-                      bfi_get_error_msg(bfi_ecode));
+        PRINT_WARNING(E_BFINDEX, 0, "contains: unable to load file `%s': %s",
+                      index_file_path, bfi_get_error_msg(bfi_ecode));
         return true;
     }
 
