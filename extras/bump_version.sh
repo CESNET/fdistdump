@@ -105,7 +105,7 @@ main() {
     GIT_NAME="$(git config --get user.name)"
     GIT_EMAIL="$(git config --get user.email)"
     HEADER="* $SPEC_DATE $GIT_NAME <$GIT_EMAIL> - $NEW_VERSION_STR-1"
-    BODY="- Incremented the $1 version number ($LATEST_VERSION_STR -> $NEW_VERSION_STR)."
+    BODY="- $1 version bump ($LATEST_VERSION_STR -> $NEW_VERSION_STR)"
     sed -i -e "/Version:/ s/${LATEST_VERSION_STR}/${NEW_VERSION_STR}/" \
            -e "/Release:/ s/\(Release:[[:space:]]\+\)[[:digit:]]\+/\11/" \
            -e "/%changelog/a $HEADER\n$BODY\n" \
@@ -116,7 +116,7 @@ main() {
     echo To finalize the process, inspect changes made by thit script and run \
          the following commands:
     echo git add configure.ac doc/man/fdistdump.1 fdistdump.spec
-    echo git commit -m "\"increment the $1 version number ($LATEST_VERSION_STR -> $NEW_VERSION_STR)\""
+    echo git commit -m "\"VERSION BUMP: $1 ($LATEST_VERSION_STR -> $NEW_VERSION_STR)\""
     echo git tag -a "v$NEW_VERSION_STR"
     echo git checkout master
     echo git merge develop
