@@ -29,7 +29,7 @@ before_install:
     - sudo apt-get -qq install autoconf autoconf-archive automake libtool
     - sudo apt-get -qq install gcc make
     # install fdistdump's dependencies
-    - travis/install_dependencies.sh
+    - extras/install_dependencies_ubuntu.sh
 
     - export OMPI_CC="$CC"   # CC set by travis as OMPI underlying compiler
     - export MPICH_CC="$CC"  # CC set by travis as MPICH underlying compiler
