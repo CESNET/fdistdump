@@ -34,8 +34,7 @@ main() {
     fi
 
     # find the most recent tag that is reachable from HEAD of the current branch
-    #local -r LATEST_TAG="$(git describe --abbrev=0)"
-    local -r LATEST_TAG="v0.3.0"
+    local -r LATEST_TAG="$(git describe --abbrev=0)"
     [[ $LATEST_TAG =~ ^v[[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+$ ]] \
         || die "invalid tag produced by git describe: \'$LATEST_TAG\'"
     # strip the tag's initial letter v and parse the string into an array of its
