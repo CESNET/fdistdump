@@ -1,4 +1,9 @@
-/** Program entry point with various initializations and master and slave split.
+/**
+ * @brief Program entry point.
+ *
+ * Initialization of the MPI execution environment, command-line arguments
+ * parsing, master/slave execution split. Returns EXIT_SUCCESS on success or
+ * aborts on error.
  */
 
 /*
@@ -35,7 +40,6 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #include "common.h"
@@ -51,76 +55,75 @@
 #include <mpi.h>
 
 
-/* Global varables. */
-MPI_Datatype mpi_struct_shared_task_ctx;
-int secondary_errno;
-
-
-int main(int argc, char **argv)
+/**
+ * @brief Program entry point.
+ *
+ * Contains initialization of the MPI execution environment, calls command-line
+ * arguments parsing, performs a master/slave execution split. Returns
+ * EXIT_SUCCESS on success or aborts on error.
+ *
+ * @param argc Number of command-line arguments in argument vector.
+ * @param argv Vector of command-line argument strings.
+ *
+ * @return EXIT_SUCCESS on success of all processes, calls MPI_Abort() on error.
+ */
+int
+main(int argc, char *argv[])
 {
-        error_code_t primary_errno = E_OK;
-        int world_rank;
-        int world_size;
-        int thread_provided; //thread safety provided by the MPI
-        struct cmdline_args args = { 0 };
+    error_code_t ecode = E_OK;
 
+    /*
+     * Initialize MPI and check supported thread level. We need at least
+     * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
+     * Open MPI < 3.0 does not support it by default.
+     */
+    int thread_provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
+    if (thread_provided != MPI_THREAD_SERIALIZED
+            && thread_provided != MPI_THREAD_MULTIPLE) {
+        ecode = E_MPI;
+        PRINT_ERROR(ecode, thread_provided,
+                    "an insufficient level of thread support. "
+                    "At least MPI_THREAD_SERIALIZED is required.");
+        goto finalize;
+    }
 
-        /*
-         * Initialize MPI and check supported thread level. We need at least
-         * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
-         * its not common amongst MPI implementations.
-         */
-        MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
-        if (thread_provided != MPI_THREAD_SERIALIZED &&
-                        thread_provided != MPI_THREAD_MULTIPLE) {
-                PRINT_ERROR(E_MPI, thread_provided,
-                                "an insufficient level of thread support. "
-                                "At least MPI_THREAD_SERIALIZED required.");
-                primary_errno = E_MPI;
-                goto finalize;
-        }
+    // determine the calling processes rank and the total number of proecesses
+    int world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-        /* Find out processes rank and total number of proecesses. */
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    // check if there are at least two processes
+    if (world_size <= 1) {
+        ecode = E_MPI;
+        PRINT_ERROR(ecode, 0, PACKAGE_NAME " requires at least 2 copies of the program to run "
+                    "(one for the master and the others for the slaves). "
+                    "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
+        goto finalize;
+    }
 
-        /* Check if there are at least two processes. */
-        if (world_size <= 1) {
-                PRINT_ERROR(E_MPI, 0, "%s requires at least 2 copies of the "
-                                "program to run. Did you use MPI process "
-                                "manager, e.g. mpiexec(1)?", PACKAGE_NAME);
-                primary_errno = E_MPI;
-                goto finalize;
-        }
+    // parse command line arguments in all processes
+    struct cmdline_args args = { 0 };
+    ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
+    if (ecode != E_OK) {
+        goto finalize;
+    }
 
-        /* Parse command line arguments by all processes. */
-        primary_errno = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
-        if (primary_errno != E_OK) {
-                goto finalize;
-        }
-
-        /* Create MPI data types (global variables). */
-        create_mpi_struct_shared_task_ctx();
-
-        /* Split master and slave code. */
-        if (world_rank == ROOT_PROC) {
-                primary_errno = master(world_size, &args);
-        } else {
-                primary_errno = slave(world_size);
-        }
-
-        /* Free MPI data types (global variables). */
-        free_mpi_struct_shared_task_ctx();
-
-        /* Free arguments structure. */
-        arg_free(&args);
-
+    // split master and slave code
+    if (world_rank == ROOT_PROC) {
+        ecode = master_main(world_size, &args);
+    } else {
+        ecode = slave_main(world_size, &args);
+    }
 
 finalize:
-        if (primary_errno == E_OK || primary_errno == E_HELP) {
-                MPI_Finalize();
-                return EXIT_SUCCESS;
-        } else {
-                MPI_Abort(MPI_COMM_WORLD, primary_errno);
-        }
+    if (ecode == E_OK || ecode == E_HELP) {
+        PRINT_DEBUG("terminating with success");
+        MPI_Finalize();
+        return EXIT_SUCCESS;
+    } else {
+        PRINT_DEBUG("terminating MPI execution environment due to an error");
+        MPI_Abort(MPI_COMM_WORLD, ecode);
+    }
 }

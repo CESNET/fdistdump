@@ -35,7 +35,6 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 
@@ -69,8 +68,6 @@
 #error "MAX_STR_LEN < INET6_ADDRSTRLEN"
 #endif
 
-
-extern int secondary_errno;
 
 static char global_str[MAX_STR_LEN];
 static struct output_params output_params; //output parameters
@@ -884,9 +881,9 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
         }
         first_item = first_item ? false : (putchar('\n'), false);
 
-        secondary_errno = lnf_rec_init(&rec);
-        if (secondary_errno != LNF_OK) {
-                PRINT_ERROR(E_LNF, secondary_errno, "lnf_rec_init()");
+        int lnf_ret = lnf_rec_init(&rec);
+        if (lnf_ret != LNF_OK) {
+                PRINT_ERROR(E_LNF, lnf_ret, "lnf_rec_init()");
                 return E_LNF;
         }
 

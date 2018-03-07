@@ -35,11 +35,9 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #pragma once
-
 
 #include "common.h"
 #include "output.h"
@@ -48,25 +46,25 @@
 #include <stdbool.h>
 
 
-//TODO: include shared_task_ctx
 struct cmdline_args {
-        working_mode_t working_mode; //working mode (records, aggregation, topN)
-        struct field_info fields[LNF_FLD_TERM_];
+    working_mode_t working_mode;  // working mode (records, aggregation, topN)
 
-        char *filter_str; //filter expression string
-        char *path_str; //path string
+    char *const *paths;  // paths_cnt sized array of user specified paths
+    size_t paths_cnt;
+    struct tm time_begin;  // beginning of the time range
+    struct tm time_end;    // end of the time range
 
-        size_t rec_limit; //read/aggregate/topN record limit
+    struct field_info fields[LNF_FLD_TERM_];  // used libnf fields
 
-        struct tm time_begin; //beginning of the time range
-        struct tm time_end; //end of the time range
+    char *filter_str;  // input filter expression string
+    size_t rec_limit;  // output record limit
+    bool use_fast_topn;  // enables the fast top-N algorithm
+    bool use_bfindex;    // enables the Bloom filter indexes
 
-        bool use_fast_topn; //enables fast top-N algorithm
-        bool use_bfindex;  // enables Bloom filter indexes
-
-        struct output_params output_params; //output (printing) parameters
-        progress_bar_type_t progress_bar_type;
-        char *progress_bar_dest;
+    // output (printing) parameters
+    struct output_params output_params;
+    progress_bar_type_t progress_bar_type;
+    char *progress_bar_dest;
 };
 
 
@@ -85,12 +83,3 @@ struct cmdline_args {
 error_code_t
 arg_parse(struct cmdline_args *args, int argc, char *const argv[],
           bool root_proc);
-
-/**
- * @brief Free parameters structure allocated by arg_parse().
- *
- * @param[in] args Structure with parsed command line argument and other program
- *                 settings.
- */
-void
-arg_free(struct cmdline_args *args);

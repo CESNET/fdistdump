@@ -1,4 +1,4 @@
-/** Master process query declarations.
+/** Master process declarations.
  */
 
 /*
@@ -35,21 +35,24 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #pragma once
 
-
 #include "common.h"
 #include "arg_parse.h"
 
-/** \brief Master program function.
+
+/**
+ * @brief Master's process entry point.
  *
- * Code executed by master process, usually with rank 0.
+ * Entry point to the code executed only by the master process (usually with
+ * rank 0).
  *
- * \param[in] world_size MPI_COMM_WORLD size.
- * \param[in] args Command line parameters.
- * \return Error code.
+ * @param[in] world_size MPI_COMM_WORLD size.
+ * @param[in] args Parsed command-line arguments.
+ *
+ * @return Error code.
  */
-error_code_t master(int world_size, const struct cmdline_args *args);
+error_code_t
+master_main(int world_size, const struct cmdline_args *args);

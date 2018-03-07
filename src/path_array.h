@@ -1,4 +1,5 @@
-/** Preprocessing and generating array of paths from string or time range.
+/** Preprocessing of user specified paths and creation of array of specific
+ * paths flow files from string or time range.
  */
 
 /*
@@ -35,17 +36,17 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #pragma once
-
 
 #include <stddef.h> //size_t
 
 
 /* Generate array of paths from paths string and optional time range. */
-char ** path_array_gen(char *paths, const struct tm begin,
-                const struct tm end, size_t *cnt);
+char **
+path_array_gen(char *const paths[], size_t paths_cnt, const struct tm begin,
+               const struct tm end, size_t *out_paths_cnt);
 /* Free all file names and array. */
-void path_array_free(char **names, size_t names_cnt);
+void
+path_array_free(char *paths[], size_t paths_cnt);

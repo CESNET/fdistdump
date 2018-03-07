@@ -1,4 +1,4 @@
-/** Slave process query declarations.
+/** Slave process declarations.
  */
 
 /*
@@ -35,21 +35,24 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #pragma once
 
-
 #include "common.h"
+#include "arg_parse.h"
 
-#include <stddef.h> //size_t
 
-/** \brief Slave program function.
+/**
+ * @brief Slave's process entry point.
  *
- * Code executed by slave processes, usually with rank != 0.
+ * Entry point to the code executed only by the slave processes (usually with
+ * ranks > 0).
  *
- * \param[in] world_size MPI_COMM_WORLD size.
- * \return Error code.
+ * @param[in] world_size MPI_COMM_WORLD size.
+ * @param[in] args Parsed command-line arguments.
+ *
+ * @return Error code.
  */
-error_code_t slave(int world_size);
+error_code_t
+slave_main(int world_size, const struct cmdline_args *args);

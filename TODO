@@ -1,41 +1,40 @@
 Bugfixes:
+  - terminate immediately on errors
 
 Features:
-        -add output printing in defined order
-        -add fields offsets for output printing
-        -add output alignment options: none, expanding, absolute
-        -add more output format options (e.g. pretty with disabled stat
-         conversions) and create short options for them
+  - add output printing in defined order
+  - add fields offsets for output printing
+  - add output alignment options: none, expanding, absolute
+  - add more output format options (e.g., pretty with disabled stat conversions)
+    and create short options for them
 
 Optimizations:
-        -optimization for ascending sort, there is possibility to vastly reduce
-         number of read/transfered records. If the key value of first records
-         is X and the key value of Nth record is also X, it is unnecessary to
-         read further records. Similar optimization is possible for descending
-         sort.
-        -OpenMP reduction for summaries (needs OpenMP 4.0, GCC 4.9)
-        -minimize lnf_rec_read() calls for summaries
+  - optimization for ascending sort, there is possibility to vastly reduce
+    number of read/transfered records. If the key value of first records is X
+    and the key value of Nth record is also X, it is unnecessary to read further
+    records. Similar optimization is possible for descending sort.
+  - OpenMP reduction for summaries (needs OpenMP 4.0, GCC 4.9)
+  - minimize lnf_rec_read() calls for summaries
+  - add passive timeout to the MPI receiving loop on master
 
 Tests:
-        -add tests for reading multiple input files at once to test
-         multithreading
-        -add tests for reading single/multiple very large files to test
-         buffer switching
-        -add tests for reading nonexistent/invalid/empty files in all modes.
-         There is a possibility of deadlock.
+  - add tests for reading multiple input files at once to test multithreading
+  - add tests for reading single/multiple very large files to test buffer
+    switching
+  - add tests for reading nonexistent/invalid/empty files in all modes. There is
+    a possibility of a deadlock.
 
 Documentation:
-        -create a ChangeLog
+  - create a ChangeLog
 
 Build:
-        -move away from autotools
 
 Coding style:
-        -switch to 4 spaces indentation
-        -join multiline string
-        -check 80 characters per line
+  - switch to 4 spaces indentation
+  - join multiline string
+  - check 80 characters per line
 
 Others:
-        -create and use more MPI tags
-        -suppress printing command-line error messages on all nodes
-        -use an MPI error handler
+  - create and use more MPI tags
+  - suppress printing command-line error messages on all nodes
+  - use an MPI error handler

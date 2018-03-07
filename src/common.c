@@ -35,7 +35,6 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 
@@ -52,17 +51,6 @@
 
 
 #define TM_YEAR_BASE 1900
-
-
-/**
- * \defgroup glob_var Global variables
- * @{
- */
-extern MPI_Datatype mpi_struct_shared_task_ctx;
-extern int secondary_errno;
-/**
- * @}
- */ //glob_var
 
 
 /**
@@ -102,134 +90,129 @@ char * working_mode_to_str(working_mode_t working_mode)
 
 
 /**
- * \defgroup mpi_type_func Functions constructing/destructing MPI data types
+ * \defgroup libnf_mem Functions operating with libnf aggregation/sorting memory
  * @{
  */
-#define STRUCT_TM_ELEMS 9
-void create_mpi_struct_shared_task_ctx(void)
+/**
+ * @brief Allocate a libnf memory and configure for specified fields.
+ *
+ * If sort_only_mode is false, the memory will be a hash table to perform
+ * aggregation based on one or more aggregation keys.
+ * If sort_only_mode is true, the memory will be a linked list to store each
+ * record as it is.
+ * Destructor function libnf_mem_free() should be called to free the memory.
+ *
+ * @param[in] mem Double pointer to the libnf memory data type.
+ * @param[in] fields Array of field_info structures based on which the memory
+ *                   will be configured.
+ * @param sort_only_mode Switches between hash table and linked list.
+ *
+ * @return E_OK on success, E_LNF on failure.
+ */
+error_code_t
+libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
+               const bool sort_only_mode)
 {
-        int block_lengths[STRUCT_SHARED_TASK_CTX_ELEMS] = {
-                1, //working_mode
-                (STRUCT_FIELD_INFO_ELEMS * LNF_FLD_TERM_), //fields
-                1, //filter_str_len
-                1, //path_str_len
-                1, //rec_limit
-                STRUCT_TM_ELEMS, //time_begin
-                STRUCT_TM_ELEMS, //time_end
-                1, //use_fast_topn
-                1, //use_bfindex
-                /* NEW */
-        };
-        MPI_Aint displacements[STRUCT_SHARED_TASK_CTX_ELEMS] = {
-                offsetof(struct shared_task_ctx, working_mode),
-                offsetof(struct shared_task_ctx, fields),
-                offsetof(struct shared_task_ctx, filter_str_len),
-                offsetof(struct shared_task_ctx, path_str_len),
-                offsetof(struct shared_task_ctx, rec_limit),
-                offsetof(struct shared_task_ctx, time_begin),
-                offsetof(struct shared_task_ctx, time_end),
-                offsetof(struct shared_task_ctx, use_fast_topn),
-                offsetof(struct shared_task_ctx, use_bfindex),
-                /* offsetof(struct shared_task_ctx, NEW), */
-        };
-        MPI_Datatype types[STRUCT_SHARED_TASK_CTX_ELEMS] = {
-                MPI_INT, //working_mode
-                MPI_INT, //fields
-                MPI_UNSIGNED_LONG, //filter_str_len
-                MPI_UNSIGNED_LONG, //path_str_len
-                MPI_UNSIGNED_LONG, //rec_limit
-                MPI_INT, //time_begin
-                MPI_INT, //time_end
-                MPI_C_BOOL, //use_fast_topn
-                MPI_C_BOOL, //use_bfindex
-                /* NEW */
-        };
+    assert(mem && fields);
 
-        MPI_Type_create_struct(STRUCT_SHARED_TASK_CTX_ELEMS, block_lengths,
-                        displacements, types, &mpi_struct_shared_task_ctx);
-        MPI_Type_commit(&mpi_struct_shared_task_ctx);
+    error_code_t ecode = E_OK;
+
+    // initialize the memory
+    int lnf_ret = lnf_mem_init(mem);
+    if (lnf_ret != LNF_OK) {
+        PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_init()");
+        return E_LNF;
+    }
+
+    bool have_aggr_field = false;
+    bool have_sort_field = false;
+    for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+        if (fields[i].id == 0) {
+            continue;  // field is not present
+        }
+        //TODO
+        if ((fields[i].flags & LNF_AGGR_FLAGS) == LNF_AGGR_KEY) {
+            have_aggr_field = true;
+        }
+        if (fields[i].flags & LNF_SORT_FLAGS) {
+            have_sort_field = true;
+        }
+    }
+    //TODO
+    if (sort_only_mode) {
+        //assert(have_sort_field && !have_aggr_field);
+    } else {
+        assert(have_aggr_field);
+    }
+
+    // is it possible to apply a fast aggregation?
+    if (!sort_only_mode
+            && fields[LNF_FLD_FIRST].id
+            && ((fields[LNF_FLD_FIRST].flags & LNF_AGGR_FLAGS) == LNF_AGGR_MIN)
+            && fields[LNF_FLD_LAST].id
+            && ((fields[LNF_FLD_LAST].flags & LNF_AGGR_FLAGS) == LNF_AGGR_MAX)
+            && fields[LNF_FLD_DOCTETS].id
+            && ((fields[LNF_FLD_DOCTETS].flags & LNF_AGGR_FLAGS) == LNF_AGGR_SUM)
+            && fields[LNF_FLD_DPKTS].id
+            && ((fields[LNF_FLD_DPKTS].flags & LNF_AGGR_FLAGS) == LNF_AGGR_SUM)
+            && fields[LNF_FLD_AGGR_FLOWS].id
+            && ((fields[LNF_FLD_AGGR_FLOWS].flags & LNF_AGGR_FLAGS) == LNF_AGGR_SUM))
+    {
+        lnf_ret = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
+        if (lnf_ret != LNF_OK) {
+            ecode = E_LNF;
+            PRINT_ERROR(ecode, lnf_ret, "lnf_mem_fastaggr()");
+            goto error_label;
+        }
+    }
+
+    // loop through the fields
+    for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+        if (fields[i].id == 0) {
+            continue;  // field is not present
+        }
+
+        if (fields[i].id >= LNF_FLD_CALC_BPS
+                && fields[i].id <= LNF_FLD_CALC_BPP) {
+            continue;
+        }
+
+        lnf_ret = lnf_mem_fadd(*mem, fields[i].id, fields[i].flags,
+                               fields[i].ipv4_bits, fields[i].ipv6_bits);
+        if (lnf_ret != LNF_OK) {
+            ecode = E_LNF;
+            PRINT_ERROR(ecode, lnf_ret, "lnf_mem_fadd()");
+            goto error_label;
+        }
+    }
+
+    if (sort_only_mode) {
+        // switch the libnf memory to a linked list to disable aggregation
+        lnf_ret = lnf_mem_setopt(mem, LNF_OPT_LISTMODE, NULL, 0);
+        assert(lnf_ret == LNF_OK);
+    }
+
+    return ecode;
+error_label:
+    libnf_mem_free(*mem);
+    *mem = NULL;
+    return ecode;
 }
 
-void free_mpi_struct_shared_task_ctx(void)
+/**
+ * @brief Free memory allocated by libnf_mem_init().
+ *
+ * @param[in] mem Pointer to the libnf memory data type.
+ */
+void
+libnf_mem_free(lnf_mem_t *const mem)
 {
-        MPI_Type_free(&mpi_struct_shared_task_ctx);
+    assert(mem);
+    lnf_mem_free(mem);
 }
 /**
  * @}
- */ //mpi_type_func
-
-
-/**
- * \defgroup aggr_mem Functions operating with aggregation memory
- * @{
- */
-error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields)
-{
-        secondary_errno = lnf_mem_init(mem);
-        if (secondary_errno != LNF_OK) {
-                PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_init()");
-                return E_LNF;
-        }
-
-        /* Is it possible to apply fast aggregation? */
-        if (fields[LNF_FLD_FIRST].id &&
-                        ((fields[LNF_FLD_FIRST].flags & LNF_AGGR_FLAGS) ==
-                         LNF_AGGR_MIN) &&
-                        fields[LNF_FLD_LAST].id &&
-                        ((fields[LNF_FLD_LAST].flags & LNF_AGGR_FLAGS) ==
-                         LNF_AGGR_MAX) &&
-                        fields[LNF_FLD_DOCTETS].id &&
-                        ((fields[LNF_FLD_DOCTETS].flags & LNF_AGGR_FLAGS) ==
-                         LNF_AGGR_SUM) &&
-                        fields[LNF_FLD_DPKTS].id &&
-                        ((fields[LNF_FLD_DPKTS].flags & LNF_AGGR_FLAGS) ==
-                         LNF_AGGR_SUM) &&
-                        fields[LNF_FLD_AGGR_FLOWS].id &&
-                        ((fields[LNF_FLD_AGGR_FLOWS].flags & LNF_AGGR_FLAGS) ==
-                         LNF_AGGR_SUM))
-        {
-                secondary_errno = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
-                if (secondary_errno != LNF_OK) {
-                        PRINT_ERROR(E_LNF, secondary_errno, "lnf_mem_fastaggr()");
-                        free_aggr_mem(*mem);
-                        *mem = NULL;
-                        return E_LNF;
-                }
-        }
-
-        /* Loop through the fields. */
-        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
-                if (fields[i].id == 0) {
-                        continue; //field is not present
-                }
-
-                if (fields[i].id >= LNF_FLD_CALC_BPS &&
-                                fields[i].id <= LNF_FLD_CALC_BPP) {
-                        continue;
-                }
-
-                secondary_errno = lnf_mem_fadd(*mem, fields[i].id,
-                                fields[i].flags, fields[i].ipv4_bits,
-                                fields[i].ipv6_bits);
-                if (secondary_errno != LNF_OK) {
-                        PRINT_ERROR(E_LNF, secondary_errno,
-                                        "lnf_mem_fadd()");
-                        free_aggr_mem(*mem);
-                        *mem = NULL;
-                        return E_LNF;
-                }
-        }
-
-        return E_OK;
-}
-
-void free_aggr_mem(lnf_mem_t *mem)
-{
-        lnf_mem_free(mem);
-}
-/**
- * @}
- */ //aggr_mem
+ */  // libnf_mem
 
 
 /**

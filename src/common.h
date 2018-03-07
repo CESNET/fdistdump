@@ -35,7 +35,6 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #pragma once
@@ -63,6 +62,9 @@
 #define FLOW_FILE_NAME_SUFFIX "%Y%m%d%H%M%S"
 #define FLOW_FILE_NAME_FORMAT FLOW_FILE_NAME_PREFIX "." FLOW_FILE_NAME_SUFFIX
 #define FLOW_FILE_FORMAT FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT
+
+
+typedef uint32_t xchg_rec_size_t;
 
 
 /**
@@ -112,12 +114,14 @@ typedef enum { //progress bar type
  * \defgroup common_struct Common structures usable everywhere
  * @{
  */
+#define STRUCT_PROCESSED_SUMM_ELEMENTS 3
 struct processed_summ {
         uint64_t flows;
         uint64_t pkts;
         uint64_t bytes;
 };
 
+#define STRUCT_METADATA_SUMM_ELEMENTS 15
 struct metadata_summ {
         uint64_t flows;
         uint64_t flows_tcp;
@@ -138,32 +142,11 @@ struct metadata_summ {
         uint64_t bytes_other;
 };
 
-
-//XXX: reflect changes also in mpi_struct_shared_task_ctx
-#define STRUCT_FIELD_INFO_ELEMS 4
 struct field_info {
         int id;
         int flags;
         int ipv4_bits;
         int ipv6_bits;
-};
-
-//XXX: reflect changes also in mpi_struct_shared_task_ctx
-#define STRUCT_SHARED_TASK_CTX_ELEMS 9
-struct shared_task_ctx {
-        working_mode_t working_mode; //working mode
-        struct field_info fields[LNF_FLD_TERM_]; //present LNF fields
-
-        size_t filter_str_len; //filter expression string length
-        size_t path_str_len; //path string length
-
-        size_t rec_limit; //record/aggregation limit
-
-        struct tm time_begin; //beginning of the time range
-        struct tm time_end; //end of the time range
-
-        bool use_fast_topn; //enables fast top-N algorithm
-        bool use_bfindex;  //enables Bloom filter indexes
 };
 /**
  * @}
@@ -229,35 +212,33 @@ struct shared_task_ctx {
 char * working_mode_to_str(working_mode_t working_mode);
 
 
-/** \brief Construct MPI structure mpi_struct_shared_task_ctx.
+/**
+ * @brief Allocate a libnf memory and configure for specified fields.
  *
- * Global variable MPI_Datatype mpi_struct_shared_task_ctx is constructed as
- * mirror to struct shared_task_ctx. Every change to struct shared_task_ctx must
- * be reflected.
- */
-void create_mpi_struct_shared_task_ctx(void);
-
-/** \brief Destruct MPI structure mpi_struct_shared_task_ctx.
- */
-void free_mpi_struct_shared_task_ctx(void);
-
-
-/** \brief Initialize LNF aggregation memory.
+ * If sort_only_mode is false, the memory will be a hash table to perform
+ * aggregation based on one or more aggregation keys.
+ * If sort_only_mode is true, the memory will be a linked list to store each
+ * record as it is.
+ * Destructor function libnf_mem_free() should be called to free the memory.
  *
- * Initialize aggregation memory and set memory parameters. mem will be
- * allocated, therefore have to be freed by free_aggr_mem().
+ * @param[in] mem Double pointer to the libnf memory data type.
+ * @param[in] fields Array of field_info structures based on which the memory
+ *                   will be configured.
+ * @param sort_only_mode Switches between hash table and linked list.
  *
- * \param[inout] mem Pointer to pointer to LNF memory structure.
- * \param[in] fields LNF fields and theirs parameters.
- * \return E_OK on success, E_LNF on error.
+ * @return E_OK on success, E_LNF on failure.
  */
-error_code_t init_aggr_mem(lnf_mem_t **mem, const struct field_info *fields);
+error_code_t
+libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
+               const bool sort_only_mode);
 
-/** \brief Free LNF aggregation memory.
+/**
+ * @brief Free memory allocated by libnf_mem_init().
  *
- * \param[inout] mem Pointer to LNF memory structure.
+ * @param[in] mem Pointer to the libnf memory data type.
  */
-void free_aggr_mem(lnf_mem_t *mem);
+void
+libnf_mem_free(lnf_mem_t *const mem);
 
 
 /** \brief Yield the time difference between a and b.

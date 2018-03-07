@@ -1,4 +1,5 @@
-/** Preprocessing and generating array of paths from string or time range.
+/** Preprocessing of user specified paths and creation of array of specific
+ * paths flow files from string or time range.
  */
 
 /*
@@ -35,7 +36,6 @@
  * in contract, strict liability, or tort (including negligence or
  * otherwise) arising in any way out of the use of this software, even
  * if advised of the possibility of such damage.
- *
  */
 
 #include "common.h"
@@ -60,7 +60,6 @@
 
 #include <mpi.h>
 
-
 #define PATH_ARRAY_INIT_SIZE 50
 
 
@@ -72,46 +71,46 @@ struct path_array_ctx {
 
 
 /* Add path into the path array. */
-static error_code_t add_file(struct path_array_ctx *pac, const char *name)
+static error_code_t add_file(struct path_array_ctx *pa_ctx, const char *name)
 {
         /* Is there a free space in the array for another file? */
-        if (pac->names_cnt == pac->names_size) { //no, ask for another space
+        if (pa_ctx->names_cnt == pa_ctx->names_size) { //no, ask for another space
                 char **new_names;
 
-                new_names = realloc(pac->names,
-                                pac->names_size * 2 * sizeof (*pac->names));
+                new_names = realloc(pa_ctx->names,
+                                pa_ctx->names_size * 2 * sizeof (*pa_ctx->names));
                 if (new_names == NULL) { //failure
                         PRINT_ERROR(E_MEM, 0, "realloc()");
                         return E_MEM;
                 } else { //success
-                        pac->names = new_names;
-                        pac->names_size *= 2;
+                        pa_ctx->names = new_names;
+                        pa_ctx->names_size *= 2;
                 }
         }
 
         /* Allocate space for the name and copy it there. */
-        pac->names[pac->names_cnt] = strdup(name);
-        if (pac->names[pac->names_cnt] == NULL) {
+        pa_ctx->names[pa_ctx->names_cnt] = strdup(name);
+        if (pa_ctx->names[pa_ctx->names_cnt] == NULL) {
                 PRINT_ERROR(E_MEM, 0, "strdup()");
                 return E_MEM;
         } else {
-                pac->names_cnt++;
+                pa_ctx->names_cnt++;
                 return E_OK;
         }
 }
 
 
-static error_code_t fill_from_time(struct path_array_ctx *pac,
+static error_code_t fill_from_time(struct path_array_ctx *pa_ctx,
                 char path[PATH_MAX], const struct tm begin,
                 const struct tm end)
 {
-        error_code_t primary_errno = E_OK;
+        error_code_t ecode = E_OK;
         size_t offset = strlen(path);
         struct tm ctx = begin;
         struct stat stat_buff;
 
 
-        /* Make sure there is a terminating slash. */
+        /* Make sure there is the terminating slash. */
         if (path[offset - 1] != '/') {
                 path[offset++] = '/';
         }
@@ -122,7 +121,7 @@ static error_code_t fill_from_time(struct path_array_ctx *pac,
                 if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
                                         &ctx) == 0) {
                         errno = ENAMETOOLONG;
-                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
                                         path);
                         continue;
                 }
@@ -133,12 +132,12 @@ static error_code_t fill_from_time(struct path_array_ctx *pac,
 
                 /* Check file existence. */
                 if (stat(path, &stat_buff) != 0) {
-                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
                                         path);
                 } else {
-                        primary_errno = add_file(pac, path);
-                        if (primary_errno != E_OK) {
-                                return primary_errno;
+                        ecode = add_file(pa_ctx, path);
+                        if (ecode != E_OK) {
+                                return ecode;
                         }
                 }
         }
@@ -147,10 +146,10 @@ static error_code_t fill_from_time(struct path_array_ctx *pac,
         return E_OK;
 }
 
-static error_code_t fill_from_path(struct path_array_ctx *pac,
+static error_code_t fill_from_path(struct path_array_ctx *pa_ctx,
                 const char path[PATH_MAX])
 {
-        error_code_t primary_errno = E_OK;
+        error_code_t ecode = E_OK;
         DIR *dir;
         struct dirent *entry;
         struct stat stat_buff;
@@ -158,18 +157,18 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
 
         /* Detect file type. */
         if (stat(path, &stat_buff) != 0) {
-                PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
+                PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno), path);
                 return E_OK; //not a fatal error
         }
 
         if (!S_ISDIR(stat_buff.st_mode)) {
                 /* Path is not a directory. */
-                return add_file(pac, path);
+                return add_file(pa_ctx, path);
         }
 
         dir = opendir(path);
         if (dir == NULL) {
-                PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno), path);
+                PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno), path);
                 return E_OK; //not a fatal error
         }
 
@@ -191,7 +190,7 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
                 /* Too long filenames are ignored. */
                 if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
                         errno = ENAMETOOLONG;
-                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
+                        PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
                                         path);
                         continue; //skip this file
                 }
@@ -201,22 +200,23 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
                 strcat(new_path, "/");
                 strcat(new_path, entry->d_name);
 
-                primary_errno = fill_from_path(pac, new_path);
-                if (primary_errno != E_OK) {
+                ecode = fill_from_path(pa_ctx, new_path);
+                if (ecode != E_OK) {
                         break;
                 }
         }
         closedir(dir);
 
 
-        return primary_errno;
+        return ecode;
 }
 
 
-/** \brief Transform format string into path string.
+/**
+ * @brief Transform format string into path string.
  *
  * The format string is a character string composed of zero or more directives:
- * ordinary characters (not %), which are copied unchanged to the output path;
+ * ordinary characters (not %), which are copied unchanged to the output path,
  * and conversion specifications, each of which results in an additional action.
  * Each conversion specification is introduced by the character % followed by a
  * conversion specifier character.
@@ -227,144 +227,139 @@ static error_code_t fill_from_path(struct path_array_ctx *pac,
  * Conversion specifiers:
  *   h: converted into the hostname of the node
  *
- * \param[in] format Format string.
- * \param[out] path  Path creted from the format string.
- * \return True if path should be processed, false if path should be skipped.
+ * @param[in] format Format string.
+ * @param[out] path Path creted from the format string.
+ *
+ * @return True if path should be processed, false if path should be skipped.
  */
-static bool path_preprocessor(const char *format, char path[PATH_MAX])
+static bool
+path_preprocessor(const char *format, char path[PATH_MAX])
 {
-        char tmp[PATH_MAX];
-        char *last_path = tmp;
-        char *perc_sign;
+    assert(format && path);
 
+    if (strlen(format) >= PATH_MAX) {
+        PRINT_WARNING(E_PATH, 0, "conversion specifier too long, skipping `%s'",
+                      format);
+        return false;
+    }
 
-        if (strlen(format) >= PATH_MAX) {
-                PRINT_WARNING(E_PATH, 0, "conversion specifier too long, "
-                                "skipping \"%s\"", format);
+    char tmp[PATH_MAX];
+    char *last_path = tmp;
+    strcpy(tmp, format);
+
+    // format starts by %DIGIT
+    if (tmp[0] == '%' && isdigit(tmp[1])) {
+        last_path = tmp + 2;
+
+        while (isdigit(*last_path) && last_path++);  // skip all digits
+        if (*last_path++ != ':') {  // check for the terminating colon
+            PRINT_WARNING(E_PATH, 0, "invalid conversion specifier, skipping `%s'",
+                          format);
+            return false;
+        }
+
+        int world_rank;
+        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        if (world_rank != atoi(tmp + 1)) {
+            return false;  // this path is not for me, it is for different rank
+        }
+    }
+
+    // last_path now contains all except the initial rank directive
+    char *perc_sign = strchr(last_path, '%');  // find the first directive
+    while (perc_sign) {
+        // copy the format string till the percent sign
+        *perc_sign = '\0';
+        strcat(path, last_path);
+
+        perc_sign++; // move the pointer to the escaped character
+        switch (*perc_sign) {
+        case 'h':
+            errno = 0;
+            gethostname(path + strlen(path), PATH_MAX - strlen(path));
+            if (errno != 0) {
+                errno = ENAMETOOLONG;
+                PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
+                              format);
                 return false;
+            }
+            break;
+
+        default:
+            PRINT_WARNING(E_PATH, 0, "unknown conversion specifier, skipping `%s'",
+                          format);
+            return false;
         }
 
-        strcpy(tmp, format); //copy all except initial conversion specification
+        last_path = perc_sign + 1;  // a pointer to the next regular character
+        perc_sign = strchr(last_path, '%');
+    }
 
-        /* Format starts by %DIGIT. */
-        if (tmp[0] == '%' && isdigit(tmp[1])) {
-                last_path = tmp + 2;
-                int world_rank;
+    strcat(path, last_path);  // copy the rest of the format string
+    PRINT_DEBUG("path preprocessor: `%s' -> `%s'", format, path);
 
-                while (isdigit(*last_path) && last_path++); //skip all digits
-                if (*last_path++ != ':') { //check for terminating colon
-                        PRINT_WARNING(E_PATH, 0, "invalid conversion specifier, "
-                                        "skipping \"%s\"", format);
-                        return false;
-                }
-
-                MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-                if (world_rank != atoi(tmp + 1)) {
-                        return false; //this path is not for me (different rank)
-                }
-        }
-
-        /* last_path now contains all except the initial conversion specifier.*/
-        perc_sign = strchr(last_path, '%'); //find first percent sign
-        while (perc_sign != NULL) {
-                *perc_sign = '\0';
-                strcat(path, last_path); //copy format path till percent sign
-
-                perc_sign++; //move pointer to escaped character
-                switch (*perc_sign) {
-                case 'h':
-                        errno = 0;
-                        gethostname(path + strlen(path),
-                                        PATH_MAX - strlen(path));
-                        if (errno != 0) {
-                                errno = ENAMETOOLONG;
-                                PRINT_WARNING(E_PATH, errno, "%s \"%s\"",
-                                                strerror(errno), format);
-                                return false;
-                        }
-                        break;
-                default:
-                        PRINT_WARNING(E_PATH, 0, "unknown conversion specifier, "
-                                        "skipping \"%s\"", format);
-                        return false;
-                }
-
-                last_path = perc_sign + 1; //ptr to next regular character
-                perc_sign = strchr(last_path, '%');
-        }
-
-        strcat(path, last_path); //copy rest of the format string
-        PRINT_DEBUG("path preprocessor: `%s' -> `%s'", format, path);
-
-        return true;
+    return true;
 }
 
-/* Generate array of paths from paths string and optional time range. */
-char ** path_array_gen(char *paths, const struct tm begin,
-                const struct tm end, size_t *cnt)
+
+char **
+path_array_gen(char *const paths[], size_t paths_cnt, const struct tm begin,
+               const struct tm end, size_t *out_paths_cnt)
 {
-        error_code_t primary_errno = E_OK;
-        struct path_array_ctx pac = { 0 };
-        const bool have_time_range = tm_diff(end, begin) > 0;
-        char *token;
-        char *saveptr;
+    assert(paths && *paths && paths_cnt > 0 && out_paths_cnt);
 
+    // allocate memory for the generated paths
+    struct path_array_ctx pa_ctx = { 0 };
+    pa_ctx.names = malloc(PATH_ARRAY_INIT_SIZE * sizeof (*pa_ctx.names));
+    if (!pa_ctx.names) {
+        PRINT_ERROR(E_MEM, 0, "malloc()");
+        return NULL;
+    } else {
+        pa_ctx.names_size = PATH_ARRAY_INIT_SIZE;
+    }
 
-        pac.names = malloc(PATH_ARRAY_INIT_SIZE * sizeof (*pac.names));
-        if (pac.names == NULL) {
-                PRINT_ERROR(E_MEM, 0, "malloc()");
-                return NULL;
+    for (size_t i = 0; i < paths_cnt; ++i) {
+        // apply preprocessor rules, skip the path on error
+        char new_path[PATH_MAX] = { 0 };
+        if (!path_preprocessor(paths[i], new_path)) {
+            continue;
+        }
+
+        // check for file existence and other errors
+        struct stat stat_buff;
+        if (stat(new_path, &stat_buff) != 0) {
+            PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno), new_path);
+            continue;
+        }
+
+        /*
+         * Generate filenames from the time range if it is available (end to
+         * start difference is > 0) and new_path is a directory. If new_path is
+         * not a directory, process it as a regular file.
+         */
+        error_code_t ecode = E_OK;
+        if (tm_diff(end, begin) > 0 && S_ISDIR(stat_buff.st_mode)) {
+            ecode = fill_from_time(&pa_ctx, new_path, begin, end);
         } else {
-                pac.names_size = PATH_ARRAY_INIT_SIZE;
+            ecode = fill_from_path(&pa_ctx, new_path);
         }
-
-        /* Split paths string into particular paths. */
-        for (token = strtok_r(paths, "\x1C", &saveptr); //first token
-                        token != NULL;
-                        token = strtok_r(NULL, "\x1C", &saveptr)) //next
-        {
-                char path[PATH_MAX] = { 0 };
-                struct stat stat_buff;
-
-                /* Apply preprocessor rules and continue or skip path. */
-                if (!path_preprocessor(token, path)) {
-                        continue; //skip path
-                }
-
-                /* Check for file existence and other errors. */
-                if (stat(path, &stat_buff) != 0) {
-                        PRINT_WARNING(E_PATH, errno, "%s \"%s\"", strerror(errno),
-                                        path);
-                        continue; //skip path
-                }
-
-                /*
-                 * Generate filenames from time range if time range is available
-                 * and path is a directory. Use path as a filename otherwise.
-                 */
-                if (have_time_range && S_ISDIR(stat_buff.st_mode)) {
-                        primary_errno = fill_from_time(&pac, path, begin, end);
-                } else {
-                        primary_errno = fill_from_path(&pac, path);
-                }
-                if (primary_errno != E_OK) {
-                        path_array_free(pac.names, pac.names_cnt);
-                        return NULL;
-                }
+        if (ecode != E_OK) {
+            path_array_free(pa_ctx.names, pa_ctx.names_cnt);
+            return NULL;
         }
+    }
 
-
-        *cnt = pac.names_cnt;
-        return pac.names;
+    *out_paths_cnt = pa_ctx.names_cnt;
+    return pa_ctx.names;
 }
 
-/* Free all file names and array. */
-void path_array_free(char **names, size_t names_cnt)
+void
+path_array_free(char *paths[], size_t paths_cnt)
 {
-        if (names != NULL) {
-                for (size_t i = 0; i < names_cnt; ++i) {
-                        free(names[i]);
-                }
-                free(names);
+    if (paths) {
+        for (size_t i = 0; i < paths_cnt; ++i) {
+            free(paths[i]);
         }
+        free(paths);
+    }
 }
