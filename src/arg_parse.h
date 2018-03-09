@@ -55,10 +55,12 @@ struct cmdline_args {
     struct tm time_end;    // end of the time range
 
     struct field_info fields[LNF_FLD_TERM_];  // used libnf fields
+    int fields_sort_key;  // TODO: remove
+    int fields_sort_dir;  // TODO: remove
 
     char *filter_str;  // input filter expression string
     size_t rec_limit;  // output record limit
-    bool use_fast_topn;  // enables the fast top-N algorithm
+    bool use_tput;  // enables the TPUT algorithm
     bool use_bfindex;    // enables the Bloom filter indexes
 
     // output (printing) parameters

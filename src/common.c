@@ -102,7 +102,7 @@ char * working_mode_to_str(working_mode_t working_mode)
  * record as it is.
  * Destructor function libnf_mem_free() should be called to free the memory.
  *
- * @param[in] mem Double pointer to the libnf memory data type.
+ * @param[in] lnf_mem Double pointer to the libnf memory data type.
  * @param[in] fields Array of field_info structures based on which the memory
  *                   will be configured.
  * @param sort_only_mode Switches between hash table and linked list.
@@ -110,15 +110,15 @@ char * working_mode_to_str(working_mode_t working_mode)
  * @return E_OK on success, E_LNF on failure.
  */
 error_code_t
-libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
+libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
                const bool sort_only_mode)
 {
-    assert(mem && fields);
+    assert(lnf_mem && fields);
 
     error_code_t ecode = E_OK;
 
     // initialize the memory
-    int lnf_ret = lnf_mem_init(mem);
+    int lnf_ret = lnf_mem_init(lnf_mem);
     if (lnf_ret != LNF_OK) {
         PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_init()");
         return E_LNF;
@@ -158,7 +158,7 @@ libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
             && fields[LNF_FLD_AGGR_FLOWS].id
             && ((fields[LNF_FLD_AGGR_FLOWS].flags & LNF_AGGR_FLAGS) == LNF_AGGR_SUM))
     {
-        lnf_ret = lnf_mem_fastaggr(*mem, LNF_FAST_AGGR_BASIC);
+        lnf_ret = lnf_mem_fastaggr(*lnf_mem, LNF_FAST_AGGR_BASIC);
         if (lnf_ret != LNF_OK) {
             ecode = E_LNF;
             PRINT_ERROR(ecode, lnf_ret, "lnf_mem_fastaggr()");
@@ -177,7 +177,7 @@ libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
             continue;
         }
 
-        lnf_ret = lnf_mem_fadd(*mem, fields[i].id, fields[i].flags,
+        lnf_ret = lnf_mem_fadd(*lnf_mem, fields[i].id, fields[i].flags,
                                fields[i].ipv4_bits, fields[i].ipv6_bits);
         if (lnf_ret != LNF_OK) {
             ecode = E_LNF;
@@ -188,27 +188,53 @@ libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
 
     if (sort_only_mode) {
         // switch the libnf memory to a linked list to disable aggregation
-        lnf_ret = lnf_mem_setopt(mem, LNF_OPT_LISTMODE, NULL, 0);
+        lnf_ret = lnf_mem_setopt(lnf_mem, LNF_OPT_LISTMODE, NULL, 0);
         assert(lnf_ret == LNF_OK);
     }
 
     return ecode;
 error_label:
-    libnf_mem_free(*mem);
-    *mem = NULL;
+    libnf_mem_free(*lnf_mem);
+    *lnf_mem = NULL;
     return ecode;
+}
+
+/**
+ * @brief Calculate number of records in the libnf memory.
+ *
+ * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
+ *
+ * @return Number of records in the supplied memory.
+ */
+uint64_t
+libnf_mem_rec_cnt(lnf_mem_t *lnf_mem)
+{
+    uint64_t rec_cntr = 0;
+
+    // initialize the libnf cursor
+    lnf_mem_cursor_t *cursor;
+    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+
+    while (cursor) {
+        lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
+        assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+        rec_cntr++;
+    }
+
+    return rec_cntr;
 }
 
 /**
  * @brief Free memory allocated by libnf_mem_init().
  *
- * @param[in] mem Pointer to the libnf memory data type.
+ * @param[in] lnf_mem Pointer to the libnf memory data type.
  */
 void
-libnf_mem_free(lnf_mem_t *const mem)
+libnf_mem_free(lnf_mem_t *const lnf_mem)
 {
-    assert(mem);
-    lnf_mem_free(mem);
+    assert(lnf_mem);
+    lnf_mem_free(lnf_mem);
 }
 /**
  * @}

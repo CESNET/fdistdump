@@ -422,23 +422,26 @@ Every other value will be treated as a filename and \fBfdistdump\fR will continu
 .\" Other options subsection ---------------------
 .SS Other options
 .TP
-.B --no-fast-topn
-Disable fast top-N algorithm.
-.B fdistdump
-uses this algorithm for statistic (or top-N) queries.
-This option shouldn't influence results in any way, it is just an optimization.
-It should reduce amount of data transferred between master and slave(s).
-There are three conditions that have to be met to make this algorithm work:
+.B --no-tput
+Disable the TPUT algorithm for Top-N queries.
 
-1. it is not disabled by this option
+TPUT is an algorithm to quickly answer Top-N queries (e.g., find the N objects with the highest aggregate values) in a distributed network.
+It should not affect the results in any way, but it should reduce amount of data transferred between the master and the slave(s).
+It supports both descending and ascending order directions.
+\fBfdistdump\fR's implementation uses a modified TPUT algorithm presented in "Efficient Top-K Query Calculation in Distributed Networks" by Pei Cao and Zhe Wang.
 
-2. record limit is enabled
-.RB ( -l )
+However, there are three conditions that have to be satisfied, otherwise it will be automaticly disabled:
 
-3. sort key
-.RB ( -o )
-is one of traffic volume fields
-.RB ( bytes ,\  packets ,\  outbytes ,\  outpackets \ and\  flows ).
+1. aggregation is enabled (\fB-a\fR),
+
+2. record limit is enabled (\fB-l\fR),
+
+3. sorting is enabled (\fB-o\fR) and the sort key is one of traffic volume fields
+
+.RB ( bytes ,\  packets ,\  outbytes ,\  outpackets ,\ or\  flows ).
+If TPUT is disabled, a naive method is used.
+Naive method for answering Top-N queries requires to send data about all records to the master.
+Since the number of records can be high, it could be expensive to a) transfer all there records, and b) aggregate and sort them on the master node.
 .TP
 .B --no-bfindex
 Disable Bloom filter indexes.

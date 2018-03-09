@@ -71,8 +71,6 @@
 #error "LNF_MAX_RAW_LEN > UINT32_MAX"
 #endif
 
-#define LOOKUP_CURSOR_INIT_SIZE 1024
-
 
 /*
  * Global variables.
@@ -84,7 +82,7 @@ static const struct cmdline_args *args;
  * Data types declarations.
  */
 struct slave_ctx {  // thread-shared context
-    lnf_mem_t *libnf_mem;  // libnf memory used for aggregation
+    lnf_mem_t *lnf_mem;  // libnf memory used for aggregation
     lnf_filter_t *filter; // libnf compiled filter expression
 #ifdef HAVE_LIBBFINDEX
     struct bfindex_node *bfindex_root;  // indexing IP address tree root
@@ -100,7 +98,7 @@ struct slave_ctx {  // thread-shared context
 
 struct thread_ctx {  // thread-private context
     lnf_file_t *file;  // libnf file
-    lnf_rec_t *rec;    // libnf record
+    lnf_rec_t *lnf_rec;    // libnf record
 
     uint8_t *buff[2];  // two chunks of memory for the record storage
     struct processed_summ processed_summ;  // summary of processed records
@@ -115,22 +113,22 @@ struct thread_ctx {  // thread-private context
  * @brief TODO
  *
  * @param private
- * @param rec
+ * @param lnf_rec
  */
 static void
-processed_summ_update(struct processed_summ *private, lnf_rec_t *rec)
+processed_summ_update(struct processed_summ *private, lnf_rec_t *lnf_rec)
 {
-    assert(private && rec);
+    assert(private && lnf_rec);
 
     uint64_t tmp;
 
-    lnf_rec_fget(rec, LNF_FLD_AGGR_FLOWS, &tmp);
+    lnf_rec_fget(lnf_rec, LNF_FLD_AGGR_FLOWS, &tmp);
     private->flows += tmp;
 
-    lnf_rec_fget(rec, LNF_FLD_DPKTS, &tmp);
+    lnf_rec_fget(lnf_rec, LNF_FLD_DPKTS, &tmp);
     private->pkts += tmp;
 
-    lnf_rec_fget(rec, LNF_FLD_DOCTETS, &tmp);
+    lnf_rec_fget(lnf_rec, LNF_FLD_DOCTETS, &tmp);
     private->bytes += tmp;
 }
 
@@ -354,11 +352,11 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
     size_t buff_rec_cntr = 0; //number of records in the current buffer
     MPI_Request request = MPI_REQUEST_NULL;
     int lnf_ret;
-    while ((lnf_ret = lnf_read(t_ctx->file, t_ctx->rec)) == LNF_OK) {
+    while ((lnf_ret = lnf_read(t_ctx->file, t_ctx->lnf_rec)) == LNF_OK) {
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (s_ctx->filter && !lnf_filter_match(s_ctx->filter, t_ctx->rec)) {
+        if (s_ctx->filter && !lnf_filter_match(s_ctx->filter, t_ctx->lnf_rec)) {
             continue;
         }
         file_proc_rec_cntr++;
@@ -393,7 +391,7 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
         }
 
         // update the thread-private processed summary counters
-        processed_summ_update(&t_ctx->processed_summ, t_ctx->rec);
+        processed_summ_update(&t_ctx->processed_summ, t_ctx->lnf_rec);
 
         // write the 4 byte long record size before each record
         *(uint32_t *)(t_ctx->buff[buff_idx] + buff_off) = rec_size;
@@ -401,7 +399,7 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
 
         // loop through the fields in the record and fill the data buffer
         for (size_t i = 0; i < fast_fields_cnt; ++i) {
-            lnf_rec_fget(t_ctx->rec, fast_fields[i].id,
+            lnf_rec_fget(t_ctx->lnf_rec, fast_fields[i].id,
                          t_ctx->buff[buff_idx] + buff_off);
             buff_off += fast_fields[i].size;
         }
@@ -462,20 +460,20 @@ read_and_store_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
     int lnf_ret;
     size_t file_rec_cntr = 0;
     size_t file_proc_rec_cntr = 0;
-    while ((lnf_ret = lnf_read(t_ctx->file, t_ctx->rec)) == LNF_OK) {
+    while ((lnf_ret = lnf_read(t_ctx->file, t_ctx->lnf_rec)) == LNF_OK) {
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (s_ctx->filter && !lnf_filter_match(s_ctx->filter, t_ctx->rec)) {
+        if (s_ctx->filter && !lnf_filter_match(s_ctx->filter, t_ctx->lnf_rec)) {
             continue;
         }
         file_proc_rec_cntr++;
 
         // update the thread-private processed summary counters
-        processed_summ_update(&t_ctx->processed_summ, t_ctx->rec);
+        processed_summ_update(&t_ctx->processed_summ, t_ctx->lnf_rec);
 
         // write the record into the libnf memory (a hash table)
-        lnf_ret = lnf_mem_write(s_ctx->libnf_mem, t_ctx->rec);
+        lnf_ret = lnf_mem_write(s_ctx->lnf_mem, t_ctx->lnf_rec);
         if (lnf_ret != LNF_OK) {
             ecode = E_LNF;
             PRINT_ERROR(ecode, lnf_ret, "lnf_mem_write()");
@@ -498,7 +496,7 @@ read_and_store_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
  * Each record is prefixed with its length:
  * | xchg_rec_size_t rec_len | rec_len bytes sized record |
  *
- * @param mem
+ * @param lnf_mem
  * @param limit
  * @param buff
  * @param buff_size
@@ -506,10 +504,10 @@ read_and_store_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
  * @return 
  */
 static error_code_t
-send_raw_mem(lnf_mem_t *const mem, size_t rec_limit, uint8_t *const buff[2],
+send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, uint8_t *const buff[2],
              const size_t buff_size)
 {
-    assert(mem && buff && buff[0] && buff[1]
+    assert(lnf_mem && buff && buff[0] && buff[1]
            && buff_size >= sizeof (xchg_rec_size_t) + LNF_MAX_RAW_LEN);
 
     error_code_t ecode = E_OK;
@@ -521,7 +519,7 @@ send_raw_mem(lnf_mem_t *const mem, size_t rec_limit, uint8_t *const buff[2],
 
     // initialize the cursor to point to the first record in the memory
     lnf_mem_cursor_t *cursor;
-    int lnf_ret = lnf_mem_first_c(mem, &cursor);
+    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
 
     // loop throught all records
     bool buff_idx = 0;        // currently used data buffer index
@@ -539,7 +537,7 @@ send_raw_mem(lnf_mem_t *const mem, size_t rec_limit, uint8_t *const buff[2],
         const size_t buff_remaining =
             buff_size - buff_off - sizeof (xchg_rec_size_t);
 
-        lnf_ret = lnf_mem_read_raw_c(mem, cursor, rec_data_ptr,
+        lnf_ret = lnf_mem_read_raw_c(lnf_mem, cursor, rec_data_ptr,
                                      (int *)rec_size_ptr, buff_remaining);
         assert(lnf_ret != LNF_EOF);
 
@@ -550,7 +548,7 @@ send_raw_mem(lnf_mem_t *const mem, size_t rec_limit, uint8_t *const buff[2],
             rec_cntr++;
 
             // move the cursor to the next record
-            lnf_ret = lnf_mem_next_c(mem, &cursor);
+            lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
         } else {  // no, send the full buffer
             MPI_Wait(&request, MPI_STATUS_IGNORE);
             MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
@@ -577,65 +575,58 @@ send_raw_mem(lnf_mem_t *const mem, size_t rec_limit, uint8_t *const buff[2],
     // the buffers will be invalid after return, wait for the send to complete
     MPI_Wait(&request, MPI_STATUS_IGNORE);
 
-    PRINT_DEBUG("send_raw_mem: sent %zu records", rec_cntr);
+    PRINT_DEBUG("send_raw_mem: sent %zu record(s)", rec_cntr);
     return ecode;
 }
 
-
-/**
- * @brief TODO
- *
- * @param s_ctx
- *
- * @return 
- */
-static error_code_t
-fast_topn_isend_loop(struct slave_ctx *s_ctx)
+static void
+send_raw_mem_ng(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
+                uint8_t *const buff[2], const size_t buff_size)
 {
-    assert(s_ctx);
+    assert(lnf_mem && buff && buff[0] && buff[1]
+           && buff_size >= sizeof (xchg_rec_size_t) + LNF_MAX_RAW_LEN);
 
-    error_code_t ecode = E_OK;
+    // zero record limit means send all records
+    if (rec_limit == 0) {
+        rec_limit = SIZE_MAX;
+    }
 
     // initialize the cursor to point to the first record in the memory
     lnf_mem_cursor_t *cursor;
-    int lnf_ret = lnf_mem_first_c(s_ctx->libnf_mem, &cursor);
+    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
 
-    // loop through the first rec_limit or less records
-    bool buff_idx = 0;         // currently used data buffer index
-    size_t buff_off = 0;       // data buffer offset
-    size_t buff_rec_cntr = 0;  // number of records in current buffer
-    size_t byte_cntr = 0;
+    // loop throught all records
+    bool buff_idx = 0;        // currently used data buffer index
+    size_t buff_off = 0;      // data buffer offset
+    size_t buff_rec_cntr = 0; // number of records in current buffer
     size_t rec_cntr = 0;
-    lnf_mem_cursor_t *nth_rec_cursor = NULL;  // cursor to Nth record
     MPI_Request request = MPI_REQUEST_NULL;
-    while (rec_cntr < args->rec_limit && cursor) {
-        // read next record if there is enough space in the record buffer
-        // save 4 bytes for the record size
-        uint32_t rec_size;
-        lnf_ret = lnf_mem_read_raw_c(
-                s_ctx->libnf_mem, cursor,
-                (char *)s_ctx->buff[buff_idx] + buff_off + sizeof (rec_size),
-                (int *)&rec_size,
-                XCHG_BUFF_SIZE - buff_off - sizeof (rec_size));
+    while (cursor && rec_limit > rec_cntr) {
+        // read another record, write it into the record buffer
+        // write the 4 byte long record size before the record
+        xchg_rec_size_t *const rec_size_ptr =
+            (xchg_rec_size_t *)(buff[buff_idx] + buff_off);
+        char *const rec_data_ptr =
+            (char *)rec_size_ptr + sizeof (xchg_rec_size_t);
+        const size_t buff_remaining =
+            buff_size - buff_off - sizeof (xchg_rec_size_t);
+
+        lnf_ret = lnf_mem_read_raw_c(lnf_mem, cursor, rec_data_ptr,
+                                     (int *)rec_size_ptr, buff_remaining);
         assert(lnf_ret != LNF_EOF);
 
         // was in the buffer enough space for the record?
         if (lnf_ret != LNF_ERR_NOMEM) {  // yes
-            // write the 4 byte long record size before the record
-            *(uint32_t *)(s_ctx->buff[buff_idx] + buff_off) = rec_size;
-            buff_off += sizeof (rec_size) + rec_size;
-
+            buff_off += sizeof (xchg_rec_size_t) + *rec_size_ptr;
             buff_rec_cntr++;
             rec_cntr++;
 
-            // save the cursor to the Nth record and move to the next record
-            nth_rec_cursor = cursor;
-            lnf_ret = lnf_mem_next_c(s_ctx->libnf_mem, &cursor);
+            // move the cursor to the next record
+            lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
         } else {  // no, send the full buffer
             MPI_Wait(&request, MPI_STATUS_IGNORE);
-            MPI_Isend(s_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC,
-                      TAG_DATA, MPI_COMM_WORLD, &request);
-            byte_cntr += buff_off;
+            MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
+                      MPI_COMM_WORLD, &request);
 
             // clear the buffer context variables and toggle the buffers
             buff_off = 0;
@@ -643,231 +634,26 @@ fast_topn_isend_loop(struct slave_ctx *s_ctx)
             buff_idx = !buff_idx;
         }
     }
-    if (lnf_ret == LNF_EOF) {
-        goto send_buffered;  // no records in memory or all records read
-    } else if (lnf_ret != LNF_OK) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_mem_next_c() or lnf_mem_first_c()");
-        goto send_terminator;
+    if (rec_limit == SIZE_MAX && lnf_ret != LNF_EOF) {
+        PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_next_c() or lnf_mem_first_c()");
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-
-    // find sort attributes (key and direction) in the fields array
-    int sort_field = LNF_FLD_ZERO_;
-    int sort_direction = LNF_SORT_NONE;
-    for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
-        if (args->fields[i].flags & LNF_SORT_FLAGS) {
-            sort_field = args->fields[i].id;
-            sort_direction = args->fields[i].flags & LNF_SORT_FLAGS;
-            break;
-        }
-    }
-    assert(sort_field != LNF_FLD_ZERO_);
-    assert(sort_direction == LNF_SORT_ASC || sort_direction == LNF_SORT_DESC);
-
-    // initialize the libnf record
-    lnf_rec_t *rec;
-    lnf_ret = lnf_rec_init(&rec);
-    if (lnf_ret != LNF_OK) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_rec_init()");
-        goto send_terminator;
-    }
-
-    /*
-     * Read the Nth record from the sorted memory, read a value of the sort key,
-     * and compute a threshold based on this value and the slave count.
-     */
-    lnf_ret = lnf_mem_read_c(s_ctx->libnf_mem, nth_rec_cursor, rec);
-    assert(lnf_ret != LNF_EOF);
-    if (lnf_ret != LNF_OK) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_mem_read_c()");
-        goto send_terminator;
-    }
-    uint64_t threshold;
-    lnf_ret = lnf_rec_fget(rec, sort_field, &threshold);
-    assert(lnf_ret == LNF_OK);
-    if (sort_direction == LNF_SORT_ASC) {
-        threshold *= s_ctx->slave_cnt;
-    } else if (sort_direction == LNF_SORT_DESC) {
-        threshold /= s_ctx->slave_cnt;
-    }
-
-    /*
-     * Send records until we have records and until:
-     *   - the sort field value >= threshold if the direction is descending, or
-     *   - the sort field value <= threshold if the direction is ascending.
-     */
-    while (cursor) {
-        // read next record (non-raw -- only for the threshold comparison)
-        lnf_ret = lnf_mem_read_c(s_ctx->libnf_mem, cursor, rec);
-        assert(lnf_ret != LNF_EOF);
-        if (lnf_ret != LNF_OK) {
-            ecode = E_LNF;
-            PRINT_ERROR(ecode, lnf_ret, "lnf_mem_read_c()");
-            goto send_terminator;
-        }
-        // read the value of the sort key and compare it to the threshold
-        uint64_t key_value;
-        lnf_ret = lnf_rec_fget(rec, sort_field, &key_value);
-        assert(lnf_ret == LNF_OK);
-        if ((sort_direction == LNF_SORT_ASC && key_value > threshold)
-                || (sort_direction == LNF_SORT_DESC && key_value < threshold))
-        {
-            break;  // threshold reached
-        }
-
-        // read next record (raw -- for sending) if there is enough space in the
-        // record buffer, save 4 bytes for the record size
-        uint32_t rec_size;
-        lnf_ret = lnf_mem_read_raw_c(
-                s_ctx->libnf_mem, cursor,
-                (char *)s_ctx->buff[buff_idx] + buff_off + sizeof (rec_size),
-                (int *)&rec_size,
-                XCHG_BUFF_SIZE - buff_off - sizeof (rec_size));
-        assert(lnf_ret != LNF_EOF);
-
-        // was in the buffer enough space for the record?
-        if (lnf_ret != LNF_ERR_NOMEM) {  // yes
-            // write the 4 byte long record size before the record
-            *(uint32_t *)(s_ctx->buff[buff_idx] + buff_off) = rec_size;
-            buff_off += sizeof (rec_size) + rec_size;
-
-            buff_rec_cntr++;
-            rec_cntr++;
-
-            /* Shift cursor to next record. */
-            lnf_ret = lnf_mem_next_c(s_ctx->libnf_mem,
-                    &cursor);
-        } else {  // no, send the full buffer
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
-            MPI_Isend(s_ctx->buff[buff_idx], buff_off, MPI_BYTE,
-                    ROOT_PROC, TAG_DATA, MPI_COMM_WORLD,
-                    &request);
-            byte_cntr += buff_off;
-
-            // clear the buffer context variables and toggle the buffers
-            buff_off = 0;
-            buff_rec_cntr = 0;
-            buff_idx = !buff_idx;
-        }
-    }
-    if (lnf_ret != LNF_OK && lnf_ret != LNF_EOF) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_mem_next_c()");
-        goto free_lnf_rec;
-    }
-
-free_lnf_rec:
-    lnf_rec_free(rec);
-
-send_buffered:
-    // send remaining buffered records if the buffer is not empty
+    // send the remaining records if the record buffer is not empty
     if (buff_rec_cntr != 0) {
         MPI_Wait(&request, MPI_STATUS_IGNORE);
-        MPI_Isend(s_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC,
-                  TAG_DATA, MPI_COMM_WORLD, &request);
-        byte_cntr += buff_off;
+        MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
+                  MPI_COMM_WORLD, &request);
     }
-
-send_terminator:
-    // phase 1 done, notify the master by an empty DATA message
-    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
 
     // the buffers will be invalid after return, wait for the send to complete
     MPI_Wait(&request, MPI_STATUS_IGNORE);
 
-    PRINT_DEBUG("read %zu, sent %zu B", rec_cntr, byte_cntr);
-    return ecode;
-}
+    // send the termiantor -- a message of zero length
+    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, mpi_tag, MPI_COMM_WORLD);
 
-/**
- * @brief TODO
- *
- * @param s_ctx
- *
- * @return 
- */
-static error_code_t
-fast_topn_recv_lookup_send(struct slave_ctx *s_ctx)
-{
-    assert(s_ctx);
-
-    error_code_t ecode = E_OK;
-
-    // allocate lookup cursors
-    size_t lookup_cursors_size = LOOKUP_CURSOR_INIT_SIZE;
-    lnf_mem_cursor_t **lookup_cursors = malloc(
-            lookup_cursors_size * sizeof (*lookup_cursors));
-    if (!lookup_cursors) {
-        PRINT_ERROR(E_MEM, 0, "malloc()");
-        return E_MEM;
-    }
-
-    // loop until master sends records
-    size_t lookup_cursors_idx = 0;
-    size_t received_cntr = 0;
-    while (true) {
-        int rec_len;
-        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
-        if (rec_len == 0) {
-            break;  // zero length record means all records have been received
-        }
-
-        char rec_buff[LNF_MAX_RAW_LEN];  // TODO: exchang mutliple records
-        MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
-        received_cntr++;
-
-        int lnf_ret = lnf_mem_lookup_raw_c(s_ctx->libnf_mem, rec_buff, rec_len,
-                                           &lookup_cursors[lookup_cursors_idx]);
-        if (lnf_ret == LNF_EOF) {
-            continue;  // record not found, this is OK, continue with next one
-        } else if (lnf_ret != LNF_OK) {
-            ecode = E_LNF;
-            PRINT_ERROR(ecode, lnf_ret, "lnf_mem_lookup_raw_c()");
-            goto free_lookup_cursors;
-        }
-        lookup_cursors_idx++;  // record found
-
-        // allocate more lookup cursors if needed
-        if (lookup_cursors_idx == lookup_cursors_size) {
-            lnf_mem_cursor_t **tmp;
-            lookup_cursors_size *= 2;  // qudratic allocator
-            tmp = realloc(lookup_cursors,
-                          lookup_cursors_size * sizeof (*lookup_cursors));
-            if (!tmp) {
-                ecode = E_MEM;
-                PRINT_ERROR(ecode, 0, "realloc()");
-                goto free_lookup_cursors;
-            }
-            lookup_cursors = tmp;
-        }
-    }
-
-    // send back the found records
-    for (size_t i = 0; i < lookup_cursors_idx; ++i) {
-        //TODO: optimalization -- send back only relevant records
-        char rec_buff[LNF_MAX_RAW_LEN]; //TODO: send mutliple records
-        int rec_len;
-        int lnf_ret = lnf_mem_read_raw_c(s_ctx->libnf_mem, lookup_cursors[i],
-                                         rec_buff, &rec_len, LNF_MAX_RAW_LEN);
-        assert(lnf_ret != LNF_EOF);
-        if (lnf_ret != LNF_OK) {
-            ecode = E_LNF;
-            PRINT_ERROR(ecode, lnf_ret, "lnf_mem_read_raw_c()");
-            goto free_lookup_cursors;
-        }
-        MPI_Send(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                 MPI_COMM_WORLD);
-    }
-
-free_lookup_cursors:
-    free(lookup_cursors);
-
-    PRINT_DEBUG("received %zu, found and sent %zu", received_cntr,
-                lookup_cursors_idx);
-    return ecode;
+    PRINT_DEBUG("send_raw_mem_ng: sent %zu record(s) with tag %d", rec_cntr,
+                mpi_tag);
 }
 
 
@@ -899,16 +685,178 @@ progress_report_next(void)
 }
 
 /**
- * @defgroup slave_tput Slaves' side of the Top-N TPUT algorithm.
+ * @defgroup slave_tput Slaves's side of the TPUT Top-N algorithm.
+ * For more information see @ref master_tput.
  * @{
  */
-//error_code_t
-//tput_phase_1(slave_ctx *const s_ctx)
-//{
-//    assert(s_ctx);
-//    return send_raw_mem(s_ctx->libnf_mem, args->rec_limit, s_ctx->buff,
-//                        XCHG_BUFF_SIZE);
-//}
+/**
+ * @brief Slave's TPUT phase 1: establish a lower bound on the true bottom.
+ *
+ * Each slave sends the top N items from its memory.
+ *
+ * @param[in] s_ctx Slave's all-purpose context.
+ */
+static void
+tput_phase_1(struct slave_ctx *const s_ctx)
+{
+    assert(s_ctx);
+
+    // send the top N items from the sorted list
+    send_raw_mem_ng(s_ctx->lnf_mem, args->rec_limit, TAG_TPUT1, s_ctx->buff,
+                    XCHG_BUFF_SIZE);
+
+    PRINT_DEBUG("slave TPUT phase 1: done");
+}
+
+/**
+ * @brief Slaves's TPUT phase 2: find number of records satisfying the threshold.
+ *
+ * Those are records where:
+ *   - the sort field value >= threshold if the direction is descending, or
+ *   - the sort field value <= threshold if the direction is ascending.
+ *
+ * @param[in] lnf_mem The libnf memory. Will not be modified.
+ * @param[in] threshold Threshold received from the master.
+ * @param[in] key A libnf field which acts as a sort key.
+ * @param[in] direction A libnf sort direction.
+ *
+ * @return Number of records satisfying the threshold. Always 0 if the libnf
+ * memory is empty.
+ */
+static uint64_t
+tput_phase_2_find_threshold_cnt(lnf_mem_t *lnf_mem, const uint64_t threshold,
+                                const int key, const int direction)
+{
+    assert(lnf_mem);
+
+    // initialize the cursor to point to the first record
+    lnf_mem_cursor_t *cursor;
+    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+    if (lnf_ret == LNF_EOF) {
+        PRINT_DEBUG("slave TPUT phase 2: 0 records are satisfying the threshold");
+        return 0;  // memory is empty, zero records are satisfactory
+    }
+
+    // initialize the libnf record
+    lnf_rec_t *lnf_rec;
+    lnf_ret = lnf_rec_init(&lnf_rec);
+    assert(lnf_ret == LNF_OK);
+
+    size_t rec_cntr = 0;
+    do {
+        // read a next record
+        lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
+        assert(lnf_ret == LNF_OK);
+
+        // extract the value of the sort key from the record
+        uint64_t value;
+        lnf_ret = lnf_rec_fget(lnf_rec, key, &value);
+        assert(lnf_ret == LNF_OK);
+        if (direction == LNF_SORT_DESC && value >= threshold) {
+            rec_cntr++;
+        } else if (direction == LNF_SORT_ASC && value <= threshold) {
+            rec_cntr++;
+        } else {
+            break;
+        }
+        // move to the next record
+    } while (lnf_mem_next_c(lnf_mem, &cursor) == LNF_OK);
+
+    lnf_rec_free(lnf_rec);
+
+    PRINT_DEBUG("slave TPUT phase 2: %" PRIu64
+                " records are satisfying the threshold", rec_cntr);
+    return rec_cntr;
+}
+
+/**
+ * @brief Slave's TPUT phase 2: prune away ineligible objects.
+ *
+ * After receiving the threshold from the master, slave sends to the master a
+ * list of records satisfying the received threshold
+ * (see @ref tput_phase_2_find_threshold_cnt).
+ *
+ * @param[in] s_ctx Slave's all-purpose context.
+ */
+static void
+tput_phase_2(struct slave_ctx *const s_ctx)
+{
+    assert(s_ctx);
+
+    uint64_t threshold;
+    MPI_Bcast(&threshold, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
+
+    // find number of records satisfying the threshold
+    assert(args->fields_sort_key);
+    assert(args->fields_sort_dir == LNF_SORT_DESC
+           || args->fields_sort_dir == LNF_SORT_ASC);
+    const uint64_t threshold_cnt = tput_phase_2_find_threshold_cnt(
+            s_ctx->lnf_mem, threshold, args->fields_sort_key,
+            args->fields_sort_dir);
+
+    // send all records satisfying the threshold
+    send_raw_mem_ng(s_ctx->lnf_mem, threshold_cnt, TAG_TPUT2, s_ctx->buff,
+                    XCHG_BUFF_SIZE);
+    PRINT_DEBUG("slave TPUT phase 2: done");
+}
+
+/**
+ * @brief Slave's TPUT phase 3: identify the top N objects.
+ *
+ * The slave receives a set of records S from the master. The slave then looks
+ * up the record in its libnf memory. If it finds matching aggregation key, the
+ * records is send to the master.
+ *
+ * @param[in] s_ctx Slave's all-purpose context.
+ */
+static void
+tput_phase_3(struct slave_ctx *s_ctx)
+{
+    assert(s_ctx);
+
+    error_code_t ecode = E_OK;
+    char rec_buff[LNF_MAX_RAW_LEN];
+    int rec_len;
+    int lnf_ret;
+
+    // receive number of records in the masters memory
+    uint64_t received_rec_cnt;
+    MPI_Bcast(&received_rec_cnt, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
+
+    // initialize libnf memory for found records only
+    lnf_mem_t *found_records;
+    ecode = libnf_mem_init(&found_records, args->fields, true);
+    assert(ecode == E_OK);
+
+    uint64_t found_rec_cntr = 0;
+    for (size_t i = 0; i < received_rec_cnt; ++i) {
+        // receive a key from the master
+        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
+        assert(rec_len > 0);
+        MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+
+        // lookup the received key in my libnf memory
+        lnf_mem_cursor_t *cursor;
+        lnf_ret = lnf_mem_lookup_raw_c(s_ctx->lnf_mem, rec_buff, rec_len,
+                                       &cursor);
+        assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+        if (lnf_ret == LNF_OK) {  // key found
+            found_rec_cntr++;
+            lnf_ret |= lnf_mem_read_raw_c(s_ctx->lnf_mem, cursor, rec_buff,
+                                          &rec_len, sizeof (rec_buff));
+            lnf_ret |= lnf_mem_write_raw(found_records, rec_buff, rec_len);
+            assert(lnf_ret == LNF_OK);
+        }
+    }
+    PRINT_DEBUG("slave TPUT phase 3: received %" PRIu64 " records, found %"
+                PRIu64 " records", received_rec_cnt, found_rec_cntr);
+
+    send_raw_mem_ng(found_records, 0, TAG_TPUT3, s_ctx->buff, XCHG_BUFF_SIZE);
+    libnf_mem_free(found_records);
+
+    PRINT_DEBUG("slave TPUT phase 3: done");
+}
 /**
  * @}
  */  // slave_tput
@@ -935,7 +883,7 @@ postprocess(struct slave_ctx *const s_ctx)
 
     case MODE_SORT:
         if (args->rec_limit != 0) {
-            ecode = send_raw_mem(s_ctx->libnf_mem, args->rec_limit, s_ctx->buff,
+            ecode = send_raw_mem(s_ctx->lnf_mem, args->rec_limit, s_ctx->buff,
                                  XCHG_BUFF_SIZE);
         } // else all records already sent while reading
         // send the terminator
@@ -943,19 +891,14 @@ postprocess(struct slave_ctx *const s_ctx)
         break;
 
     case MODE_AGGR:
-        if (args->use_fast_topn) {
-            // the new Top-N TPUT algorithm
-            //ecode = tput_phase_1(s_ctx);
-
-            // old fast Top-N algorithm
-            ecode = fast_topn_isend_loop(s_ctx);
-            if (ecode != E_OK) {
-                return ecode;
-            }
-            ecode = fast_topn_recv_lookup_send(s_ctx);
+        if (args->use_tput) {
+            // use the TPUT Top-N algorithm
+            tput_phase_1(s_ctx);
+            tput_phase_2(s_ctx);
+            tput_phase_3(s_ctx);
         } else {
             // send all aggregated records
-            ecode = send_raw_mem(s_ctx->libnf_mem, 0, s_ctx->buff,
+            ecode = send_raw_mem(s_ctx->lnf_mem, 0, s_ctx->buff,
                                  XCHG_BUFF_SIZE);
         }
         // send the terminator
@@ -996,7 +939,7 @@ process_files(struct slave_ctx *s_ctx, char *paths[], size_t paths_cnt)
     struct thread_ctx t_ctx = { 0 };
 
     // initialize the libnf record, only once for each thread
-    int lnf_ret = lnf_rec_init(&t_ctx.rec);
+    int lnf_ret = lnf_rec_init(&t_ctx.lnf_rec);
     if (lnf_ret != LNF_OK) {
         ecode = E_LNF;
         PRINT_ERROR(ecode, lnf_ret, "lnf_rec_init()");
@@ -1121,12 +1064,12 @@ continue_label:
     }
 
     // merge thread-specific hash tables into thread-shared one
-    if (s_ctx->libnf_mem) {
-        lnf_mem_merge_threads(s_ctx->libnf_mem);
+    if (s_ctx->lnf_mem) {
+        lnf_mem_merge_threads(s_ctx->lnf_mem);
     }
 
 free_lnf_rec:
-    lnf_rec_free(t_ctx.rec);
+    lnf_rec_free(t_ctx.lnf_rec);
 return_label:
     return ecode;
 }
@@ -1206,7 +1149,7 @@ init_record_storage(struct slave_ctx *s_ctx)
         }
 
         // initialize the libnf sorting memory and set its parameters
-        ecode = libnf_mem_init(&s_ctx->libnf_mem, args->fields, true);
+        ecode = libnf_mem_init(&s_ctx->lnf_mem, args->fields, true);
         if (ecode != E_OK) {
             return ecode;
         }
@@ -1214,7 +1157,7 @@ init_record_storage(struct slave_ctx *s_ctx)
 
     case MODE_AGGR:
         // initialize the libnf aggregation memory and set its parameters
-        ecode = libnf_mem_init(&s_ctx->libnf_mem, args->fields, false);
+        ecode = libnf_mem_init(&s_ctx->lnf_mem, args->fields, false);
         break;
 
     case MODE_META:
@@ -1239,8 +1182,8 @@ slave_free(struct slave_ctx *s_ctx)
     if (s_ctx->filter) {
         lnf_filter_free(s_ctx->filter);
     }
-    if (s_ctx->libnf_mem) {
-        libnf_mem_free(s_ctx->libnf_mem);
+    if (s_ctx->lnf_mem) {
+        libnf_mem_free(s_ctx->lnf_mem);
     }
 #ifdef HAVE_LIBBFINDEX
     if (s_ctx->bfindex_root){

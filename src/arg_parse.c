@@ -37,8 +37,7 @@
  * if advised of the possibility of such damage.
  */
 
-#define _XOPEN_SOURCE //strptime()
-
+#define _XOPEN_SOURCE  // strptime()
 
 #include "common.h"
 #include "arg_parse.h"
@@ -50,7 +49,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
-#include <limits.h> //PATH_MAX, NAME_MAX
+#include <limits.h>  // PATH_MAX, NAME_MAX
 #include <ctype.h>
 
 #include <getopt.h>
@@ -132,8 +131,8 @@ static const char *help_string =
 "            Set progress bar destination.\n"
 "\n"
 "Other options\n"
-"     --no-fast-topn\n"
-"            Disable fast top-N algorithm.\n"
+"     --no-tput\n"
+"            Disable the TPUT algorithm for Top-N queries.\n"
 "     --no-bfindex\n"
 "            Disable Bloom filter indexes.\n"
 "\n"
@@ -142,28 +141,27 @@ static const char *help_string =
 "     --version\n"
 "            Display version information and exit.\n";
 
+enum {  // command line options, have to start above the ASCII table
+    OPT_NO_TPUT = 256,  // disable the TPUT algorithm for Top-N queries
+    OPT_NO_BFINDEX,  // disable Bloom filter indexes
 
-enum { //command line options, have to start above ASCII
-        OPT_NO_FAST_TOPN = 256, //disable fast top-N algorithm
-        OPT_NO_BFINDEX,  // disable Bloom filter indexes
+    OPT_OUTPUT_ITEMS,  // output items (records, processed records summary,
+                       // metadata summary)
+    OPT_OUTPUT_FORMAT,          // output (print) format
+    OPT_OUTPUT_TS_CONV,         // output timestamp conversion
+    OPT_OUTPUT_TS_LOCALTIME,    // output timestamp in localtime
+    OPT_OUTPUT_VOLUME_CONV,     // output volumetric field conversion
+    OPT_OUTPUT_TCP_FLAGS_CONV,  // output TCP flags conversion
+    OPT_OUTPUT_IP_ADDR_CONV,    // output IP address conversion
+    OPT_OUTPUT_IP_PROTO_CONV,   // output IP protocol conversion
+    OPT_OUTPUT_DURATION_CONV,   // output IP protocol conversion
 
-        OPT_OUTPUT_ITEMS, //output items (records, processed records summary,
-                          //metadata summary)
-        OPT_OUTPUT_FORMAT, //output (print) format
-        OPT_OUTPUT_TS_CONV, //output timestamp conversion
-        OPT_OUTPUT_TS_LOCALTIME, //output timestamp in localtime
-        OPT_OUTPUT_VOLUME_CONV, //output volumetric field conversion
-        OPT_OUTPUT_TCP_FLAGS_CONV, //output TCP flags conversion
-        OPT_OUTPUT_IP_ADDR_CONV, //output IP address conversion
-        OPT_OUTPUT_IP_PROTO_CONV, //output IP protocol conversion
-        OPT_OUTPUT_DURATION_CONV, //output IP protocol conversion
+    OPT_FIELDS,  // specification of listed fields
+    OPT_PROGRESS_BAR_TYPE,  // type of the progress bar
+    OPT_PROGRESS_BAR_DEST,  // destination of the progress bar
 
-        OPT_FIELDS, //specification of listed fields
-        OPT_PROGRESS_BAR_TYPE, //type of the progress bar
-        OPT_PROGRESS_BAR_DEST, //destination of the progress bar
-
-        OPT_HELP, //print help
-        OPT_VERSION, //print version
+    OPT_HELP,  // print help
+    OPT_VERSION,  // print version
 };
 
 // variables for getopt_long() setup
@@ -180,7 +178,7 @@ static const struct option long_opts[] = {
     {"verbosity", required_argument, NULL, 'v'},
 
     // long options only
-    {"no-fast-topn", no_argument, NULL, OPT_NO_FAST_TOPN},
+    {"no-tput", no_argument, NULL, OPT_NO_TPUT},
     {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
 
     {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
@@ -203,30 +201,28 @@ static const struct option long_opts[] = {
     {0, 0, 0, 0}  // termination required by getopt_long()
 };
 
-
-
 static const char *const date_formats[] = {
-        /* Date formats. */
-        "%Y-%m-%d", //standard date, 2015-12-31
-        "%d.%m.%Y", //European, 31.12.2015
-        "%m/%d/%Y", //American, 12/31/2015
+    // date formats
+    "%Y-%m-%d",  // standard date: 2015-12-31
+    "%d.%m.%Y",  // European: 31.12.2015
+    "%m/%d/%Y",  // American: 12/31/2015
 
-        /* Time formats. */
-        "%H:%M", //23:59
+    // time formats
+    "%H:%M",  // 23:59
 
-        /* Special formats. */
-        "%a", //weekday according to the current locale, abbreviated or full
-        "%b", //month according to the current locale, abbreviated or full
-        "%s", //the number of seconds since the Epoch, 1970-01-01 00:00:00 UTC
+    // special formats
+    "%a",  // weekday according to the current locale, abbreviated or full
+    "%b",  // month according to the current locale, abbreviated or full
+    "%s",  // the number of seconds since the Epoch, 1970-01-01 00:00:00 UTC
 };
 
 static const char *const utc_strings[] = {
-        "u",
-        "ut",
-        "utc",
-        "U",
-        "UT",
-        "UTC",
+    "u",
+    "ut",
+    "utc",
+    "U",
+    "UT",
+    "UTC",
 };
 
 /**
@@ -234,7 +230,6 @@ static const char *const utc_strings[] = {
  *                            of various length and signedness.
  * @{
  */
-
 /**
  * @brief Convert a signed decimal integer from a string to a long long integer.
  *
@@ -475,7 +470,6 @@ str_to_size_t(const char *const string, size_t *res)
     *res = tmp_res;
     return NULL;
 }
-
 /**  @} */  // str_to_int_group
 
 
@@ -1160,7 +1154,8 @@ static error_code_t set_time_point(struct cmdline_args *args, char *time_str)
  * @return E_OK on success, E_ARG otherwise.
  */
 static error_code_t
-parse_sort_spec(struct field_info fields[], char *sort_spec)
+parse_sort_spec(struct cmdline_args *args, struct field_info fields[],
+                char *sort_spec)
 {
     assert(fields && sort_spec && sort_spec[0] != '\0');
 
@@ -1194,8 +1189,12 @@ parse_sort_spec(struct field_info fields[], char *sort_spec)
         return ecode;
     }
 
-    return fields_add_sort_key(fields + field_id, field_id, direction,
-                               ipv4_bits, ipv6_bits);
+    ecode = fields_add_sort_key(fields + field_id, field_id, direction,
+                                ipv4_bits, ipv6_bits);
+    args->fields_sort_key = field_id;
+    args->fields_sort_dir = fields[field_id].flags & LNF_SORT_FLAGS;
+
+    return ecode;
 }
 
 
@@ -1440,9 +1439,11 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     error_code_t ecode = E_OK;
 
     // set default values for certain arguments
-    args->use_fast_topn = true;
+    args->use_tput = true;
     args->use_bfindex = true;
     args->rec_limit = SIZE_MAX;  // SIZE_MAX means record limit is unset
+    args->fields_sort_key = LNF_FLD_ZERO_;
+    args->fields_sort_dir = LNF_SORT_NONE;
 
     // revent all non-root processes from printing getopt_long() errors
     if (!root_proc) {
@@ -1490,8 +1491,8 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             verbosity_optarg = optarg;
             break;
 
-        case OPT_NO_FAST_TOPN:  // disable fast top-N algorithm
-            args->use_fast_topn = false;
+        case OPT_NO_TPUT:  // disable the TPUT algorithm for Top-N queries
+            args->use_tput = false;
             break;
         case OPT_NO_BFINDEX:    // disable Bloom filter indexes
             args->use_bfindex = false;
@@ -1585,7 +1586,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         }
         if (sort_optarg) {
             PRINT_DEBUG("args: using aggregation mode with sorting");
-            ecode = parse_sort_spec(args->fields, sort_optarg);
+            ecode = parse_sort_spec(args, args->fields, sort_optarg);
             if (ecode != E_OK) {
                 return ecode;
             }
@@ -1595,7 +1596,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     } else if (sort_optarg) {  // sort mode
         PRINT_DEBUG("args: using sorting mode");
         args->working_mode = MODE_SORT;
-        ecode = parse_sort_spec(args->fields, sort_optarg);
+        ecode = parse_sort_spec(args, args->fields, sort_optarg);
         if (ecode != E_OK) {
             return ecode;
         }
@@ -1790,24 +1791,21 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
 
     ////////////////////////////////////////////////////////////////////////////
     /*
-     * Reasons to forcibly disable the fast Top-N algorithm are:
-     *   - no record limit specified (all records would be exchanged anyway),
-     *   - sorting is disabled or sort key is not one of traffic volume fields
-     *     (data octets, packets, out bytes, out packets and aggregated flows).
+     * The TPUT algorithm for Top-N queries requires:
+     *   - aggregation,
+     *   - record limit (without it all records would be exchanged anyway),
+     *   - sorting by one of traffic volume fields (data octets, packets, out
+     *     bytes, out packets, or aggregated flows).
+     * If these condition are not satisfied, TPUT will be disabled.
      */
-    if (args->working_mode == MODE_AGGR) {
-        // find sort key among fields
-        int sort_key = LNF_FLD_ZERO_;
-        for (size_t i = LNF_FLD_ZERO_; i < LNF_FLD_TERM_; ++i) {
-            if (args->fields[i].flags & LNF_SORT_FLAGS) {
-                sort_key = i;
-                break;
-            }
-        }
-        if (!IN_RANGE_INCL(sort_key, LNF_FLD_DOCTETS, LNF_FLD_AGGR_FLOWS)
-                || !args->rec_limit)
+    if (args->use_tput) {
+        if (args->working_mode != MODE_AGGR
+                || !args->rec_limit
+                || !IN_RANGE_INCL(args->fields_sort_key, LNF_FLD_DOCTETS,
+                                  LNF_FLD_AGGR_FLOWS))
         {
-            args->use_fast_topn = false;
+            PRINT_INFO("disabling TPUT, one or more conditions were not met");
+            args->use_tput = false;
         }
     }
 
@@ -1820,8 +1818,8 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
 
     //     printf("------------------------------------------------------\n");
     //     printf("mode: %s\n", working_mode_to_str(args->working_mode));
-    //     if (args->working_mode == MODE_AGGR && args->use_fast_topn) {
-    //         printf("flags: using fast top-N algorithm\n");
+    //     if (args->working_mode == MODE_AGGR && args->use_tput) {
+    //         printf("flags: using the TPUT algorithm for Top-N queries\n");
     //     }
 
     //     printf("fields:\n");

@@ -95,7 +95,7 @@ main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     // check if there are at least two processes
-    if (world_size <= 1) {
+    if (world_size < 2) {
         ecode = E_MPI;
         PRINT_ERROR(ecode, 0, PACKAGE_NAME " requires at least 2 copies of the program to run "
                     "(one for the master and the others for the slaves). "

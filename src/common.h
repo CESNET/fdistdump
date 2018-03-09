@@ -96,6 +96,10 @@ enum { //tags
         TAG_DATA, //message contains data (records)
         TAG_STATS, //message contains statistics
         TAG_PROGRESS, //message containg progress info
+
+        TAG_TPUT1,
+        TAG_TPUT2,
+        TAG_TPUT3,
 };
 
 typedef enum { //progress bar type
@@ -221,7 +225,7 @@ char * working_mode_to_str(working_mode_t working_mode);
  * record as it is.
  * Destructor function libnf_mem_free() should be called to free the memory.
  *
- * @param[in] mem Double pointer to the libnf memory data type.
+ * @param[in] lnf_mem Double pointer to the libnf memory data type.
  * @param[in] fields Array of field_info structures based on which the memory
  *                   will be configured.
  * @param sort_only_mode Switches between hash table and linked list.
@@ -229,16 +233,26 @@ char * working_mode_to_str(working_mode_t working_mode);
  * @return E_OK on success, E_LNF on failure.
  */
 error_code_t
-libnf_mem_init(lnf_mem_t **const mem, const struct field_info fields[],
+libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
                const bool sort_only_mode);
+
+/**
+ * @brief Calculate number of records in the libnf memory.
+ *
+ * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
+ *
+ * @return Number of records in the supplied memory.
+ */
+uint64_t
+libnf_mem_rec_cnt(lnf_mem_t *lnf_mem);
 
 /**
  * @brief Free memory allocated by libnf_mem_init().
  *
- * @param[in] mem Pointer to the libnf memory data type.
+ * @param[in] lnf_mem Pointer to the libnf memory data type.
  */
 void
-libnf_mem_free(lnf_mem_t *const mem);
+libnf_mem_free(lnf_mem_t *const lnf_mem);
 
 
 /** \brief Yield the time difference between a and b.

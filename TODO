@@ -9,10 +9,6 @@ Features:
     and create short options for them
 
 Optimizations:
-  - optimization for ascending sort, there is possibility to vastly reduce
-    number of read/transfered records. If the key value of first records is X
-    and the key value of Nth record is also X, it is unnecessary to read further
-    records. Similar optimization is possible for descending sort.
   - OpenMP reduction for summaries (needs OpenMP 4.0, GCC 4.9)
   - minimize lnf_rec_read() calls for summaries
   - add passive timeout to the MPI receiving loop on master
