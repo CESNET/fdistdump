@@ -1,39 +1,122 @@
 .\" Man page for fdistdump
 .\" Author: Jan Wrona, <wrona@cesnet.cz>
 .TH FDISTDUMP 1 "2018-02-20" "0.3.1" "fdistdump manual"
+
+
 .\" NAME section ---------------------------------------------------------------
 .SH NAME
-fdistdump \- a tool to query IP flow files using single or distributed system
+fdistdump \- a tool to query IP flow records on a distributed system
+
+
 .\" SYNOPSIS section -----------------------------------------------------------
 .SH SYNOPSIS
+.\" SPMD mode
 .B mpiexec
 .RI [ MPI_options ]
 .B fdistdump
-.RB [ -a
-.IR field [,...]]
-.RB [ -f
-.IR filter ]
-.RB [ -l
-.IR limit ]
-.RB [ -o
-.IR field [# direction ]]
-.RB [ -s
-.IR statistic ]
-.RB [ -t
-.IR time_spec ]
-.RB [ -T
-.IR begin [# end ]]
-.RB [ -v
-.IR level ]
+.RI [ options ]
 .IR path \ ...
+.\" MPMD mode
+.br
+.B mpiexec
+.RI [ global_MPI_options ]
+.RI [ local_MPI_options ]
+.B fdistdump
+.RI [ options ]
+.R :
+.RI [ local_MPI_options ]
+.B fdistdump
+.RI [ options ]
+.IR path1 \ ...
+.R :
+.RI [ local_MPI_options ]
+.B fdistdump
+.RI [ options ]
+.IR path2 \ ...
+.R :
+.R \ ...
+
+
 .\" DESCRIPTION section --------------------------------------------------------
 .SH DESCRIPTION
-.B fdistdump
-is a fast, scalable and distributed tool to query Internet Protocol flow record files.
+\fBfdistdump\fR is a fast, scalable, distributed tool to query Internet Protocol flow record files.
 The master/slave communication model allows it to run jobs on unlimited number of nodes, including a single local node.
 Message Passing Interface (MPI) is used as an underlying communication protocol.
-Among other features, \fBfdistdump\fR allows you to list, sort and aggregate records with the possibility to apply powerful record \fIfilter\fR.
+Its basic features include listing, filtering, sorting, and aggregating records.
+\fBfdistdump\fR also implements an algorithm to quickly answer Top-N queries (e.g., find the N objects with the highest aggregate values) on a distributed system.
+
+
+.\" INVOCATION section ------------------------------------------------------------
+.SH INVOCATION
+\fBfdistdump\fR is an MPI application and it is necessary to launch it using one of \fBmpiexec\fR, \fBmpirun\fR, \fBorterun\fR, or however your MPI implementation calls the process manager.
+
+.\" SPMD vs MPMD subsection ---------------------
+.SS Launch Modes
+Both MPI program launch modes are supported: single program, multiple data (SPMD) and multiple programs, multiple data (MPMD).
+.TP
+.B SPMD
+The SPMD mode is demonstrated by the first line in the \fBSYNOPSIS\fR section above.
+In the this mode, all \fIoptions\fR and \fIpath\fRs are identical for each \fBfdistdump\fR instance.
+Every specified \fIpath\fR will be processed separately by each slave, therefore each \fIpath\fR should be accessible from every node where the slave process is invoked.
+Typical use case for this mode is when the slaves use a local storage for flow files, because each slave stores different set of flow files on the same path.
+If this mode would be used with a shared storage, multiple slaves would process the same set of flow files, which is usually not what you want.
 .PP
+.nf
+.RS
+$ mpiexec -host MasterNode,SlaveNode1,SlaveNode2 fdistdump \fI/local/flow/storage\fR
+.RE
+.fi
+
+.TP
+.B MPMD
+The MPMD mode is invoked using the colon notation and is demonstrated by the second line in the \fBSYNOPSIS\fR section above.
+It allows to set different \fIlocal_MPI_options\fR and \fIpath\fRs for each \fBfdistdump\fR instance.
+All \fIoptions\fR should be identical for each \fBfdistdump\fR process, otherwise the behavior is undefined.
+Typical use case for this mode is when the slaves use a shared storage for flow files, because each slave can be assigned with a different set of flow files.
+.PP
+.nf
+.RS
+$ mpiexec -host MasterNode,SlaveNode1,SlaveNode2      # \fIglobal_MPI_options\fR
+          -n 1 fdistdump :                            # master process launched on MasterNode, master does not read any flow files
+          -n 1 fdistdump \fI/shared/flow/storage/dir1\fR :  # slave process launched on SlaveNode1
+          -n 1 fdistdump \fI/shared/flow/storage/dir2\fR    # slave process launched on SlaveNode2
+.RE
+.fi
+
+.\" MPI_options subsection ---------------------
+.SS MPI_options
+Only the basic \fIMPI_options\fR are mentioned here, for a complete list see the process manager documentation.
+
+.TP
+.BI -n \ number
+Use this option to run \fBfdistdump\fR on a \fBsingle local node\fR.
+\fInumber\fR specifies a number of processes to launch.
+The first process will always be the master, remaining processes will be the slaves.
+It is mandatory to have exactly one master and at least one slave process.
+Therefore, \fInumber\fR has to be at least 2, otherwise the job won't start.
+The following command will run two \fBfdistdump\fR processes on a local node, one master and one slave.
+Without any additional \fBfdistdump\fR options, all records in \fIpath\fR will be printed to the stdout:
+.PP
+.nf
+.RS
+$ mpiexec -n 2 fdistdump \fIpath\fR
+.RE
+.fi
+
+.TP
+.BI -host \ host\fR[,...]
+Use this option to run \fBfdistdump\fR on \fBmultiple nodes\fR (hosts).
+By the \fB-host\fR option you can specify those nodes from the command-line using a comma separated list.
+The following command will run three \fBfdistdump\fR processes: the master on node1, one slave on node2, and another slave on node3.
+Without any additional \fBfdistdump\fR options, all records in \fIpath\fR on node2 and node3 (i.e., where slave processes are running) will be printed to the stdout:
+.PP
+.nf
+.RS
+$ mpiexec -host node1,node2,node3 fdistdump \fIpath\fR
+.RE
+.fi
+
+
 .\" OPTIONS section ------------------------------------------------------------
 .SH OPTIONS
 Non argument options that are duplicated on the command line are not harmful.
@@ -41,90 +124,18 @@ For options that require an argument, each duplication will override the previou
 A short option may take a parameter of the form \fB-a\fI param\fR, a long option may take a parameter of the form \fB--arg=\fIparam\fR or \fB--arg\fI param\fR.
 Long option names may be abbreviated if the abbreviation is unique or is an exact match for some defined option.
 Mandatory arguments to long options are mandatory for short options too.
-.\" MPI_options subsection ---------------------
-.SS MPI_options
-.B fdistdump
-is a MPI application and is necessary to launch it using one of
-.BR mpiexec ,\  mpirun ,\  orterun
-or however your MPI implementation calls the process manager.
-Here, only basic
-.I MPI_options
-are mentioned, for complete list see your process manager documentation.
-.TP
-.BI -n \ #
-To run
-.B fdistdump
-on a
-.BR "single local node" ,
-you can use this option, where
-.I #
-specifies the number of processes to launch.
-The first process will always be in the role of master, remaining processes will be the slaves.
-It is mandatory to have exactly one master and at least one slave process, therefore
-.I #
-have to be at least 2, otherwise job won't start.
-Following command will run two
-.B fdistdump
-processes on a local node, one master and one slave.
-Without any additional
-.B fdistdump
-options, all records in
-.I path
-will be printed to stdout:
-.PP
-.nf
-.RS
-$ mpiexec -n 2 fdistdump \fIpath\fR
-.RE
-.fi
-.TP
-.BI -host \ host\fR[,...]
-To run
-.B fdistdump
-on a
-.BR "multiple nodes (hosts)" ,
-you have to specify the nodes of the cluster.
-By this option you can specify those nodes from the command-line by a comma separated list.
-Following command will run three
-.B fdistdump
-processes.
-Master on node1, one slave on node2 and another slave on node3.
-Without any additional
-.B fdistdump
-options, all records in
-.I path
-on nodes node2 and node3 (where slave processes are running) will be printed to stdout:
-.PP
-.nf
-.RS
-$ mpiexec -host node1,node2,node3 fdistdump \fIpath\fR
-.RE
-.fi
+
 .\" Path option subsection ---------------------
 .SS Path
-Each
-.I path
-argument given to
-.B fdistdump
-is either a filename or a directory.
-All
-.IR path s
-will be processed by all the slave processes and therefore should be accessible from every node, where the slave process is invoked.
-Otherwise, warning message will be printed to
-.B stderr
-by affected process and inaccessible
-.I path
-will be ignored.
-In case
-.I path
-is a filename, it will be processed directly.
-In case it is a directory, all the files in that directory will be processed, recursively for all the subdirectories.
+Each given \fIpath\fR argument is either a filename or a directory.
+In SPMD mode, all \fIpath\fRs will be processed by all slave processes and therefore should be accessible from every node where the slave process is invoked.
+Otherwise, a warning message will be printed to the stderr by the affected process and the inaccessible \fIpath\fR will be ignored.
+If \fIpath\fR is a filename, it will be processed directly.
+If it is a directory, all files in that directory will be processed and all subdirectories will be recursively processed in the same way.
 
-The \fIpath\fR is a character string composed of zero or more directives:
-ordinary characters (not %), which are copied unchanged to the output path;
-and conversion specifications, each of which results in some additinal action.
+The \fIpath\fR is a character string composed of zero or more directives: ordinary characters (not %), which are copied unchanged to the output path, and conversion specifications, each of which results in some additinal action.
 Each conversion specification is introduced by the character % followed by a conversion specifier character.
-If path begins with "%DIGITS:", then \fIpath\fR is targeted only for one specific slave, the one with DIGITS equal to the MPI rank of the slave.
+If path begins with "%DIGITS:", then \fIpath\fR is targeted only for one specific slave, the one where DIGITS are equal to the MPI rank of that slave.
 
 Conversion specifiers:
 .TP
@@ -133,12 +144,13 @@ The conversion specifier is converted into the hostname of the node.
 This may be used to read different files by each slave from a shared storage.
 
 .\" General options subsection ---------------------
-.SS General options
+.SS General Options
 .TP
 .BR -a , \ --aggregation=\fIfield\fR[,...]
 Aggregate flow records together by any number of \fIfield\fRs.
 Option argument is comma separated list of \fIfield\fRs, at least one \fIfield\fR is mandatory.
 For more informations about valid \fIfield\fR strings see the \fB--fields\fR argument description.
+
 .TP
 .BR -f , \ --filter=\fIfilter
 Process only
@@ -157,6 +169,7 @@ which currently uses
 filtering engine by default. This will change in future versions and
 .B libnf
 will use its own filtering engine.
+
 .TP
 .BR -l , \ --limit=\fIlimit
 Limit the number of records to print. Option argument is a natural number, special value 0 disables the limit.
@@ -164,12 +177,14 @@ Limit the number of records to print. Option argument is a natural number, speci
 Keep in mind that with enabled aggregation, this doesn't reduce the number of processed records.
 During the aggregation, all filter matching records have to be processed for the sake of result correctness.
 On the other hand, without aggregation, this may vastly reduce the number of processed records and therefore reduce the query running time.
+
 .TP
 .BR -o , \ --order=\fIfield\fR[#\fIdirection\fR]
 Set record sort order.
 Sort key is specified by \fIfield\fR.
 Sort \fIdirection\fR is either \fBasc\fR or \fBdesc\fR string, which are abbreviations for ascending and descending direction, respectively.
 For more informations about valid \fIfield\fR strings see the \fB--fields\fR argument description.
+
 .TP
 .BR -s , \ --statistic=\fIstatistic
 Shortcut for aggregation (\fB-a\fR), sort (\fB-o\fR) and record limit (\fB-l\fR).
@@ -187,6 +202,7 @@ Default record limit is
 and may by changed by an explicit
 .B -l
 option.
+
 .TP
 .BR -t , \ --time-point=\fItime_spec
 Process only a single flow file on each slave, the one which includes given
@@ -231,6 +247,7 @@ Beginning time is aligned to the beginning of the rotation interval, ending time
        begin  end                           begin        end
 .RE
 .fi
+
 .TP
 .BR -v , \ --verbosity=\fIlevel
 Set verbosity level to \fIlevel\fR.
@@ -238,8 +255,9 @@ The higher the number, the more information is printed.
 Level 0 shows no messages (quite mode), level 1 shows errors, level 2 shows warnings, level 3 shows info messages and level 4 shows debug messages.
 All messages of this kind are printed to the \fBstderr\fR stream.
 Default level is 2, i.e. show errors and warnings.
+
 .\" Controlling the output subsection ---------------------
-.SS Controlling the output
+.SS Controlling the Output
 .TP
 .BI --output-items= item_list
 Set output items.
@@ -252,6 +270,7 @@ Those sums are further divided according to the transport protocols TCP, UDP, IC
 Using \fBmetadata-summary\fR as a single output item is very fast and efficent.
 
 Default value of \fIitem_list\fR for pretty output is \fBrecords,processed-records-summary\fR, for CSV it contains only \fBrecords\fR.
+
 .TP
 .BI --output-format= format
 Set output (print) format.
@@ -265,6 +284,7 @@ Data conversions are all set to the most human readable form (timestamps convert
 .B csv
 will create machine readable output suitable for post-processing.
 It is a standard comma separated values format, where all data conversions are set to the most machine readable form (timestamps printed as integers, TCP flags printed as a integers, ...).
+
 .TP
 .BI --output-ts-conv= timestamp_conversion
 Set timestamp output conversion format.
@@ -285,6 +305,7 @@ function.
 Default string for pretty print is
 .RB ' "%F %T" '.
 Dot and milliseconds are always appended.
+
 .TP
 .BI --output-ts-localtime
 Convert timestamps to local time.
@@ -292,6 +313,7 @@ Timestamps stored in flow records are in UTC.
 This option will convert them to the user's specified timezone (by
 .BR localtime ()
 function) before output conversion is performed.
+
 .TP
 .BI --output-volume-conv= volume_conversion
 Set volume output conversion format.
@@ -311,6 +333,7 @@ For example 150000 will be converted to 150.0 k using
 .B metric-prefix
 and to 146.4 Ki using
 .BR binary-prefix .
+
 .TP
 .BI --output-tcpflags-conv= TCP_flags_conversion
 Set TCP flags output conversion format.
@@ -329,6 +352,7 @@ Each character represents one bit, order is preserved (CWR is first, FIN is last
 If bit is set, character is set to the first letter of bit's name.
 If bit is unset, character is set to the dot symbol.
 For example C.UA..SF means that CWR, URG, ACK, SYN and FIN bits are set, others are unset.
+
 .TP
 .BI --output-addr-conv= IP_address_conversion
 Set IP address output conversion format.
@@ -346,6 +370,7 @@ With
 conversion,
 .BR inet_ntop ()
 function is used to convert binary representation to string.
+
 .TP
 .BI --output-proto-conv= IP_protocol_conversion
 Set IP protocol output conversion format.
@@ -360,6 +385,7 @@ Using
 conversion will print raw integer. Using
 .B str
 conversion will print IP protocol name, as defined by IANA.
+
 .TP
 .BI --output-duration-conv= duration_conversion
 Set
@@ -376,6 +402,7 @@ Using
 raw integer is printed. Using
 .BR str ,
 duration is converted into HH:MM:SS.MS string.
+
 .TP
 .BI --fields= field \fR[,...]
 Set the list of printed fields.
@@ -405,6 +432,7 @@ You can add only some fields without actually making the field an aggregation ke
 Those fields are
 .BR first ,\  last ,\  received ,\  bytes ,\  packets ,\  outbytes ,\ outpackets ,\  flows ,\  tcpflags ,\  eventtime ,\  duration ,\  bps ,\  pps \ and\  bpp .
 If any other \fIfield\fR is present in the list, it will be used as an aggregation key.
+
 .TP
 .BI --progress-bar-type= progress_bar_type
 Set progress bar type.
@@ -414,13 +442,15 @@ This may be inaccurate if records are unevenly spread among files.
 \fIprogress_bar_type\fR is one of
 .BR none ,\  total ,\  perslave \ or\  json.
 \fBnone\fR will disable progress bar, \fBtotal\fR will print only total progress (enabled by default), \fBperslave\fR will print per slave progress together with total progress, \fBjson\fR will print per slave progress formatted as a JSON.
+
 .TP
 .BI --progress-bar-dest= progress_bar_destination
 Set progress bar destination.
 There are two special values: stdout and stderr (which is also default).
 Every other value will be treated as a filename and \fBfdistdump\fR will continually rewrite this file with the current progress.
+
 .\" Other options subsection ---------------------
-.SS Other options
+.SS Other Options
 .TP
 .B --no-tput
 Disable the TPUT algorithm for Top-N queries.
@@ -442,6 +472,7 @@ However, there are three conditions that have to be satisfied, otherwise it will
 If TPUT is disabled, a naive method is used.
 Naive method for answering Top-N queries requires to send data about all records to the master.
 Since the number of records can be high, it could be expensive to a) transfer all there records, and b) aggregate and sort them on the master node.
+
 .TP
 .B --no-bfindex
 Disable Bloom filter indexes.
@@ -454,14 +485,18 @@ If enabled, together witch each flow file also index file is read.
 If the flow file name has the standard prefix "lnf.", the index file name is constructed by subtituting this prefix with "bfi.".
 Otherwise, the index file name is constructed by prefixing the flow file name with "bfi.".
 This feature uses the followinh Bloom filter index library: https://github.com/CESNET/bloom-filter-index.
+
 .\" Getting help subsection ---------------------
-.SS Getting help
+.SS Getting Help
 .TP
 .B --help
 Print a help message and exit.
+
 .TP
 .B --version
 Display version information and exit.
+
+
 .\" EXIT STATUS section --------------------------------------------------------
 .SH EXIT STATUS
 Exit status value depends on your MPI process manager
@@ -471,12 +506,18 @@ For behavior in situations, where one or more processes return non-zero value, s
 
 .B fdistdump
 processes return 0 on success, 1 on error.
+
+
 .\" ENVIRONMENT section --------------------------------------------------------
 .SH ENVIRONMENT
 TZ environment variable is set to empty string for a short amount of time for internal reasons.
 It is restored to its original value afterwards.
+
+
 .\" FILES section --------------------------------------------------------------
-.\".SH FILES There are no configuration files yet.
+\fBfdistdump\fR does not use any configuration files.
+
+
 .\" NOTES section --------------------------------------------------------------
 .SH NOTES
 With disabled sorting and more than one input flow file (doesn't matter if local or distributed), output record order is undefined.
@@ -491,12 +532,17 @@ If you need defined record order, use sorting
 
 Nfdump filtering engine, which we are using for now, isn't thread safe.
 Therefore, query with filter may be slower than without one.
+
+
 .\" BUGS section --------------------------------------------------------------
 .\".SH BUGS
+
+
 .\" EXAMPLE section ------------------------------------------------------------
 .SH EXAMPLE
+
 .\" List records subsection ---------------------
-.SS List records
+.SS List Records
 Launch two \fBfdistdump\fR processes on local node, one master and one slave.
 Slave process will read both specified flow files concurrently and print all records in both files.
 .nf
@@ -561,6 +607,7 @@ Record limit is 5, therefore 5 records with largest \fBbytes\fR values are print
 \&  2015-01-20 14:06:58.177     41.4 M      32.5 k      0           0           195.166.35.230      166.206.177.218     IPv6
 \&  2015-01-19 23:30:02.336     40.9 M      27.3 k      80          4425        172.21.3.117        156.194.181.105     TCP
 .fi
+
 .\" Aggregation subsection ---------------------
 .SS Aggregation
 Following query will process all the records in all the files within specified directory.
@@ -619,7 +666,7 @@ Statistic with filter is very popular query type.
 .fi
 
 .\" Time based options subsection ---------------------
-.SS Time based options
+.SS Time Based Options
 Only flow files corresponding to specified time or time range will be processed.
 However, \fIpath\fR directories have to contain specific directory hierarchy.
 
@@ -686,6 +733,7 @@ This can be solved by an \fBUTC\fR flag, which says that your time specifier is 
 \&          68.6 M flows, 617.9 M packets, 476.6 G bytes
 \&          0.610311 seconds, 112.4 M flows/second
 .fi
+
 .\" Miscellaneous subsection ---------------------
 .SS Miscellaneous
 Usage of CSV output format.
@@ -756,6 +804,8 @@ Read only each file's metadata, sum it up and print in the CSV format.
 \&  packets,123566800,121011000,2500200,52800,2800
 \&  bytes,169099997700,167450161300,1643290400,6186000,360000
 .fi
+
+
 .\" SEE ALSO section -----------------------------------------------------------
 .SH SEE ALSO
 .BR inet_ntop (3)
