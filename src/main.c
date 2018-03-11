@@ -70,23 +70,15 @@
 int
 main(int argc, char *argv[])
 {
-    error_code_t ecode = E_OK;
-
     /*
-     * Initialize MPI and check supported thread level. We need at least
-     * MPI_THREAD_SERIALIZED. MPI_THREAD_MULTIPLE would be great, but
-     * Open MPI < 3.0 does not support it by default.
+     * Initialize MPI and check supported thread level. MPI_THREAD_MULTIPLE is
+     * required. MPICH supports it, but Open MPI < 3.0 does not support it by
+     * default.
      */
     int thread_provided;
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &thread_provided);
-    if (thread_provided != MPI_THREAD_SERIALIZED
-            && thread_provided != MPI_THREAD_MULTIPLE) {
-        ecode = E_MPI;
-        PRINT_ERROR(ecode, thread_provided,
-                    "an insufficient level of thread support. "
-                    "At least MPI_THREAD_SERIALIZED is required.");
-        goto finalize;
-    }
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &thread_provided);
+    ERROR_IF(thread_provided != MPI_THREAD_MULTIPLE, E_MPI,
+            "an insufficient level of thread support, MPI_THREAD_MULTIPLE is required.");
 
     // determine the calling processes rank and the total number of proecesses
     int world_rank;
@@ -95,29 +87,23 @@ main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     // check if there are at least two processes
-    if (world_size < 2) {
-        ecode = E_MPI;
-        PRINT_ERROR(ecode, 0, PACKAGE_NAME " requires at least 2 copies of the program to run "
-                    "(one for the master and the others for the slaves). "
-                    "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
-        goto finalize;
-    }
+    ERROR_IF(world_size < 2, E_MPI, PACKAGE_NAME
+            " requires at least 2 copies of the program to run "
+            "(one for the master and the others for the slaves). "
+            "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
 
     // parse command line arguments in all processes
     struct cmdline_args args = { 0 };
-    ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
-    if (ecode != E_OK) {
-        goto finalize;
-    }
+    error_code_t ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
+    ERROR_IF(ecode != E_OK, ecode, "parsing arguments failed");
 
     // split master and slave code
     if (world_rank == ROOT_PROC) {
-        ecode = master_main(world_size, &args);
+        master_main(&args);
     } else {
-        ecode = slave_main(world_size, &args);
+        slave_main(&args);
     }
 
-finalize:
     if (ecode == E_OK || ecode == E_HELP) {
         PRINT_DEBUG("terminating with success");
         MPI_Finalize();

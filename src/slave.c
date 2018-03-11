@@ -71,7 +71,6 @@
 #error "LNF_MAX_RAW_LEN > UINT32_MAX"
 #endif
 
-
 /*
  * Global variables.
  */
@@ -82,22 +81,26 @@ static const struct cmdline_args *args;
  * Data types declarations.
  */
 struct slave_ctx {  // thread-shared context
-    lnf_mem_t *lnf_mem;  // libnf memory used for aggregation
-    lnf_filter_t *filter; // libnf compiled filter expression
+    lnf_filter_t *lnf_filter; // libnf compiled filter expression
+                              // TODO: can thread-private filter be faster?
 #ifdef HAVE_LIBBFINDEX
     struct bfindex_node *bfindex_root;  // indexing IP address tree root
                                         // (created from the the libnf filter)
 #endif  // HAVE_LIBBFINDEX
-    uint8_t *buff[2];  // two chunks of memory for the record storage
-    size_t proc_rec_cntr;  // processed record counter
+    uint64_t proc_rec_cntr;  // processed record counter
     bool rec_limit_reached; // true if rec_limit records has been read
-    size_t slave_cnt;  // slave count
     struct processed_summ processed_summ;  // summary of processed records
     struct metadata_summ metadata_summ;    // summary of flow files metadata
+
+    uint64_t tput_threshold;
+    char tput_rec_buff[LNF_MAX_RAW_LEN];
+    int tput_rec_len;
+    uint64_t tput_rec_cnt;
 };
 
 struct thread_ctx {  // thread-private context
-    lnf_file_t *file;  // libnf file
+    lnf_mem_t *lnf_mem;  // libnf memory used for record storage
+    lnf_file_t *lnf_file;  // libnf file
     lnf_rec_t *lnf_rec;    // libnf record
 
     uint8_t *buff[2];  // two chunks of memory for the record storage
@@ -109,6 +112,146 @@ struct thread_ctx {  // thread-private context
 /*
  * Static functions.
  */
+/**
+ * @brief TODO
+ *
+ * @param lnf_filter
+ * @param filter_str
+ *
+ * @return 
+ */
+static error_code_t
+init_filter(lnf_filter_t **lnf_filter, char *filter_str)
+{
+    assert(lnf_filter && filter_str && strlen(filter_str) != 0);
+
+    int lnf_ret = lnf_filter_init_v2(lnf_filter, filter_str);
+    if (lnf_ret != LNF_OK) {
+        PRINT_ERROR(E_LNF, lnf_ret, "cannot initialise filter `%s'", filter_str);
+        return E_LNF;
+    }
+
+    return E_OK;
+}
+
+#ifdef HAVE_LIBBFINDEX
+/**
+ * @brief TODO
+ *
+ * @param lnf_filter
+ *
+ * @return NULL is OK and error/warning message was printed in bfindex_init()
+ */
+static struct bfindex_node *
+init_bfindex(lnf_filter_t *lnf_filter)
+{
+    assert(lnf_filter);
+
+    const ff_t *const filter_tree = lnf_filter_ffilter_ptr(lnf_filter);
+    assert(filter_tree && filter_tree->root);
+    return bfindex_init(filter_tree->root);  // return NULL is OK
+}
+#endif  // HAVE_LIBBFINDEX
+
+static void
+slave_ctx_init(struct slave_ctx *const s_ctx)
+{
+    assert(s_ctx);
+
+    // initialize the filter and the Bloom filter index, if possible
+    if (args->filter_str) {
+        init_filter(&s_ctx->lnf_filter, args->filter_str);
+
+#ifdef HAVE_LIBBFINDEX
+        if (args->use_bfindex) {
+            s_ctx->bfindex_root = init_bfindex(s_ctx->lnf_filter);
+            if (s_ctx->bfindex_root) {
+                PRINT_INFO("Bloom filter indexes enabled");
+            } else {
+                PRINT_INFO("Bloom filter indexes disabled involuntarily");
+            }
+        } else {
+            PRINT_INFO("Bloom filter indexes disabled voluntarily");
+        }
+#endif  // HAVE_LIBBFINDEX
+    }
+}
+
+static void
+slave_ctx_free(struct slave_ctx *const s_ctx)
+{
+    assert(s_ctx);
+
+    if (s_ctx->lnf_filter) {
+        lnf_filter_free(s_ctx->lnf_filter);
+    }
+#ifdef HAVE_LIBBFINDEX
+    if (s_ctx->bfindex_root){
+        bfindex_free(s_ctx->bfindex_root);
+    }
+#endif  // HAVE_LIBBFINDEX
+}
+
+static void
+thread_ctx_init(struct thread_ctx *const t_ctx)
+{
+    assert(t_ctx);
+
+    // initialize the libnf record, only once for each thread
+    int lnf_ret = lnf_rec_init(&t_ctx->lnf_rec);
+    if (lnf_ret != LNF_OK) {
+        PRINT_ERROR(E_LNF, lnf_ret, "lnf_rec_init()");
+        MPI_Abort(MPI_COMM_WORLD, E_LNF);
+    }
+
+    // allocate two new data buffers for the records storage.
+    t_ctx->buff[0] = malloc(XCHG_BUFF_SIZE * sizeof (*t_ctx->buff[0]));
+    t_ctx->buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (*t_ctx->buff[1]));
+    ERROR_IF(!t_ctx->buff[0] || !t_ctx->buff[1], E_MEM,
+             "thread record buffer allocation failed");
+
+    // perform allocations and initializations of the libnf memory record
+    // storage, if required
+    switch (args->working_mode) {
+    case MODE_LIST:
+        // no storage required, everything will be sent while reading
+        break;
+
+    case MODE_SORT:
+        // initialize the libnf sorting memory and set its parameters
+        libnf_mem_init(&t_ctx->lnf_mem, args->fields, true);
+        break;
+
+    case MODE_AGGR:
+        // initialize the libnf aggregation memory and set its parameters
+        libnf_mem_init(&t_ctx->lnf_mem, args->fields, false);
+        break;
+
+    case MODE_META:
+        // no storage required
+        break;
+
+    default:
+        assert(!"unknown working mode");
+    }
+}
+
+static void
+thread_ctx_free(struct thread_ctx *const t_ctx)
+{
+    assert(t_ctx);
+
+    lnf_rec_free(t_ctx->lnf_rec);
+
+    // free the thread-local record storage buffers
+    free(t_ctx->buff[0]);
+    free(t_ctx->buff[1]);
+
+    if (t_ctx->lnf_mem) {
+        libnf_mem_free(t_ctx->lnf_mem);
+    }
+}
+
 /**
  * @brief TODO
  *
@@ -158,25 +301,26 @@ processed_summ_share(struct processed_summ *shared,
  * Read to the temporary variable, check validity, and update private counsters.
  *
  * @param private
- * @param file
+ * @param lnf_file
  */
 static void
-metadata_summ_update(struct metadata_summ *private, lnf_file_t *file)
+metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
 {
-    assert(private && file);
+    assert(private && lnf_file);
 
     struct metadata_summ tmp;
     int lnf_ret;
 
     // flows
-    lnf_ret |= lnf_info(file, LNF_INFO_FLOWS, &tmp.flows, sizeof (tmp.flows));
-    lnf_ret |= lnf_info(file, LNF_INFO_FLOWS_TCP, &tmp.flows_tcp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS, &tmp.flows,
+                        sizeof (tmp.flows));
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS_TCP, &tmp.flows_tcp,
                         sizeof (tmp.flows_tcp));
-    lnf_ret |= lnf_info(file, LNF_INFO_FLOWS_UDP, &tmp.flows_udp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS_UDP, &tmp.flows_udp,
                         sizeof (tmp.flows_udp));
-    lnf_ret |= lnf_info(file, LNF_INFO_FLOWS_ICMP, &tmp.flows_icmp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS_ICMP, &tmp.flows_icmp,
                         sizeof (tmp.flows_icmp));
-    lnf_ret |= lnf_info(file, LNF_INFO_FLOWS_OTHER, &tmp.flows_other,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS_OTHER, &tmp.flows_other,
                         sizeof (tmp.flows_other));
     assert(lnf_ret = LNF_OK);
 
@@ -193,14 +337,15 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *file)
     private->flows_other += tmp.flows_other;
 
     // packets
-    lnf_ret |= lnf_info(file, LNF_INFO_PACKETS, &tmp.pkts, sizeof (tmp.pkts));
-    lnf_ret |= lnf_info(file, LNF_INFO_PACKETS_TCP, &tmp.pkts_tcp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS, &tmp.pkts,
+                        sizeof (tmp.pkts));
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS_TCP, &tmp.pkts_tcp,
                         sizeof (tmp.pkts_tcp));
-    lnf_ret |= lnf_info(file, LNF_INFO_PACKETS_UDP, &tmp.pkts_udp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS_UDP, &tmp.pkts_udp,
                         sizeof (tmp.pkts_udp));
-    lnf_ret |= lnf_info(file, LNF_INFO_PACKETS_ICMP, &tmp.pkts_icmp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS_ICMP, &tmp.pkts_icmp,
                         sizeof (tmp.pkts_icmp));
-    lnf_ret |= lnf_info(file, LNF_INFO_PACKETS_OTHER, &tmp.pkts_other,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS_OTHER, &tmp.pkts_other,
                         sizeof (tmp.pkts_other));
     assert(lnf_ret = LNF_OK);
 
@@ -217,14 +362,15 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *file)
     private->pkts_other += tmp.pkts_other;
 
     // bytes
-    lnf_ret |= lnf_info(file, LNF_INFO_BYTES, &tmp.bytes, sizeof (tmp.bytes));
-    lnf_ret |= lnf_info(file, LNF_INFO_BYTES_TCP, &tmp.bytes_tcp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES, &tmp.bytes,
+                        sizeof (tmp.bytes));
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES_TCP, &tmp.bytes_tcp,
                         sizeof (tmp.bytes_tcp));
-    lnf_ret |= lnf_info(file, LNF_INFO_BYTES_UDP, &tmp.bytes_udp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES_UDP, &tmp.bytes_udp,
                         sizeof (tmp.bytes_udp));
-    lnf_ret |= lnf_info(file, LNF_INFO_BYTES_ICMP, &tmp.bytes_icmp,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES_ICMP, &tmp.bytes_icmp,
                         sizeof (tmp.bytes_icmp));
-    lnf_ret |= lnf_info(file, LNF_INFO_BYTES_OTHER, &tmp.bytes_other,
+    lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES_OTHER, &tmp.bytes_other,
                         sizeof (tmp.bytes_other));
     assert(lnf_ret = LNF_OK);
 
@@ -291,41 +437,15 @@ metadata_summ_share(struct metadata_summ *shared,
 /**
  * @brief TODO
  *
- * Lack of the MPI_THREAD_MULTIPLE threading level implies the CS.
- *
- * @param data
- * @param data_size
- * @param req
- */
-static void
-wait_isend_cs(void *data, size_t data_size, MPI_Request *req)
-{
-    assert(data && data_size > 0 && req);
-
-    #pragma omp critical (mpi)
-    {
-        MPI_Wait(req, MPI_STATUS_IGNORE);
-        MPI_Isend(data, data_size, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                  MPI_COMM_WORLD, req);
-    }
-}
-
-/**
- * @brief TODO
- *
  * Read all records from the file. No aggregation is performed, records are only
  * saved into the record buffer. When the buffer is full, it is sent towards the
  * master.
- *
- * @param s_ctx
- * @param t_ctx
- *
- * @return 
  */
-static error_code_t
-read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
+static void
+ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
+                   struct thread_ctx *t_ctx, int mpi_tag)
 {
-    assert(s_ctx && t_ctx);
+    assert(ff_path && s_ctx && t_ctx);
 
     // fill the fast fields array and calculate constant record size
     struct {
@@ -346,17 +466,16 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
     // loop through all records, HOT PATH!
     size_t file_rec_cntr = 0;
     size_t file_proc_rec_cntr = 0;
-    size_t file_sent_bytes = 0;
     bool buff_idx = 0; //index to the currently used data buffer
     size_t buff_off = 0; //current data buffer offset
     size_t buff_rec_cntr = 0; //number of records in the current buffer
     MPI_Request request = MPI_REQUEST_NULL;
     int lnf_ret;
-    while ((lnf_ret = lnf_read(t_ctx->file, t_ctx->lnf_rec)) == LNF_OK) {
+    while ((lnf_ret = lnf_read(t_ctx->lnf_file, t_ctx->lnf_rec)) == LNF_OK) {
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (s_ctx->filter && !lnf_filter_match(s_ctx->filter, t_ctx->lnf_rec)) {
+        if (s_ctx->lnf_filter && !lnf_filter_match(s_ctx->lnf_filter, t_ctx->lnf_rec)) {
             continue;
         }
         file_proc_rec_cntr++;
@@ -370,8 +489,9 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
                 break;
             }
 
-            wait_isend_cs(t_ctx->buff[buff_idx], buff_off, &request);
-            file_sent_bytes += buff_off;
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            MPI_Isend(t_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC,
+                      mpi_tag, MPI_COMM_WORLD, &request);
 
             // increment the thread-shared counter of processed records
             #pragma omp atomic
@@ -409,8 +529,9 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
 
     // send the remaining records if the record buffer is not empty
     if (buff_rec_cntr != 0) {
-        wait_isend_cs(t_ctx->buff[buff_idx], buff_off, &request);
-        file_sent_bytes += buff_off;
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
+        MPI_Isend(t_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
+                  MPI_COMM_WORLD, &request);
 
         // increment the thread-shared counter of processed records
         #pragma omp atomic
@@ -422,19 +543,14 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
         s_ctx->rec_limit_reached = true;
         #pragma omp flush
     } else if (lnf_ret != LNF_EOF) {
-        PRINT_WARNING(E_LNF, lnf_ret, "failed to read the whole file");
+        PRINT_WARNING(E_LNF, lnf_ret, "`%s': EOF was not reached", ff_path);
     }
 
     // the buffers will be invalid after return, wait for the send to complete
-    #pragma omp critical (mpi)
-    {
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
-    }
+    MPI_Wait(&request, MPI_STATUS_IGNORE);
 
-    PRINT_DEBUG("read %zu, processed %zu, sent %zu B", file_rec_cntr,
-                file_proc_rec_cntr, file_sent_bytes);
-
-    return E_OK;
+    PRINT_DEBUG("`%s': read %zu records, processed %zu records", ff_path,
+                file_rec_cntr, file_proc_rec_cntr);
 }
 
 /**
@@ -443,28 +559,23 @@ read_and_send_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
  * Read all records from the file. Aggreagation is performed (records are
  * written to the libnf memory, which is a hash table). The record limit is
  * ignored.
- *
- * @param s_ctx
- * @param t_ctx
- *
- * @return 
  */
-static error_code_t
-read_and_store_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
+static void
+ff_read_and_store(const char *ff_path, struct slave_ctx *s_ctx,
+                   struct thread_ctx *t_ctx)
 {
-    assert(s_ctx && t_ctx);
-
-    error_code_t ecode = E_OK;
+    assert(ff_path && s_ctx && t_ctx);
 
     // loop through all records, HOT PATH!
     int lnf_ret;
     size_t file_rec_cntr = 0;
     size_t file_proc_rec_cntr = 0;
-    while ((lnf_ret = lnf_read(t_ctx->file, t_ctx->lnf_rec)) == LNF_OK) {
+    while ((lnf_ret = lnf_read(t_ctx->lnf_file, t_ctx->lnf_rec)) == LNF_OK) {
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (s_ctx->filter && !lnf_filter_match(s_ctx->filter, t_ctx->lnf_rec)) {
+        if (s_ctx->lnf_filter && !lnf_filter_match(s_ctx->lnf_filter,
+                                                   t_ctx->lnf_rec)) {
             continue;
         }
         file_proc_rec_cntr++;
@@ -473,115 +584,38 @@ read_and_store_file(struct slave_ctx *s_ctx, struct thread_ctx *t_ctx)
         processed_summ_update(&t_ctx->processed_summ, t_ctx->lnf_rec);
 
         // write the record into the libnf memory (a hash table)
-        lnf_ret = lnf_mem_write(s_ctx->lnf_mem, t_ctx->lnf_rec);
-        if (lnf_ret != LNF_OK) {
-            ecode = E_LNF;
-            PRINT_ERROR(ecode, lnf_ret, "lnf_mem_write()");
-            break;
-        }
+        lnf_ret = lnf_mem_write(t_ctx->lnf_mem, t_ctx->lnf_rec);
+        ERROR_IF(lnf_ret != LNF_OK, E_LNF, "`%s': lnf_mem_write()", ff_path);
     }
-    // check if EOF was reached
-    if (lnf_ret != LNF_EOF) {
-        PRINT_WARNING(E_LNF, lnf_ret, "EOF wasn not reached");
-    }
+    WARN_IF(lnf_ret != LNF_EOF, E_LNF, "`%s': EOF was not reached", ff_path);
 
-    PRINT_DEBUG("read %zu, processed %zu", file_rec_cntr, file_proc_rec_cntr);
-    return ecode;
+    PRINT_DEBUG("`%s': read %zu records, processed %zu records", ff_path,
+                file_rec_cntr, file_proc_rec_cntr);
 }
 
+
+static void
+send_terminator(const int mpi_tag)
+{
+    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, mpi_tag, MPI_COMM_WORLD);
+}
 
 /**
  * @brief TODO
  *
- * Each record is prefixed with its length:
- * | xchg_rec_size_t rec_len | rec_len bytes sized record |
+ * Terminator is included.
+ *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
  *
  * @param lnf_mem
- * @param limit
+ * @param rec_limit
+ * @param mpi_tag
  * @param buff
  * @param buff_size
- *
- * @return 
  */
-static error_code_t
-send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, uint8_t *const buff[2],
-             const size_t buff_size)
-{
-    assert(lnf_mem && buff && buff[0] && buff[1]
-           && buff_size >= sizeof (xchg_rec_size_t) + LNF_MAX_RAW_LEN);
-
-    error_code_t ecode = E_OK;
-
-    // zero record limit means send all records
-    if (rec_limit == 0) {
-        rec_limit = SIZE_MAX;
-    }
-
-    // initialize the cursor to point to the first record in the memory
-    lnf_mem_cursor_t *cursor;
-    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
-
-    // loop throught all records
-    bool buff_idx = 0;        // currently used data buffer index
-    size_t buff_off = 0;      // data buffer offset
-    size_t buff_rec_cntr = 0; // number of records in current buffer
-    size_t rec_cntr = 0;
-    MPI_Request request = MPI_REQUEST_NULL;
-    while (cursor && rec_limit > rec_cntr) {
-        // read another record, write it into the record buffer
-        // write the 4 byte long record size before the record
-        xchg_rec_size_t *const rec_size_ptr =
-            (xchg_rec_size_t *)(buff[buff_idx] + buff_off);
-        char *const rec_data_ptr =
-            (char *)rec_size_ptr + sizeof (xchg_rec_size_t);
-        const size_t buff_remaining =
-            buff_size - buff_off - sizeof (xchg_rec_size_t);
-
-        lnf_ret = lnf_mem_read_raw_c(lnf_mem, cursor, rec_data_ptr,
-                                     (int *)rec_size_ptr, buff_remaining);
-        assert(lnf_ret != LNF_EOF);
-
-        // was in the buffer enough space for the record?
-        if (lnf_ret != LNF_ERR_NOMEM) {  // yes
-            buff_off += sizeof (xchg_rec_size_t) + *rec_size_ptr;
-            buff_rec_cntr++;
-            rec_cntr++;
-
-            // move the cursor to the next record
-            lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
-        } else {  // no, send the full buffer
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
-            MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                      MPI_COMM_WORLD, &request);
-
-            // clear the buffer context variables and toggle the buffers
-            buff_off = 0;
-            buff_rec_cntr = 0;
-            buff_idx = !buff_idx;
-        }
-    }
-    if (rec_limit == SIZE_MAX && lnf_ret != LNF_EOF) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_mem_next_c() or lnf_mem_first_c()");
-    }
-
-    // send the remaining records if the record buffer is not empty
-    if (buff_rec_cntr != 0) {
-        MPI_Wait(&request, MPI_STATUS_IGNORE);
-        MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, TAG_DATA,
-                  MPI_COMM_WORLD, &request);
-    }
-
-    // the buffers will be invalid after return, wait for the send to complete
-    MPI_Wait(&request, MPI_STATUS_IGNORE);
-
-    PRINT_DEBUG("send_raw_mem: sent %zu record(s)", rec_cntr);
-    return ecode;
-}
-
 static void
-send_raw_mem_ng(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
-                uint8_t *const buff[2], const size_t buff_size)
+send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
+             uint8_t *const buff[2], const size_t buff_size)
 {
     assert(lnf_mem && buff && buff[0] && buff[1]
            && buff_size >= sizeof (xchg_rec_size_t) + LNF_MAX_RAW_LEN);
@@ -649,16 +683,16 @@ send_raw_mem_ng(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
     // the buffers will be invalid after return, wait for the send to complete
     MPI_Wait(&request, MPI_STATUS_IGNORE);
 
-    // send the termiantor -- a message of zero length
-    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, mpi_tag, MPI_COMM_WORLD);
-
-    PRINT_DEBUG("send_raw_mem_ng: sent %zu record(s) with tag %d", rec_cntr,
+    send_terminator(mpi_tag);
+    PRINT_DEBUG("send_raw_mem: sent %zu record(s) with tag %d", rec_cntr,
                 mpi_tag);
 }
 
 
 /**
  * @brief TODO
+ *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
  *
  * @param files_cnt
  */
@@ -671,17 +705,17 @@ progress_report_init(size_t files_cnt)
 
 /**
  * @brief TODO
+ *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ *
  */
 static void
 progress_report_next(void)
 {
-    #pragma omp critical (mpi)
-    {
-        MPI_Request request = MPI_REQUEST_NULL;
-        MPI_Isend(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS,
-                MPI_COMM_WORLD, &request);
-        MPI_Request_free(&request);
-    }
+    MPI_Request request = MPI_REQUEST_NULL;
+    MPI_Isend(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS, MPI_COMM_WORLD,
+              &request);
+    MPI_Request_free(&request);
 }
 
 /**
@@ -694,16 +728,17 @@ progress_report_next(void)
  *
  * Each slave sends the top N items from its memory.
  *
- * @param[in] s_ctx Slave's all-purpose context.
+ * @param[in] s_ctx Thread-shared context.
+ * @param[in] t_ctx Thread-local context.
  */
 static void
-tput_phase_1(struct slave_ctx *const s_ctx)
+tput_phase_1(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
 {
-    assert(s_ctx);
+    assert(s_ctx && t_ctx);
 
     // send the top N items from the sorted list
-    send_raw_mem_ng(s_ctx->lnf_mem, args->rec_limit, TAG_TPUT1, s_ctx->buff,
-                    XCHG_BUFF_SIZE);
+    send_raw_mem(t_ctx->lnf_mem, args->rec_limit, TAG_TPUT1, t_ctx->buff,
+                 XCHG_BUFF_SIZE);
 
     PRINT_DEBUG("slave TPUT phase 1: done");
 }
@@ -777,27 +812,34 @@ tput_phase_2_find_threshold_cnt(lnf_mem_t *lnf_mem, const uint64_t threshold,
  * list of records satisfying the received threshold
  * (see @ref tput_phase_2_find_threshold_cnt).
  *
- * @param[in] s_ctx Slave's all-purpose context.
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ *
+ * @param[in] s_ctx Thread-shared context.
+ * @param[in] t_ctx Thread-local context.
  */
 static void
-tput_phase_2(struct slave_ctx *const s_ctx)
+tput_phase_2(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
 {
-    assert(s_ctx);
+    assert(s_ctx && t_ctx);
 
-    uint64_t threshold;
-    MPI_Bcast(&threshold, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
+    #pragma omp single
+    {
+        MPI_Bcast(&s_ctx->tput_threshold, 1, MPI_UINT64_T, ROOT_PROC,
+                  MPI_COMM_WORLD);
+        PRINT_DEBUG("have threshold %" PRIu64, s_ctx->tput_threshold);
+    }  // implicit barrier and flush
 
     // find number of records satisfying the threshold
     assert(args->fields_sort_key);
     assert(args->fields_sort_dir == LNF_SORT_DESC
            || args->fields_sort_dir == LNF_SORT_ASC);
     const uint64_t threshold_cnt = tput_phase_2_find_threshold_cnt(
-            s_ctx->lnf_mem, threshold, args->fields_sort_key,
+            t_ctx->lnf_mem, s_ctx->tput_threshold, args->fields_sort_key,
             args->fields_sort_dir);
 
     // send all records satisfying the threshold
-    send_raw_mem_ng(s_ctx->lnf_mem, threshold_cnt, TAG_TPUT2, s_ctx->buff,
-                    XCHG_BUFF_SIZE);
+    send_raw_mem(t_ctx->lnf_mem, threshold_cnt, TAG_TPUT2, t_ctx->buff,
+                 XCHG_BUFF_SIZE);
     PRINT_DEBUG("slave TPUT phase 2: done");
 }
 
@@ -808,101 +850,195 @@ tput_phase_2(struct slave_ctx *const s_ctx)
  * up the record in its libnf memory. If it finds matching aggregation key, the
  * records is send to the master.
  *
- * @param[in] s_ctx Slave's all-purpose context.
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ *
+ * @param[in] s_ctx Thread-shared context.
+ * @param[in] t_ctx Thread-local context.
  */
 static void
-tput_phase_3(struct slave_ctx *s_ctx)
+tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
 {
-    assert(s_ctx);
+    assert(s_ctx && t_ctx);
 
-    error_code_t ecode = E_OK;
-    char rec_buff[LNF_MAX_RAW_LEN];
-    int rec_len;
-    int lnf_ret;
-
-    // receive number of records in the masters memory
-    uint64_t received_rec_cnt;
-    MPI_Bcast(&received_rec_cnt, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
+    #pragma omp single
+    {
+        // receive number of records in the masters memory
+        MPI_Bcast(&s_ctx->tput_rec_cnt, 1, MPI_UINT64_T, ROOT_PROC,
+                  MPI_COMM_WORLD);
+    }  // implicit barrier and flush
 
     // initialize libnf memory for found records only
     lnf_mem_t *found_records;
-    ecode = libnf_mem_init(&found_records, args->fields, true);
-    assert(ecode == E_OK);
+    libnf_mem_init(&found_records, args->fields, true);
 
     uint64_t found_rec_cntr = 0;
-    for (size_t i = 0; i < received_rec_cnt; ++i) {
-        // receive a key from the master
-        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
-        assert(rec_len > 0);
-        MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+    for (uint64_t i = 0; i < s_ctx->tput_rec_cnt; ++i) {
+        int lnf_ret;
+        #pragma omp single
+        {
+            // receive a key from the master
+            MPI_Bcast(&s_ctx->tput_rec_len, 1, MPI_INT, ROOT_PROC,
+                      MPI_COMM_WORLD);
+            assert(IN_RANGE_INCL(s_ctx->tput_rec_len, 1,
+                                 (int)sizeof (s_ctx->tput_rec_buff) + 1));
+            MPI_Bcast(s_ctx->tput_rec_buff, s_ctx->tput_rec_len, MPI_BYTE,
+                      ROOT_PROC, MPI_COMM_WORLD);
+        }  // implicit barrier and flush
 
         // lookup the received key in my libnf memory
         lnf_mem_cursor_t *cursor;
-        lnf_ret = lnf_mem_lookup_raw_c(s_ctx->lnf_mem, rec_buff, rec_len,
-                                       &cursor);
+        lnf_ret = lnf_mem_lookup_raw_c(t_ctx->lnf_mem, s_ctx->tput_rec_buff,
+                                       s_ctx->tput_rec_len, &cursor);
+        #pragma omp barrier  // wait for each thred to finish the lookup
         assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
         if (lnf_ret == LNF_OK) {  // key found
             found_rec_cntr++;
-            lnf_ret |= lnf_mem_read_raw_c(s_ctx->lnf_mem, cursor, rec_buff,
+
+            char rec_buff[LNF_MAX_RAW_LEN];
+            int rec_len;
+            lnf_ret |= lnf_mem_read_raw_c(t_ctx->lnf_mem, cursor, rec_buff,
                                           &rec_len, sizeof (rec_buff));
             lnf_ret |= lnf_mem_write_raw(found_records, rec_buff, rec_len);
             assert(lnf_ret == LNF_OK);
         }
     }
     PRINT_DEBUG("slave TPUT phase 3: received %" PRIu64 " records, found %"
-                PRIu64 " records", received_rec_cnt, found_rec_cntr);
+                PRIu64 " records", s_ctx->tput_rec_cnt, found_rec_cntr);
 
-    send_raw_mem_ng(found_records, 0, TAG_TPUT3, s_ctx->buff, XCHG_BUFF_SIZE);
+    send_raw_mem(found_records, 0, TAG_TPUT3, t_ctx->buff, XCHG_BUFF_SIZE);
+
     libnf_mem_free(found_records);
-
     PRINT_DEBUG("slave TPUT phase 3: done");
 }
 /**
  * @}
  */  // slave_tput
 
+
 /**
  * @brief TODO
  *
- * @param s_ctx
+ * There are two data buffers for each thread. The first one filled and then
+ * passed to nonblocking MPI send function. In the meantime, the second one is
+ * filled. After both these operations are completed, buffers are switched and
+ * the whole process repeats until all data are sent.
  *
- * @return 
  */
-static error_code_t
-postprocess(struct slave_ctx *const s_ctx)
+static void
+process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
+                const char *const ff_path)
 {
-    assert(s_ctx);
+    PRINT_DEBUG("`%s': processing...", ff_path);
 
-    error_code_t ecode = E_OK;
+    // open the flow file
+    // TODO: open and update metadata counters before or after bfindex?
+    int lnf_ret = lnf_open(&t_ctx->lnf_file, ff_path, LNF_READ, NULL);
+    if (lnf_ret != LNF_OK) {
+        PRINT_WARNING(E_LNF, lnf_ret, "`%s\': unable to open flow file",
+                      ff_path);
+        t_ctx->lnf_file = NULL;
+        goto return_label;
+    }
+
+    // read and update the thread-private metadata summary counters
+    metadata_summ_update(&t_ctx->metadata_summ, t_ctx->lnf_file);
+
+#ifdef HAVE_LIBBFINDEX
+    if (s_ctx->bfindex_root) {  // Bloom filter indexing is enabled
+        char *bfindex_file_path = bfindex_flow_to_index_path(ff_path);
+        if (bfindex_file_path) {
+            PRINT_DEBUG("`%s': using bfindex file `%s'", ff_path,
+                        bfindex_file_path);
+            const bool contains = bfindex_contains(s_ctx->bfindex_root,
+                                                   bfindex_file_path);
+            free(bfindex_file_path);
+            if (contains) {
+                PRINT_INFO("`%s': bfindex query returned "
+                           "``required IP address(es) possibly in file''",
+                           ff_path);
+            } else {
+                PRINT_INFO("`%s': bfindex query returned "
+                           "``required IP address(es) definitely not in file''",
+                           ff_path);
+                goto return_label;
+            }
+        } else {
+            PRINT_WARNING(E_BFINDEX, 0, "`%s': "
+                          "unable to convert flow file name into bfindex file name",
+                          ff_path);
+        }
+    }
+#endif  // HAVE_LIBBFINDEX
+
+    // process the file according to the working mode
+    switch (args->working_mode) {
+    case MODE_LIST:
+    {
+        #pragma omp flush  // to flush rec_limit_reached
+        if (!s_ctx->rec_limit_reached) {
+            ff_read_and_send(ff_path, s_ctx, t_ctx, TAG_LIST);
+        }
+        break;
+    }
+
+    case MODE_SORT:
+        // store records into the thread-local libnf memory (linked list)
+        ff_read_and_store(ff_path, s_ctx, t_ctx);
+        break;
+
+    case MODE_AGGR:
+        // aggregate records into the thread-local libnf memory (hash table)
+        ff_read_and_store(ff_path, s_ctx, t_ctx);
+        break;
+
+    case MODE_META:
+        // metadata already read
+        break;
+    default:
+        assert(!"unknown working mode");
+    }
+
+return_label:
+    if (t_ctx->lnf_file) {
+        lnf_close(t_ctx->lnf_file);
+    }
+
+    PRINT_DEBUG("`%s': done", ff_path);
+    return;
+}
+
+static void
+postprocess_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
+{
+    assert(s_ctx && t_ctx);
 
     switch (args->working_mode) {
     case MODE_LIST:
-        // all records already sent during reading, send the terminator
-        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
+        // all records already sent during reading
+        send_terminator(TAG_LIST);
         break;
 
     case MODE_SORT:
-        if (args->rec_limit != 0) {
-            ecode = send_raw_mem(s_ctx->lnf_mem, args->rec_limit, s_ctx->buff,
-                                 XCHG_BUFF_SIZE);
-        } // else all records already sent while reading
-        // send the terminator
-        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
+        // merge thread-specific hash tables into thread-shared one
+        PRINT_DEBUG("sorting records in thread-local libnf memory...");
+        libnf_mem_sort(t_ctx->lnf_mem);
+        PRINT_DEBUG("sorting records in thread-local libnf memory done");
+        send_raw_mem(t_ctx->lnf_mem, args->rec_limit, TAG_SORT, t_ctx->buff,
+                     XCHG_BUFF_SIZE);
         break;
 
     case MODE_AGGR:
         if (args->use_tput) {
+            assert(args->rec_limit);
             // use the TPUT Top-N algorithm
-            tput_phase_1(s_ctx);
-            tput_phase_2(s_ctx);
-            tput_phase_3(s_ctx);
+            tput_phase_1(s_ctx, t_ctx);
+            tput_phase_2(s_ctx, t_ctx);
+            tput_phase_3(s_ctx, t_ctx);
         } else {
-            // send all aggregated records
-            ecode = send_raw_mem(s_ctx->lnf_mem, 0, s_ctx->buff,
-                                 XCHG_BUFF_SIZE);
+            // send all records
+            send_raw_mem(t_ctx->lnf_mem, 0, TAG_AGGR, t_ctx->buff,
+                         XCHG_BUFF_SIZE);
         }
-        // send the terminator
-        MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_DATA, MPI_COMM_WORLD);
         break;
 
     case MODE_META:
@@ -913,285 +1049,8 @@ postprocess(struct slave_ctx *const s_ctx)
         assert(!"unknown working mode");
     }
 
-    PRINT_DEBUG("postprocessing done");
-
-    return ecode;
+    PRINT_DEBUG("postprocess_mt done");
 }
-
-/**
- * @brief TODO
- *
- * There are two data buffers for each thread. The first one filled and then
- * passed to nonblocking MPI send function. In the meantime, the second one is
- * filled. After both these operations are completed, buffers are switched and
- * the whole process repeats until all data are sent.
- *
- * @param s_ctx
- * @param paths
- * @param paths_cnt
- *
- * @return 
- */
-static error_code_t
-process_files(struct slave_ctx *s_ctx, char *paths[], size_t paths_cnt)
-{
-    error_code_t ecode = E_OK;
-    struct thread_ctx t_ctx = { 0 };
-
-    // initialize the libnf record, only once for each thread
-    int lnf_ret = lnf_rec_init(&t_ctx.lnf_rec);
-    if (lnf_ret != LNF_OK) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_rec_init()");
-        goto return_label;
-    }
-
-    /*
-     * Use already alocated buffers for the OMP master thread. For every other
-     * thread, allocate two new data buffers for the records storage.
-     */
-    #pragma omp master
-    {
-        t_ctx.buff[0] = s_ctx->buff[0];
-        t_ctx.buff[1] = s_ctx->buff[1];
-    }
-    if (t_ctx.buff[0] != s_ctx->buff[0]) {
-        t_ctx.buff[0] = malloc(XCHG_BUFF_SIZE * sizeof (**t_ctx.buff));
-        t_ctx.buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (**t_ctx.buff));
-        if (!t_ctx.buff[0] || !t_ctx.buff[1]) {
-            ecode = E_MEM;
-            PRINT_ERROR(E_MEM, 0, "malloc()");
-            goto free_lnf_rec;
-        }
-    }
-
-    /*
-     * Perform a parallel loop through all files.
-     * schedule(dynamic): dynamic scheduler is best for this use case, see
-     *   https://github.com/CESNET/fdistdump/issues/6
-     * nowait: don't wait for the other threads and start merging memory
-     *   immediately
-     */
-    #pragma omp for schedule(dynamic) nowait
-    for (size_t i = 0; i < paths_cnt; ++i) {
-        if (ecode != E_OK) {
-            // error on one of the threads, skip all remaining files
-            goto continue_label;
-        }
-
-        PRINT_DEBUG("going to process file `%s'", paths[i]);
-
-        // open the flow file
-        lnf_ret = lnf_open(&t_ctx.file, paths[i], LNF_READ, NULL);
-        if (lnf_ret != LNF_OK) {
-            PRINT_WARNING(E_LNF, lnf_ret, "unable to open flow file `%s\'",
-                          paths[i]);
-            goto continue_label;
-        }
-
-        // increment the private metadata summary counters
-        metadata_summ_update(&t_ctx.metadata_summ, t_ctx.file);
-
-#ifdef HAVE_LIBBFINDEX
-        if (s_ctx->bfindex_root) {  // Bloom filter indexing is enabled
-            char *bfindex_file_path = bfindex_flow_to_index_path(paths[i]);
-            if (bfindex_file_path) {
-                PRINT_DEBUG("bfindex: using bfindex file `%s'",
-                            bfindex_file_path);
-                const bool contains = bfindex_contains(s_ctx->bfindex_root,
-                                                       bfindex_file_path);
-                free(bfindex_file_path);
-                if (contains) {
-                    PRINT_INFO("bfindex: query returned ``required IP address(es) possibly in file''");
-                } else {
-                    PRINT_INFO("bfindex: query returned ``required IP address(es) definitely not in file''");
-                    goto continue_label;
-                }
-            } else {
-                PRINT_WARNING(E_BFINDEX, 0,
-                        "unable to convert flow file name into bfindex file name");
-            }
-        }
-#endif  // HAVE_LIBBFINDEX
-
-        // process the file according to the working mode
-        switch (args->working_mode) {
-        case MODE_LIST:
-        {
-            #pragma omp flush  // to flush rec_limit_reached
-            if (!s_ctx->rec_limit_reached) {
-                ecode = read_and_send_file(s_ctx, &t_ctx);
-            }
-            break;
-        }
-
-        case MODE_SORT:
-            if (args->rec_limit == 0) {
-                // do not perform local sort, only send all records
-                ecode = read_and_send_file(s_ctx, &t_ctx);
-            } else {
-                // perform local sort first
-                ecode = read_and_store_file(s_ctx, &t_ctx);
-            }
-            break;
-
-        case MODE_AGGR:
-            ecode = read_and_store_file(s_ctx, &t_ctx);
-            break;
-
-        case MODE_META:
-            // metadata already read
-            break;
-        default:
-            assert(!"unknown working mode");
-        }
-
-        lnf_close(t_ctx.file);
-
-continue_label:
-        // report that another file has been processed
-        progress_report_next();
-    }  // end of the parallel loop through all files
-
-    // atomic addition of the thread-private counters into the thread-shared
-    processed_summ_share(&s_ctx->processed_summ, &t_ctx.processed_summ);
-    metadata_summ_share(&s_ctx->metadata_summ, &t_ctx.metadata_summ);
-
-    // free the non-OMP-master-thread record storage buffers
-    if (t_ctx.buff[0] != s_ctx->buff[0]) {
-        free(t_ctx.buff[1]);
-        free(t_ctx.buff[0]);
-    }
-
-    // merge thread-specific hash tables into thread-shared one
-    if (s_ctx->lnf_mem) {
-        lnf_mem_merge_threads(s_ctx->lnf_mem);
-    }
-
-free_lnf_rec:
-    lnf_rec_free(t_ctx.lnf_rec);
-return_label:
-    return ecode;
-}
-
-
-/**
- * @brief TODO
- *
- * @param filter
- * @param filter_str
- *
- * @return 
- */
-static error_code_t
-init_filter(lnf_filter_t **filter, char *filter_str)
-{
-    assert(filter && filter_str && strlen(filter_str) != 0);
-
-    int lnf_ret = lnf_filter_init_v2(filter, filter_str);
-    if (lnf_ret != LNF_OK) {
-        PRINT_ERROR(E_LNF, lnf_ret, "cannot initialise filter `%s'", filter_str);
-        return E_LNF;
-    }
-
-    return E_OK;
-}
-
-#ifdef HAVE_LIBBFINDEX
-/**
- * @brief TODO
- *
- * @param filter
- *
- * @return NULL is OK and error/warning message was printed in bfindex_init()
- */
-static struct bfindex_node *
-init_bfindex(lnf_filter_t *filter)
-{
-    assert(filter);
-
-    const ff_t *const filter_tree = lnf_filter_ffilter_ptr(filter);
-    assert(filter_tree && filter_tree->root);
-    return bfindex_init(filter_tree->root);  // return NULL is OK
-}
-#endif  // HAVE_LIBBFINDEX
-
-/**
- * @brief TODO
- *
- * @param s_ctx
- *
- * @return 
- */
-static error_code_t
-init_record_storage(struct slave_ctx *s_ctx)
-{
-    assert(s_ctx);
-
-    error_code_t ecode = E_OK;
-
-    switch (args->working_mode) {
-    case MODE_LIST:
-        // no storage required, nothing to initialize
-        return E_OK;
-
-    case MODE_SORT:
-        /*
-         * In queries without record limit we don't need the memory because
-         * local sort would be useless. (TODO: that is not completely true,
-         * merging of sorted lists of master would be faster)
-         * With record limit, however, we can sort all records on each slave and
-         * then send only first rec_limit records.
-         */
-        if (args->rec_limit == 0) {
-            // no storage required, nothing to initialize
-            break;
-        }
-
-        // initialize the libnf sorting memory and set its parameters
-        ecode = libnf_mem_init(&s_ctx->lnf_mem, args->fields, true);
-        if (ecode != E_OK) {
-            return ecode;
-        }
-        break;
-
-    case MODE_AGGR:
-        // initialize the libnf aggregation memory and set its parameters
-        ecode = libnf_mem_init(&s_ctx->lnf_mem, args->fields, false);
-        break;
-
-    case MODE_META:
-        // no storage required, nothing to initialize
-        return E_OK;
-
-    default:
-        assert(!"unknown working mode");
-    }
-
-    return ecode;
-}
-
-/**
- * @brief TODO
- *
- * @param s_ctx
- */
-static void
-slave_free(struct slave_ctx *s_ctx)
-{
-    if (s_ctx->filter) {
-        lnf_filter_free(s_ctx->filter);
-    }
-    if (s_ctx->lnf_mem) {
-        libnf_mem_free(s_ctx->lnf_mem);
-    }
-#ifdef HAVE_LIBBFINDEX
-    if (s_ctx->bfindex_root){
-        bfindex_free(s_ctx->bfindex_root);
-    }
-#endif  // HAVE_LIBBFINDEX
-}
-
 
 /*
  * Public functions.
@@ -1202,93 +1061,89 @@ slave_free(struct slave_ctx *s_ctx)
  * Entry point to the code executed only by the slave processes (usually with
  * ranks > 0).
  *
- * @param[in] world_size MPI_COMM_WORLD size.
- * @param[in] args Parsed command-line arguments.
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
  *
- * @return Error code.
+ * @param[in] args Parsed command-line arguments.
  */
-error_code_t
-slave_main(int world_size, const struct cmdline_args *args_local)
+void
+slave_main(const struct cmdline_args *args_local)
 {
-    assert(world_size > 1 && args_local);
+    assert(args_local);
 
-    error_code_t ecode = E_OK;
     args = args_local;  // share the command-line arguments by a global variable
 
-    struct slave_ctx s_ctx;
-    memset(&s_ctx, 0, sizeof (s_ctx));
-    s_ctx.slave_cnt = world_size - 1; // all nodes without master
-
-    // allocate two data buffers for records storage
-    s_ctx.buff[0] = malloc(XCHG_BUFF_SIZE * sizeof (**s_ctx.buff));
-    s_ctx.buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (**s_ctx.buff));
-    if (s_ctx.buff[0] == NULL || s_ctx.buff[1] == NULL) {
-        ecode = E_MEM;
-        PRINT_ERROR(E_MEM, 0, "malloc()");
-        goto finalize;
-    }
-
-    // initialize the filter and the Bloom filter index, if possible
-    if (args->filter_str) {
-        ecode = init_filter(&s_ctx.filter, args->filter_str);
-        if (ecode != E_OK) {
-            goto free_buffers;
-        }
-
-#ifdef HAVE_LIBBFINDEX
-        if (args->use_bfindex) {
-            s_ctx.bfindex_root = init_bfindex(s_ctx.filter);
-            if (s_ctx.bfindex_root) {
-                PRINT_INFO("Bloom filter indexes enabled");
-            } else {
-                PRINT_INFO("Bloom filter indexes disabled involuntarily");
-            }
-        } else {
-            PRINT_INFO("Bloom filter indexes disabled voluntarily");
-        }
-#endif  // HAVE_LIBBFINDEX
-    }
-
-    // perform allocations and initializations of record storage, if required
-    ecode = init_record_storage(&s_ctx);
-    if (ecode != E_OK) {
-        goto free_buffers;
-    }
+    struct slave_ctx s_ctx = { 0 };
+    slave_ctx_init(&s_ctx);
 
     // generate paths to the specific flow files
-    size_t paths_cnt = 0;
-    char **paths = path_array_gen(args->paths, args->paths_cnt,
-                                  args->time_begin, args->time_end,
-            &paths_cnt);
-    if (!paths) {
-        ecode = E_PATH;
-        goto free_buffers;
-    }
+    uint64_t ff_paths_cnt = 0;
+    char **ff_paths = path_array_gen(args->paths, args->paths_cnt,
+                                     args->time_begin, args->time_end,
+            &ff_paths_cnt);
+    assert(ff_paths);
+    PRINT_DEBUG("going to process %" PRIu64 " flow file(s)", ff_paths_cnt);
 
     // report number of files to be processed
-    progress_report_init(paths_cnt);
+    progress_report_init(ff_paths_cnt);
 
+    int num_threads = 1;  // one threads if OpenMP is not used
 #ifdef _OPENMP
-    // spawn at most files-count threads
-    if (paths_cnt < (size_t)omp_get_max_threads()) {
-        omp_set_num_threads(paths_cnt);
-    }
-#endif //_OPENMP
-
-    #pragma omp parallel reduction(max:ecode)
     {
-        ecode = process_files(&s_ctx, paths, paths_cnt);
-    } // impicit barrier
-    path_array_free(paths, paths_cnt);
-    if (ecode != E_OK) {
-        goto free_buffers;
+        // use at most files-count threads
+        int max_threads = omp_get_max_threads();
+        assert(max_threads > 0);
+        if (ff_paths_cnt < (uint64_t)max_threads) {
+            num_threads = ff_paths_cnt;
+            omp_set_num_threads(num_threads);
+        } else {
+            num_threads = max_threads;
+        }
     }
+#endif  //_OPENMP
+    PRINT_DEBUG("using %d thread(s)", num_threads);
+    // send a number of used threads
+    MPI_Reduce(&num_threads, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
+               MPI_COMM_WORLD);
 
-    /*
-     * In case of aggregation or sorting, records were saved into the libnf
-     * memory and we need to postprocess and send them to the master.
-     */
-    ecode = postprocess(&s_ctx);
+    #pragma omp parallel
+    {
+        struct thread_ctx t_ctx = { 0 };
+        thread_ctx_init(&t_ctx);
+
+        /*
+         * Perform a parallel loop through all files.
+         * schedule(dynamic): dynamic scheduler is best for this use case, see
+         *   https://github.com/CESNET/fdistdump/issues/6
+         * nowait: don't wait for the other threads and start merging memory
+         *   immediately
+         */
+        uint64_t file_cntr = 0;
+        #pragma omp for schedule(dynamic) nowait
+        for (size_t i = 0; i < ff_paths_cnt; ++i) {
+            const char *const ff_path = ff_paths[i];
+
+            // process the flow file
+            process_file_mt(&s_ctx, &t_ctx, ff_path);
+            file_cntr++;
+
+            // report that another flow file has been processed
+            progress_report_next();
+
+        }  // end of the parallel loop through all files, no barrier
+        PRINT_DEBUG("thread processed %" PRIu64 " flow file(s)", file_cntr);
+
+        // atomic update of the thread-shared counters
+        processed_summ_share(&s_ctx.processed_summ, &t_ctx.processed_summ);
+        metadata_summ_share(&s_ctx.metadata_summ, &t_ctx.metadata_summ);
+
+        // postprocessing required in the parallel section
+        postprocess_mt(&s_ctx, &t_ctx);
+
+        thread_ctx_free(&t_ctx);
+    }  // impicit barrier
+
+    // path array is no longer needed
+    path_array_free(ff_paths, ff_paths_cnt);
 
     // reduce statistic values to the master
     MPI_Reduce(&s_ctx.processed_summ, NULL, STRUCT_PROCESSED_SUMM_ELEMENTS,
@@ -1296,12 +1151,5 @@ slave_main(int world_size, const struct cmdline_args *args_local)
     MPI_Reduce(&s_ctx.metadata_summ, NULL, STRUCT_METADATA_SUMM_ELEMENTS,
                MPI_UINT64_T, MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
 
-free_buffers:
-    free(s_ctx.buff[1]);
-    free(s_ctx.buff[0]);
-
-finalize:
-    slave_free(&s_ctx);
-
-    return ecode;
+    slave_ctx_free(&s_ctx);
 }

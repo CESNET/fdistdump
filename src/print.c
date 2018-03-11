@@ -153,33 +153,28 @@ print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
     }
     va_end(arg_list);
 
-    // add location, MPI, and OpenMP string only for the debug verbosity level
-    if (verbosity >= VERBOSITY_DEBUG) {
-        // append location information
-        SNPRINTF_APPEND(str_term, remaining, "\t[location: %s:%s():%d]", file,
-                        func, line);
+    // append location information
+    SNPRINTF_APPEND(str_term, remaining, "\t[location: %s:%s():%d]", file, func,
+                    line);
 
-        // append MPI information
-        int mpi_world_rank;
-        MPI_Comm_rank(MPI_COMM_WORLD, &mpi_world_rank);
-        int mpi_world_size;
-        MPI_Comm_size(MPI_COMM_WORLD, &mpi_world_size);
-        char mpi_processor_name[MPI_MAX_PROCESSOR_NAME + 1];
-        int mpi_processor_name_len;
-        MPI_Get_processor_name(mpi_processor_name, &mpi_processor_name_len);
-        mpi_processor_name[mpi_processor_name_len] = '\0';
-        SNPRINTF_APPEND(str_term, remaining, " [MPI: %d/%d %s]", mpi_world_rank,
-                        mpi_world_size, mpi_processor_name);
+    // append MPI information
+    int mpi_world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_world_rank);
+    int mpi_world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_world_size);
+    char mpi_processor_name[MPI_MAX_PROCESSOR_NAME + 1];
+    int mpi_processor_name_len;
+    MPI_Get_processor_name(mpi_processor_name, &mpi_processor_name_len);
+    mpi_processor_name[mpi_processor_name_len] = '\0';
+    SNPRINTF_APPEND(str_term, remaining, " [MPI: %d/%d %s]", mpi_world_rank + 1,
+                   mpi_world_size, mpi_processor_name);
 
 #ifdef _OPENMP
-        if (omp_in_parallel()) {  // append OpenMP information
-            SNPRINTF_APPEND(str_term, remaining, " [OpenMP: %d/%d]",
-                            omp_get_thread_num(), omp_get_num_threads());
-        }
+    SNPRINTF_APPEND(str_term, remaining, " [OpenMP: %d/%d]",
+                    omp_get_thread_num() + 1, omp_get_num_threads());
 #endif  // _OPENMP
-    }
 
-    // append newline and print string from the beginning
+    // append a newline and print string from the beginning
     SNPRINTF_APPEND(str_term, remaining, "%s", "\n");
     fputs(str, stream);
 }

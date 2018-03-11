@@ -96,22 +96,22 @@ char * working_mode_to_str(working_mode_t working_mode)
 /**
  * @brief Allocate a libnf memory and configure for specified fields.
  *
- * If sort_only_mode is false, the memory will be a hash table to perform
+ * If list_mode is false, the memory will be a hash table designated to perform
  * aggregation based on one or more aggregation keys.
- * If sort_only_mode is true, the memory will be a linked list to store each
- * record as it is.
+ * If list_mode is true, the memory will be a linked list designated to store
+ * each record as it is.
  * Destructor function libnf_mem_free() should be called to free the memory.
  *
  * @param[in] lnf_mem Double pointer to the libnf memory data type.
  * @param[in] fields Array of field_info structures based on which the memory
  *                   will be configured.
- * @param sort_only_mode Switches between hash table and linked list.
+ * @param list_mode Switches between hash table and linked list.
  *
  * @return E_OK on success, E_LNF on failure.
  */
 error_code_t
 libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
-               const bool sort_only_mode)
+               const bool list_mode)
 {
     assert(lnf_mem && fields);
 
@@ -139,14 +139,14 @@ libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
         }
     }
     //TODO
-    if (sort_only_mode) {
+    if (list_mode) {
         //assert(have_sort_field && !have_aggr_field);
     } else {
         assert(have_aggr_field);
     }
 
     // is it possible to apply a fast aggregation?
-    if (!sort_only_mode
+    if (!list_mode
             && fields[LNF_FLD_FIRST].id
             && ((fields[LNF_FLD_FIRST].flags & LNF_AGGR_FLAGS) == LNF_AGGR_MIN)
             && fields[LNF_FLD_LAST].id
@@ -186,9 +186,9 @@ libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
         }
     }
 
-    if (sort_only_mode) {
+    if (list_mode) {
         // switch the libnf memory to a linked list to disable aggregation
-        lnf_ret = lnf_mem_setopt(lnf_mem, LNF_OPT_LISTMODE, NULL, 0);
+        lnf_ret = lnf_mem_setopt(*lnf_mem, LNF_OPT_LISTMODE, NULL, 0);
         assert(lnf_ret == LNF_OK);
     }
 
@@ -223,6 +223,25 @@ libnf_mem_rec_cnt(lnf_mem_t *lnf_mem)
     }
 
     return rec_cntr;
+}
+
+/**
+ * @brief Sort the records in the memory if sort key is set
+ *
+ * It is not necessar to call this function to sort the records, because libnf
+ * does the sorting automatically with every access. This function triggers the
+ * sorting process by requiring first record, then it returns. This is useful
+ * for example for measuring how long does the sorting take.
+ *
+ * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
+ */
+void
+libnf_mem_sort(lnf_mem_t *lnf_mem)
+{
+    // initialize the libnf cursor
+    lnf_mem_cursor_t *cursor;
+    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
 }
 
 /**

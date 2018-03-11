@@ -39,9 +39,10 @@
 
 #pragma once
 
-
 #include "config.h"
 #include "common.h"
+
+#include <mpi.h>
 
 
 typedef enum {
@@ -100,6 +101,45 @@ extern verbosity_t verbosity;
             remaining_size -= _would_write; \
         } \
     } while (false)
+
+
+/**
+ * @brief TODO
+ *
+ * @param ecode
+ * @param ...
+ */
+#define ERROR(ecode, ...) \
+    do { \
+        print_msg(ecode, 0, "ERROR", __FILE__, __func__,  __LINE__, \
+                  __VA_ARGS__); \
+    } while (0)
+
+/**
+ * @brief TODO
+ *
+ * @param cond
+ * @param ecode
+ * @param ...
+ *
+ * @return 
+ */
+#define ERROR_IF(cond, ecode, ...) \
+    do { \
+        if (cond) { \
+            print_msg(ecode, 0, "ERROR", __FILE__, __func__,  __LINE__, \
+                      __VA_ARGS__); \
+            MPI_Abort(MPI_COMM_WORLD, ecode); \
+        } \
+    } while (0)
+
+#define WARN_IF(cond, ecode, ...) \
+    do { \
+        if (cond) { \
+            print_msg(ecode, 0, "WARNING", __FILE__, __func__,  __LINE__, \
+                      __VA_ARGS__); \
+        } \
+    } while (0)
 
 /** \brief Print error/warning/info/debug macros.
  *

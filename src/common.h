@@ -51,9 +51,9 @@
 #include <libnf.h>
 
 
-#define ROOT_PROC 0 //MPI root processor number
-#define MAX_STR_LEN 1024 //maximum length of a general string
-#define XCHG_BUFF_SIZE (1024 * 1024) //1 KiB
+#define ROOT_PROC 0  // MPI root processor rank
+#define MAX_STR_LEN 1024  // maximum length of a general string
+#define XCHG_BUFF_SIZE (1024 * 1024)  // 1 KiB
 
 //TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
@@ -92,14 +92,16 @@ typedef enum { //working modes
         MODE_META, //read only metadata
 } working_mode_t;
 
-enum { //tags
-        TAG_DATA, //message contains data (records)
-        TAG_STATS, //message contains statistics
-        TAG_PROGRESS, //message containg progress info
+enum {  // MPI point-to-point communication tags
+    TAG_LIST,
+    TAG_SORT,
+    TAG_AGGR,
+    TAG_TPUT1,
+    TAG_TPUT2,
+    TAG_TPUT3,
 
-        TAG_TPUT1,
-        TAG_TPUT2,
-        TAG_TPUT3,
+    TAG_STATS,     // messages contains statistics
+    TAG_PROGRESS,  // messages containg progress info
 };
 
 typedef enum { //progress bar type
@@ -245,6 +247,19 @@ libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
  */
 uint64_t
 libnf_mem_rec_cnt(lnf_mem_t *lnf_mem);
+
+/**
+ * @brief Sort the records in the memory if sort key is set
+ *
+ * It is not necessar to call this function to sort the records, because libnf
+ * does the sorting automatically with every access. This function triggers the
+ * sorting process by requiring first record, then it returns. This is useful
+ * for example for measuring how long does the sorting take.
+ *
+ * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
+ */
+void
+libnf_mem_sort(lnf_mem_t *lnf_mem);
 
 /**
  * @brief Free memory allocated by libnf_mem_init().

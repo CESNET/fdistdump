@@ -49,10 +49,7 @@
  * Entry point to the code executed only by the master process (usually with
  * rank 0).
  *
- * @param[in] world_size MPI_COMM_WORLD size.
  * @param[in] args Parsed command-line arguments.
- *
- * @return Error code.
  */
-error_code_t
-master_main(int world_size, const struct cmdline_args *args);
+void
+master_main(const struct cmdline_args *args);

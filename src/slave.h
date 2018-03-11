@@ -49,10 +49,7 @@
  * Entry point to the code executed only by the slave processes (usually with
  * ranks > 0).
  *
- * @param[in] world_size MPI_COMM_WORLD size.
  * @param[in] args Parsed command-line arguments.
- *
- * @return Error code.
  */
-error_code_t
-slave_main(int world_size, const struct cmdline_args *args);
+void
+slave_main(const struct cmdline_args *args);

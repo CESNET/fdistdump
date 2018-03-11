@@ -59,7 +59,7 @@ static const struct cmdline_args *args;
 
 static struct progress_bar_ctx {
     progress_bar_type_t type;
-    size_t slave_cnt;
+    size_t slave_cnt;         // TODO: is it needed?
     size_t *files_slave_cur;  // slave_cnt sized
     size_t *files_slave_sum;  // slave_cnt sized
     size_t files_cur;
@@ -71,6 +71,12 @@ static struct progress_bar_ctx {
 /*
  * Data types declarations.
  */
+struct master_ctx {  // thread-shared context
+    uint8_t *rec_buff[2];  // two record buffers for IO/communication overlap
+    uint64_t slave_cnt;   // number of slave processes
+    uint64_t slave_threads_cnt;  // number threads on all slaves
+};
+
 struct mem_write_callback_data {
     lnf_mem_t *lnf_mem;
     lnf_rec_t *lnf_rec;
@@ -82,43 +88,51 @@ struct mem_write_callback_data {
     size_t fields_cnt;        // number of fields present in the fields array
 };
 
-typedef error_code_t (*recv_callback_t)(uint8_t *data, size_t data_len,
+typedef error_code_t (*recv_callback_t)(uint8_t *data, xchg_rec_size_t data_len,
                                         void *user);
 
 
 /*
  * Static functions.
  */
-static error_code_t
-mem_write_callback(uint8_t *data, size_t data_len, void *user)
+static struct master_ctx *
+master_ctx_init(const uint64_t slave_threads_cnt)
 {
-    (void)data_len;  // unused
+    assert(slave_threads_cnt > 0);
 
-    struct mem_write_callback_data *mwcd =
-        (struct mem_write_callback_data *)user;
+    struct master_ctx *const m_ctx = calloc(1, sizeof (*m_ctx));
+    ERROR_IF(!m_ctx, E_MEM, "master context structure allocation failed");
 
-    size_t offset = 0;
-    for (size_t i = 0; i < mwcd->fields_cnt; ++i) {
-        int lnf_ret = lnf_rec_fset(mwcd->lnf_rec, mwcd->fields[i].id,
-                                   data + offset);
-        if (lnf_ret != LNF_OK) {
-            PRINT_ERROR(E_LNF, lnf_ret, "lnf_rec_fset()");
-            return E_LNF;
-        }
-        offset += mwcd->fields[i].size;
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    assert(world_size >= 2);  // master and at least one slave
+    m_ctx->slave_cnt = world_size - 1;  // all nodes without master
+    m_ctx->slave_threads_cnt = slave_threads_cnt;
+
+    // allocate the record buffers
+    for (uint8_t i = 0; i < 2; ++i) {
+        m_ctx->rec_buff[i] =
+            malloc(XCHG_BUFF_SIZE * sizeof (*m_ctx->rec_buff[i]));
+        ERROR_IF(!m_ctx->rec_buff[i], E_MEM,
+                 "master record buffer allocation failed");
     }
 
-    int lnf_ret = lnf_mem_write(mwcd->lnf_mem, mwcd->lnf_rec);
-    if (lnf_ret != LNF_OK) {
-        PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_write()");
-        return E_LNF;
-    }
-
-    return E_OK;
+    return m_ctx;
 }
 
+static void
+master_ctx_free(struct master_ctx *const m_ctx)
+{
+    assert(m_ctx);
+
+    for (uint8_t i = 0; i < 2; ++i) {
+        free(m_ctx->rec_buff[i]);
+    }
+}
+
+
 static error_code_t
-mem_write_raw_callback(uint8_t *data, size_t data_len, void *user)
+mem_write_raw_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
 {
     int lnf_ret = lnf_mem_write_raw((lnf_mem_t *)user, (char *)data, data_len);
     if (lnf_ret != LNF_OK) {
@@ -130,7 +144,7 @@ mem_write_raw_callback(uint8_t *data, size_t data_len, void *user)
 }
 
 static error_code_t
-print_rec_callback(uint8_t *data, size_t data_len, void *user)
+print_rec_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
 {
         (void)data_len;  // unused
         (void)user;  // unused
@@ -224,6 +238,8 @@ progress_bar_print(void)
  *
  * Progress bar initialization: gather file count from each slave etc.
  *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ *
  * @param type
  * @param dest
  * @param slave_cnt
@@ -309,6 +325,8 @@ progress_bar_refresh(int source)
 
 /**
  * @brief TODO
+ *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
  */
 static void
 progress_bar_loop(void)
@@ -344,226 +362,32 @@ progress_bar_finish(void)
 /**
  * @brief TODO
  *
- * @param slave_cnt
- * @param rec_limit
- * @param recv_callback
- * @param user
- *
- * @return 
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
  */
-static error_code_t
-irecv_loop(size_t slave_cnt, size_t rec_limit, recv_callback_t recv_callback,
-           void *user)
-{
-    assert(slave_cnt > 0 && recv_callback);
-
-    error_code_t ecode = E_OK;
-
-    /*
-     * There are two receive buffers for each slave. Each buffer is a part of a
-     * bich chunk of a continuous memory.
-     * The first buffer is passed to the nonblocking MPI receive function while
-     * the second one is being processed. After both these operations are
-     * completed, buffers are switched. Buffer switching (toggling) is
-     * independent for each slave, that's why array buff_idx[slave_cnt] is
-     * needed.
-     *
-     * buff_mem is partitioned in buff in the following manner:
-     *
-     * <--------- XCHG_BUFF_SIZE -------> <-------- XCHG_BUFF_SIZE -------->
-     * ---------------------------------------------------------------------
-     * |           buff[0][0]            |            buff[0][1]           |
-     * --------------------------------------------------------------------
-     * |           buff[1][0]            |            buff[1][1]           |
-     * ---------------------------------------------------------------------
-     * .                                                                   .
-     * .                                                                   .
-     * .                                                                   .
-     * ---------------------------------------------------------------------
-     * |     buff[slave_cnt - 1][0]      |     buff[slave_cnt - 1][1]      |
-     * ---------------------------------------------------------------------
-     */
-    uint8_t *const buff_mem = malloc(2 * XCHG_BUFF_SIZE * slave_cnt
-                                     * sizeof (*buff_mem));
-    if (!buff_mem) {
-        PRINT_ERROR(E_MEM, 0, "malloc()");
-        return E_MEM;
-    }
-
-    uint8_t *buff[slave_cnt][2];  // pointers to the buff_mem
-    MPI_Request requests[slave_cnt + 1];  // each slave plus one for progress
-    for (size_t i = 0; i < slave_cnt; ++i) {
-        requests[i] = MPI_REQUEST_NULL;
-
-        buff[i][0] = buff_mem + (i * 2 * XCHG_BUFF_SIZE);
-        buff[i][1] = buff[i][0] + XCHG_BUFF_SIZE;
-    }
-
-    bool buff_idx[slave_cnt]; //indexes to the currently used data buffers
-    memset(buff_idx, 0, slave_cnt * sizeof (buff_idx[0]));
-
-
-    // start a first individual nonblocking data receive from each slave
-    for (size_t i = 0; i < slave_cnt; ++i) {
-        uint8_t *free_buff = buff[i][buff_idx[i]];
-        MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1, TAG_DATA,
-                  MPI_COMM_WORLD, &requests[i]);
-    }
-    // start a first nonblocking progress report receive from any slave
-    if (progress_bar_ctx.files_sum > 0) {
-        MPI_Irecv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
-                  MPI_COMM_WORLD, &requests[slave_cnt]);
-    } else {
-        requests[slave_cnt] = MPI_REQUEST_NULL;
-    }
-
-    // data receiving loop
-    size_t rec_cntr = 0;  // processed records
-    bool limit_exceeded = false;
-    while (true) {
-        // wait for a data or status report from any slave
-        int slave_idx;
-        MPI_Status status;
-        MPI_Waitany(slave_cnt + 1, requests, &slave_idx, &status);
-
-        if (slave_idx == MPI_UNDEFINED) {  // no active slaves anymore
-            break;
-        }
-
-        if (status.MPI_TAG == TAG_PROGRESS) {
-            bool finished = progress_bar_refresh(status.MPI_SOURCE);
-
-            if (!finished) {  // expext next progress report
-                MPI_Irecv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
-                          MPI_COMM_WORLD, &requests[slave_cnt]);
-            }
-
-            continue;
-        }
-
-        assert(status.MPI_TAG == TAG_DATA);
-
-        // determine actual size of received message
-        int msg_size;
-        MPI_Get_count(&status, MPI_BYTE, &msg_size);
-        if (msg_size == 0) {
-            continue;  // empty message -> slave finished
-        }
-
-        // rec_ptr is a pointer to record in the data buffer
-        uint8_t *rec_ptr = buff[slave_idx][buff_idx[slave_idx]];
-        // msg_end is a pointer to the end of the last record
-        const uint8_t *const msg_end = rec_ptr + msg_size;
-
-        // toggle buffers and start receiving next message into the free one
-        buff_idx[slave_idx] = !buff_idx[slave_idx];
-        MPI_Irecv(buff[slave_idx][buff_idx[slave_idx]], XCHG_BUFF_SIZE,
-                  MPI_BYTE, status.MPI_SOURCE, TAG_DATA, MPI_COMM_WORLD,
-                  &requests[slave_idx]);
-
-        if (limit_exceeded) {
-            continue;  // do not process further, but continue receiving
-        }
-
-        /*
-         * Call the callback function for each record in the received message.
-         * Each record is prefixed with a 4 bytes long record size.
-         */
-        while (rec_ptr < msg_end) {
-            const uint32_t rec_size = *(uint32_t *)(rec_ptr);
-
-            rec_ptr += sizeof (rec_size); // shift the pointer to the data
-            ecode = recv_callback(rec_ptr, rec_size, user);
-            if (ecode != E_OK) {
-                goto free_db_mem;
-            }
-
-            rec_ptr += rec_size; // shift the pointer to the next record
-            if (++rec_cntr == rec_limit) {
-                limit_exceeded = true;
-                break;
-            }
-        }
-    }
-
-free_db_mem:
-    free(buff_mem);
-
-    PRINT_DEBUG("recv_loop: received %zu record(s)", rec_cntr);
-    return ecode;
-}
-
 static void
-irecv_loop_ng(size_t slave_cnt, size_t rec_limit, int mpi_tag,
-              recv_callback_t recv_callback, void *user)
+recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
+          const uint64_t rec_limit, const int mpi_tag,
+          const recv_callback_t recv_callback, void *const callback_data)
 {
-    assert(slave_cnt > 0 && recv_callback);
+    assert(m_ctx && source_cnt > 0 && recv_callback);
 
-    error_code_t ecode = E_OK;
+    // start a first nonblocking receive from any source
+    bool buff_idx = 0;
+    MPI_Request request;
+    MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
+              MPI_ANY_SOURCE, mpi_tag, MPI_COMM_WORLD, &request);
 
-    /*
-     * There are two receive buffers for each slave. Each buffer is a part of a
-     * bich chunk of a continuous memory.
-     * The first buffer is passed to the nonblocking MPI receive function while
-     * the second one is being processed. After both these operations are
-     * completed, buffers are switched. Buffer switching (toggling) is
-     * independent for each slave, that's why array buff_idx[slave_cnt] is
-     * needed.
-     *
-     * buff_mem is partitioned in buff in the following manner:
-     *
-     * <--------- XCHG_BUFF_SIZE -------> <-------- XCHG_BUFF_SIZE -------->
-     * ---------------------------------------------------------------------
-     * |           buff[0][0]            |            buff[0][1]           |
-     * --------------------------------------------------------------------
-     * |           buff[1][0]            |            buff[1][1]           |
-     * ---------------------------------------------------------------------
-     * .                                                                   .
-     * .                                                                   .
-     * .                                                                   .
-     * ---------------------------------------------------------------------
-     * |     buff[slave_cnt - 1][0]      |     buff[slave_cnt - 1][1]      |
-     * ---------------------------------------------------------------------
-     */
-    uint8_t *const buff_mem = malloc(2 * XCHG_BUFF_SIZE * slave_cnt
-                                     * sizeof (*buff_mem));
-    if (!buff_mem) {
-        PRINT_ERROR(E_MEM, 0, "malloc()");
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-
-    uint8_t *buff[slave_cnt][2];  // pointers to the buff_mem
-    MPI_Request requests[slave_cnt];  // one request for each slave
-    for (size_t i = 0; i < slave_cnt; ++i) {
-        requests[i] = MPI_REQUEST_NULL;
-
-        buff[i][0] = buff_mem + (i * 2 * XCHG_BUFF_SIZE);
-        buff[i][1] = buff[i][0] + XCHG_BUFF_SIZE;
-    }
-
-    bool buff_idx[slave_cnt]; //indexes to the currently used data buffers
-    memset(buff_idx, 0, slave_cnt * sizeof (buff_idx[0]));
-
-    // start a first individual nonblocking data receive from each slave
-    for (size_t i = 0; i < slave_cnt; ++i) {
-        uint8_t *free_buff = buff[i][buff_idx[i]];
-        MPI_Irecv(free_buff, XCHG_BUFF_SIZE, MPI_BYTE, i + 1, mpi_tag,
-                  MPI_COMM_WORLD, &requests[i]);
-    }
-
-    // data receiving loop
-    size_t rec_cntr = 0;  // processed records
+    // receiving loop
+    uint64_t rec_cntr = 0;  // processed records counter
+    uint64_t msg_cntr = 0;  // received messages counter
     bool limit_exceeded = false;
-    while (true) {
-        // wait for a message from any slave
-        int slave_idx;
+    uint64_t active_sources = source_cnt;
+    PRINT_DEBUG("recv_loop: receiving from %" PRIu64 " source(s)",
+                active_sources);
+    while (active_sources) {
+        // wait for a message from any source
         MPI_Status status;
-        MPI_Waitany(slave_cnt, requests, &slave_idx, &status);
-
-        if (slave_idx == MPI_UNDEFINED) {  // no active slaves anymore
-            break;
-        }
-
+        MPI_Wait(&request, &status);
         assert(status.MPI_TAG == mpi_tag);
 
         // determine actual size of received message
@@ -572,19 +396,26 @@ irecv_loop_ng(size_t slave_cnt, size_t rec_limit, int mpi_tag,
         assert(msg_size >= 0);
 
         if (msg_size == 0) {  // empty message is a terminator
-            continue;  // do not receive any more messages from this slave
-        }
+            active_sources--;
+            PRINT_DEBUG("recv_loop: received termination, %" PRIu64
+                        " source(s) remaining", active_sources);
 
-        // rec_ptr is a pointer to record in the data buffer
-        uint8_t *rec_ptr = buff[slave_idx][buff_idx[slave_idx]];
+            // start receiving next message into the same buffer
+            MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
+                      MPI_ANY_SOURCE, mpi_tag, MPI_COMM_WORLD, &request);
+            continue;  // do not receive any more messages from this source
+        }
+        msg_cntr++;  // do not include terminators in the counter
+
+        // rec_ptr is a pointer to record in the record buffer
+        uint8_t *rec_ptr = m_ctx->rec_buff[buff_idx];
         // msg_end is a pointer to the end of the last record
         const uint8_t *const msg_end = rec_ptr + msg_size;
 
         // toggle buffers and start receiving next message into the free buffer
-        buff_idx[slave_idx] = !buff_idx[slave_idx];
-        MPI_Irecv(buff[slave_idx][buff_idx[slave_idx]], XCHG_BUFF_SIZE,
-                  MPI_BYTE, status.MPI_SOURCE, mpi_tag, MPI_COMM_WORLD,
-                  &requests[slave_idx]);
+        buff_idx = !buff_idx;
+        MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
+                  MPI_ANY_SOURCE, mpi_tag, MPI_COMM_WORLD, &request);
 
         if (limit_exceeded) {
             continue;  // do not process further, but continue receiving
@@ -595,13 +426,12 @@ irecv_loop_ng(size_t slave_cnt, size_t rec_limit, int mpi_tag,
          * Each record is prefixed with a 4 bytes long record size.
          */
         while (rec_ptr < msg_end) {
-            const uint32_t rec_size = *(uint32_t *)(rec_ptr);
+            const xchg_rec_size_t rec_size = *(xchg_rec_size_t *)(rec_ptr);
 
-            rec_ptr += sizeof (rec_size); // shift the pointer to the data
-            ecode = recv_callback(rec_ptr, rec_size, user);
-            if (ecode != E_OK) {
-                goto free_db_mem;
-            }
+            rec_ptr += sizeof (rec_size);  // shift the pointer to the record
+            const error_code_t ecode = recv_callback(rec_ptr, rec_size,
+                                                     callback_data);
+            ERROR_IF(ecode != E_OK, ecode, "recv_callback() failed");
 
             rec_ptr += rec_size; // shift the pointer to the next record
             if (++rec_cntr == rec_limit) {
@@ -611,11 +441,8 @@ irecv_loop_ng(size_t slave_cnt, size_t rec_limit, int mpi_tag,
         }
     }
 
-free_db_mem:
-    free(buff_mem);
-
-    PRINT_DEBUG("irecv_loop_ng: received %zu record(s) with tag %d", rec_cntr,
-                mpi_tag);
+    PRINT_DEBUG("recv_loop: received %" PRIu64 " message(s) with tag %d "
+                "containing %" PRIu64 " records", msg_cntr, mpi_tag, rec_cntr);
 }
 
 
@@ -643,8 +470,8 @@ free_db_mem:
 /**
  * @brief Master's TPUT phase 1: find the so called bottom.
  *
- * The libnf memory should contain from 0 to slave_cnt * N sorted and aggregated
- * records (partial sums). This function finds the bottom, which is:
+ * The libnf memory should contain from 0 to source_cnt * N sorted and
+ * aggregated records (partial sums). This function finds the bottom, which is:
  *   - 0 if there are no records,
  *   - the value of the last partial sum if there are less then N records,
  *   - the value of the Nth partial sum if there are N or more records (this is
@@ -703,25 +530,26 @@ tput_phase_1_find_bottom(lnf_mem_t *const lnf_mem)
 /**
  * @brief Master's TPUT phase 1: establish a lower bound on the true bottom.
  *
- * After receiving the data from all slaves, the master calculates the partial
+ * After receiving the data from all sources, the master calculates the partial
  * sums of the objects. It then looks at the N highest partial sums, and takes
  * the Nth one as the lower bound aka ``phase 1 bottom''.
  *
+ * @param[in] m_ctx Master context.
  * @param[out] lnf_mem Empty libnf memory.
- * @param[in] slave_cnt Number of slave nodes.
  *
  * @return Value of the phase 1 bottom.
  */
 static uint64_t
-tput_phase_1(lnf_mem_t *const lnf_mem, const size_t slave_cnt)
+tput_phase_1(struct master_ctx *const m_ctx, lnf_mem_t *const lnf_mem)
 {
-    assert(lnf_mem && slave_cnt > 0);
+    assert(m_ctx && lnf_mem);
     const uint64_t lnf_mem_rec_cnt = libnf_mem_rec_cnt(lnf_mem);
     assert(lnf_mem_rec_cnt == 0);
 
-    // receive the top N items from each slave and aggregate (aggregation will
+    // receive the top N items from each source and aggregate (aggregation will
     // calculate the partial sums)
-    irecv_loop_ng(slave_cnt, 0, TAG_TPUT1, mem_write_raw_callback, lnf_mem);
+    recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT1,
+              mem_write_raw_callback, lnf_mem);
 
     const uint64_t bottom = tput_phase_1_find_bottom(lnf_mem);
 
@@ -732,22 +560,24 @@ tput_phase_1(lnf_mem_t *const lnf_mem, const size_t slave_cnt)
 /**
  * @brief Master's TPUT phase 2: prune away ineligible objects.
  *
- * The master now sets a threshold = (phase 1 bottom / slave_cnt), and sends it
- * to all slaves.
- * The master the receives all records (from all slaves) satisfying the
+ * The master now sets a threshold = (phase 1 bottom / source_cnt), and sends it
+ * to all sources.
+ * The master the receives all records (from all sources) satisfying the
  * threshold. At the end of this round-trip, the master has seen records in the
  * true Top-N set. This is a set S.
  *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ *
+ * @param[in] m_ctx Master context.
  * @param[out] lnf_mem Pointer to the libnf memory. Will be cleared and filled
  *                     with phase 2 top N records.
- * @param[in] slave_cnt Number of slave nodes.
  * @param[in] phase_1_bottom Value of the phase 1 bottom.
  */
 static void
-tput_phase_2(lnf_mem_t **const lnf_mem, const size_t slave_cnt,
+tput_phase_2(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem,
              const uint64_t phase_1_bottom)
 {
-    assert(lnf_mem && *lnf_mem && slave_cnt > 0);
+    assert(m_ctx && lnf_mem && *lnf_mem);
 
     // clear the libnf memory
     libnf_mem_free(*lnf_mem);
@@ -755,13 +585,14 @@ tput_phase_2(lnf_mem_t **const lnf_mem, const size_t slave_cnt,
     assert(ecode == E_OK);
 
     // calculate threshold from the phase 1 bottom and broadcast it
-    uint64_t threshold = ceil((double)phase_1_bottom / slave_cnt);
+    uint64_t threshold = ceil((double)phase_1_bottom / m_ctx->slave_threads_cnt);
     MPI_Bcast(&threshold, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
     PRINT_DEBUG("master TPUT phase 2: broadcasted threshold = %" PRIu64,
                 threshold);
 
     // receive all records satisfying the threshold
-    irecv_loop_ng(slave_cnt, 0, TAG_TPUT2, mem_write_raw_callback, *lnf_mem);
+    recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT2,
+              mem_write_raw_callback, *lnf_mem);
 
     PRINT_DEBUG("master TPUT phase 2: done");
 }
@@ -773,15 +604,17 @@ tput_phase_2(lnf_mem_t **const lnf_mem, const size_t slave_cnt,
  * master then then calculate the exact sum of objects in S, and select the top
  * N objects from the set. Those objects are the true top N objects.
  *
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ *
+ * @param[in] m_ctx Master context.
  * @param[in,out] lnf_mem Pointer to the libnf memory with phase 2 top N
  *                        records. Will be cleared and filled with the true top
  *                        N records.
- * @param[in] slave_cnt Number of slave nodes.
  */
 static void
-tput_phase_3(lnf_mem_t **const lnf_mem, const size_t slave_cnt)
+tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
 {
-    assert(lnf_mem && *lnf_mem && slave_cnt > 0);
+    assert(m_ctx && lnf_mem && *lnf_mem);
 
     // query and broadcast the number of records in the memory
     uint64_t rec_cnt = libnf_mem_rec_cnt(*lnf_mem);
@@ -812,7 +645,8 @@ tput_phase_3(lnf_mem_t **const lnf_mem, const size_t slave_cnt)
     error_code_t ecode = libnf_mem_init(lnf_mem, args->fields, false);
     assert(ecode == E_OK);
 
-    irecv_loop_ng(slave_cnt, 0, TAG_TPUT3, mem_write_raw_callback, *lnf_mem);
+    recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT3,
+              mem_write_raw_callback, *lnf_mem);
     PRINT_DEBUG("master TPUT phase 3: done");
 }
 /**
@@ -822,31 +656,24 @@ tput_phase_3(lnf_mem_t **const lnf_mem, const size_t slave_cnt)
 
 /**
  * @brief TODO
- *
- * @param slave_cnt
- *
- * @return 
  */
-static error_code_t
-list_main(size_t slave_cnt)
+static void
+list_main(struct master_ctx *const m_ctx)
 {
-    assert(slave_cnt > 0);
-    return irecv_loop(slave_cnt, args->rec_limit, print_rec_callback, NULL);
+    assert(m_ctx);
+
+    recv_loop(m_ctx, m_ctx->slave_threads_cnt, args->rec_limit, TAG_LIST,
+              print_rec_callback, NULL);
 }
 
 /**
  * @brief TODO
- *
- * @param slave_cnt
- *
- * @return 
  */
-static error_code_t
-sort_main(size_t slave_cnt)
+static void
+sort_main(struct master_ctx *const m_ctx)
 {
-    assert(slave_cnt > 0);
+    assert(m_ctx);
 
-    error_code_t ecode = E_OK;
     struct mem_write_callback_data mwcd = { 0 };
 
     // fill the compressed fields array
@@ -860,88 +687,55 @@ sort_main(size_t slave_cnt)
     }
 
     // initialize the libnf sorting memory and set its parameters
-    ecode = libnf_mem_init(&mwcd.lnf_mem, args->fields, true);
-    if (ecode != E_OK) {
-        return ecode;
-    }
+    libnf_mem_init(&mwcd.lnf_mem, args->fields, true);
 
     // initialize empty libnf record for writing
     int lnf_ret = lnf_rec_init(&mwcd.lnf_rec);
-    if (lnf_ret != LNF_OK) {
-        ecode = E_LNF;
-        PRINT_ERROR(ecode, lnf_ret, "lnf_rec_init()");
-        goto free_lnf_mem;
-    }
+    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
 
     // fill the libnf linked list memory with records received from the slaves
-    if (!args->rec_limit) {
-        // no output limit, have to receive all records from all slaves
-        // callback cannot use raw records because slaves do not read raw
-        // records
-        ecode = irecv_loop(slave_cnt, 0, mem_write_callback, &mwcd);
-        if (ecode != E_OK) {
-            goto free_lnf_rec;
-        }
-    } else {
-        // output limit set, have to receive at most limit-number of records
-        // from each slave
-        ecode = irecv_loop(slave_cnt, 0, mem_write_raw_callback,
-                           mwcd.lnf_mem);
-        if (ecode != E_OK) {
-            goto free_lnf_rec;
-        }
-    }
+    recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_SORT,
+              mem_write_raw_callback, mwcd.lnf_mem);
+
+    // sort record in the libnf memory (not needed)
+    PRINT_DEBUG("sorting records in master's libnf memory...");
+    libnf_mem_sort(mwcd.lnf_mem);
+    PRINT_DEBUG("sorting records in master's libnf memory done");
 
     // print all records in the libnf linked list memory
-    ecode = print_mem(mwcd.lnf_mem, args->rec_limit);
+    print_mem(mwcd.lnf_mem, args->rec_limit);
 
-free_lnf_rec:
     lnf_rec_free(mwcd.lnf_rec);
-free_lnf_mem:
     libnf_mem_free(mwcd.lnf_mem);
-
-    return ecode;
 }
 
 /**
  * @brief TODO
- *
- * @param slave_cnt
- *
- * @return 
  */
-static error_code_t
-aggr_main(size_t slave_cnt)
+static void
+aggr_main(struct master_ctx *const m_ctx)
 {
-    assert(slave_cnt > 0);
-
-    error_code_t ecode = E_OK;
+    assert(m_ctx);
 
     // initialize aggregation memory and set its parameters
     lnf_mem_t *lnf_mem;
-    ecode = libnf_mem_init(&lnf_mem, args->fields, false);
-    assert(ecode == E_OK);
+    libnf_mem_init(&lnf_mem, args->fields, false);
 
     if (args->use_tput) {
         // use the TPUT Top-N algorithm
-        const uint64_t phase_1_bottom = tput_phase_1(lnf_mem, slave_cnt);
-        tput_phase_2(&lnf_mem, slave_cnt, phase_1_bottom);
-        tput_phase_3(&lnf_mem, slave_cnt);
+        const uint64_t phase_1_bottom = tput_phase_1(m_ctx, lnf_mem);
+        tput_phase_2(m_ctx, &lnf_mem, phase_1_bottom);
+        tput_phase_3(m_ctx, &lnf_mem);
     } else {
         // fill the libnf hash table memory with records received from the slaves
-        ecode = irecv_loop(slave_cnt, 0, mem_write_raw_callback, lnf_mem);
-        if (ecode != E_OK) {
-            goto free_lnf_mem;
-        }
+        recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_AGGR,
+                  mem_write_raw_callback, lnf_mem);
     }
 
     // print all records the lnf hash table memory
-    ecode = print_mem(lnf_mem, args->rec_limit);
+    print_mem(lnf_mem, args->rec_limit);
 
-free_lnf_mem:
     libnf_mem_free(lnf_mem);
-
-    return ecode;
 }
 
 
@@ -954,39 +748,45 @@ free_lnf_mem:
  * Entry point to the code executed only by the master process (usually with
  * rank 0).
  *
- * @param[in] world_size MPI_COMM_WORLD size.
- * @param[in] args Parsed command-line arguments.
+ * This function is not thread-safe without MPI_THREAD_MULTIPLE.
  *
- * @return Error code.
+ * @param[in] args Parsed command-line arguments.
  */
-error_code_t
-master_main(int world_size, const struct cmdline_args *args_local)
+void
+master_main(const struct cmdline_args *args_local)
 {
-    assert(world_size > 1 && args_local);
+    assert(args_local);
 
-    error_code_t ecode = E_OK;
     double duration = -MPI_Wtime();  // start the time measurement
-    size_t slave_cnt = world_size - 1; // all nodes without master
     args = args_local;  // share the command-line arguments by a global variable
+
+    // get a sum of number of threads used on all slaves
+    int slave_threads_cnt = 0;
+    MPI_Reduce(MPI_IN_PLACE, &slave_threads_cnt, 1, MPI_INT, MPI_SUM, ROOT_PROC,
+               MPI_COMM_WORLD);
+    assert(slave_threads_cnt > 0);
+
+    // initialize a master_ctx structure
+    struct master_ctx *const m_ctx =
+        master_ctx_init((uint64_t)slave_threads_cnt);
+    PRINT_DEBUG("using %d slave(s), %d slave thread(s) in total",
+                m_ctx->slave_cnt, m_ctx->slave_threads_cnt);
 
     output_setup(args->output_params, args->fields);
 
-    ecode = progress_bar_init(args->progress_bar_type, args->progress_bar_dest,
-                              slave_cnt);
-    if (ecode != E_OK) {
-        goto finalize;
-    }
+    progress_bar_init(args->progress_bar_type, args->progress_bar_dest,
+                      m_ctx->slave_cnt);
 
     // send, receive, process according to the specified working mode
     switch (args->working_mode) {
     case MODE_LIST:
-        ecode = list_main(slave_cnt);
+        list_main(m_ctx);
         break;
     case MODE_SORT:
-        ecode = sort_main(slave_cnt);
+        sort_main(m_ctx);
         break;
     case MODE_AGGR:
-        ecode = aggr_main(slave_cnt);
+        aggr_main(m_ctx);
         break;
     case MODE_META:
         // receive only the progress
@@ -1011,7 +811,5 @@ master_main(int world_size, const struct cmdline_args *args_local)
     print_processed_summ(&processed_summ, duration);
     print_metadata_summ(&metadata_summ);
 
-
-finalize:
-    return ecode;
+    master_ctx_free(m_ctx);
 }
