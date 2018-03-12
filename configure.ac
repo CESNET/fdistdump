@@ -71,11 +71,14 @@ AC_SYS_LARGEFILE
 
 
 # checks for libraries
+AC_CHECK_LIB([m], [ceil], [], [AC_MSG_ERROR([cannot find the math library])])
+
 ## libnf
 AC_CHECK_LIB([nf], [lnf_open], [], [AC_MSG_ERROR([cannot find the libnf \
 library (see https://github.com/VUTBR/libnf)])])
 AC_CHECK_HEADER([libnf.h], [], [AC_MSG_ERROR([cannot find the libnf.h header \
 file])])
+
 ## MPI
 ## check version 1
 AC_SEARCH_LIBS([MPI_Send], [mpi], [],
