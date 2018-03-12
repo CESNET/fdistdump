@@ -39,18 +39,21 @@
 
 #pragma once
 
-#include "common.h"
-#include "output.h"
+#include <inttypes.h>  // for fixed-width integer types
+#include <stdbool.h>   // for bool
+#include <time.h>      // for struct tm
 
-#include <stddef.h> //size_t
-#include <stdbool.h>
+#include <libnf.h>     // for LNF_FLD_TERM_
+
+#include "common.h"    // for error_code_t, field_info, progress...
+#include "output.h"    // for output_params
 
 
 struct cmdline_args {
     working_mode_t working_mode;  // working mode (records, aggregation, topN)
 
     char *const *paths;  // paths_cnt sized array of user specified paths
-    size_t paths_cnt;
+    uint64_t paths_cnt;
     struct tm time_begin;  // beginning of the time range
     struct tm time_end;    // end of the time range
 
@@ -59,7 +62,7 @@ struct cmdline_args {
     int fields_sort_dir;  // TODO: remove
 
     char *filter_str;  // input filter expression string
-    size_t rec_limit;  // output record limit
+    uint64_t rec_limit;  // output record limit
     bool use_tput;  // enables the TPUT algorithm
     bool use_bfindex;    // enables the Bloom filter indexes
 

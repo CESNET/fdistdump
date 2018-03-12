@@ -39,9 +39,8 @@
 
 #pragma once
 
-#include "common.h"
-#include "arg_parse.h"
-
+// forward declarations
+struct cmdline_args;
 
 /**
  * @brief Slave's process entry point.

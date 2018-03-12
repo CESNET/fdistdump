@@ -39,23 +39,20 @@
 
 #pragma once
 
-#include "config.h"
+#include <assert.h>             // for assert
+#include <inttypes.h>           // for fixed-width integer types
+#include <stdbool.h>            // for bool
+#include <stddef.h>             // for NULL, size_t
+#include <time.h>               // for tzset, mktime
 
-#include <stddef.h> //size_t
-#include <time.h> //struct tm
-#include <stdbool.h>
-#include <inttypes.h> //exact width integer types
-#include <assert.h>
-
-#include <mpi.h>
-#include <libnf.h>
+#include <libnf.h>              // for lnf_mem_t
+#include <mpi.h>                // for MPI_Comm
 
 
 #define ROOT_PROC 0  // MPI root processor rank
 #define MAX_STR_LEN 1024  // maximum length of a general string
 #define XCHG_BUFF_SIZE (1024 * 1024)  // 1 KiB
 
-//TODO: move to the configuration file and as parameter options
 #define FLOW_FILE_ROTATION_INTERVAL 300 //seconds
 #define FLOW_FILE_PATH_FORMAT "%Y/%m/%d"
 #define FLOW_FILE_NAME_PREFIX "lnf"
@@ -64,6 +61,10 @@
 #define FLOW_FILE_FORMAT FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT
 
 
+// forward declarations
+struct tm;
+
+// exported global variabled
 extern MPI_Comm mpi_comm_main;
 extern MPI_Comm mpi_comm_progress_bar;
 

@@ -37,19 +37,24 @@
  * if advised of the possibility of such damage.
  */
 
-#include "common.h"
 #include "master.h"
-#include "output.h"
-#include "print.h"
 
-#include <string.h>
-#include <stdbool.h>
-#include <assert.h>
-#include <errno.h>
-#include <math.h>  // ceil()
+#include <assert.h>             // for assert
+#include <errno.h>              // for errno
+#include <inttypes.h>           // for fixed-width integer types
+#include <math.h>               // for ceil
+#include <stdbool.h>            // for false, bool, true
+#include <stdio.h>              // for fprintf, fclose, fflush, fopen, rewind
+#include <stdlib.h>             // for free, calloc, malloc
+#include <string.h>             // for strcmp, strerror, size_t, NULL
 
-#include <mpi.h>
-#include <libnf.h>
+#include <libnf.h>              // for LNF_OK, lnf_mem_t, lnf_mem_first_c
+#include <mpi.h>                // for MPI_Bcast, MPI_Irecv, MPI_Reduce, MPI...
+
+#include "arg_parse.h"          // for cmdline_args
+#include "common.h"             // for libnf_mem_free, libnf_mem_init, ...
+#include "output.h"             // for print_mem, output_setup, ...
+#include "print.h"              // for PRINT_DEBUG, ERROR_IF, PRINT_WARNING
 
 
 /*

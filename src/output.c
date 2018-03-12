@@ -37,17 +37,26 @@
  * if advised of the possibility of such damage.
  */
 
-
-#include "common.h"
 #include "output.h"
-#include "print.h"
 
-#include <stdio.h>
-#include <assert.h>
-#include <string.h>
+#include <assert.h>             // for assert
+#include <inttypes.h>           // for fixed-width integer types
+#include <stdio.h>              // for printf, snprintf, putchar, puts
+#include <string.h>             // for strlen
+#include <time.h>               // for strftime, gmtime, localtime
+
+#include <arpa/inet.h>          // for inet_ntop
+#include <features.h>           // for __GLIBC_MINOR__, __GLIBC__
+#include <netinet/in.h>         // for ntohl, INET6_ADDRSTRLEN, IN6_IS_ADDR_...
+#include <sys/socket.h>         // for AF_INET, AF_INET6
+
+#include "common.h"             // for metadata_summ, processed_summ, ARRAY_...
+#include "print.h"              // for SNPRINTF_APPEND, PRINT_ERROR
+
+
 /*
- * Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED
- * can use undefined s6_addr32" GNU C library bug (fixed in version 2.25).
+ * Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED can
+ * use undefined s6_addr32" GNU C library bug (fixed in version 2.25).
  * https://sourceware.org/bugzilla/show_bug.cgi?id=16421
  */
 #if __GLIBC__ <= 2 && __GLIBC_MINOR__ < 25
@@ -73,9 +82,9 @@ static char global_str[MAX_STR_LEN];
 static struct output_params output_params; //output parameters
 static struct {
         int id;
-        size_t size;
+        uint64_t size;
 } fields[LNF_FLD_TERM_]; //fields array compressed for faster access
-static size_t fields_cnt = 0; //number of fields present in fields array
+static uint64_t fields_cnt = 0; //number of fields present in fields array
 static bool first_item = true; //first item will not print '\n'
 
 static const char *ip_proto_str_table[] = {
@@ -291,7 +300,7 @@ timestamp_to_str(const uint64_t *ts)
             output_params.ts_localtime ? localtime : gmtime;
         const time_t sec = *ts / 1000;
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
-        const size_t written = strftime(global_str, sizeof (global_str),
+        const uint64_t written = strftime(global_str, sizeof (global_str),
                                         output_params.ts_conv_str,
                                         timeconv(&sec));
 #pragma GCC diagnostic warning "-Wformat-nonliteral"
@@ -315,7 +324,7 @@ timestamp_to_str(const uint64_t *ts)
 static const char * double_volume_to_str(const double *volume)
 {
         double volume_conv = *volume;
-        size_t unit_table_idx = 0;
+        uint64_t unit_table_idx = 0;
         const char **unit_table;
 
         switch (output_params.volume_conv) {
@@ -359,7 +368,7 @@ static const char * double_volume_to_str(const double *volume)
 static const char * volume_to_str(const uint64_t *volume)
 {
         double volume_conv = *volume;
-        size_t unit_table_idx = 0;
+        uint64_t unit_table_idx = 0;
         const char **unit_table;
 
         switch (output_params.volume_conv) {
@@ -402,7 +411,7 @@ static const char * volume_to_str(const uint64_t *volume)
 
 static const char * tcp_flags_to_str(const uint8_t *flags)
 {
-        size_t idx = 0;
+        uint64_t idx = 0;
 
         switch (output_params.tcp_flags_conv) {
         case OUTPUT_TCP_FLAGS_CONV_NONE:
@@ -464,9 +473,9 @@ static const char * duration_to_str(const uint64_t *duration)
 
         case OUTPUT_DURATION_CONV_STR:
         {
-                size_t msec;
-                size_t sec;
-                size_t min;
+                uint64_t msec;
+                uint64_t sec;
+                uint64_t min;
 
                 msec = dur_conv % 1000;
                 dur_conv /= 1000;
@@ -601,7 +610,7 @@ mylnf_brec_to_str(const lnf_brec1_t *brec)
 {
     static char res[MAX_STR_LEN];
     char *str_term = res;
-    size_t remaining = sizeof (res);
+    uint64_t remaining = sizeof (res);
 
     switch (output_params.format) {
     case OUTPUT_FORMAT_PRETTY:
@@ -779,8 +788,8 @@ static const char * field_to_str(int field, const void *data)
         return to_str_func(data);
 }
 
-static void print_field(const char *string, size_t string_width,
-                size_t space_width, bool last)
+static void print_field(const char *string, uint64_t string_width,
+                uint64_t space_width, bool last)
 {
         if (last) { //no spacing or CSV separator after last field
                 puts(string); //appends newline
@@ -810,7 +819,7 @@ void output_setup(struct output_params op, const struct field_info *fi)
         output_params = op;
 
         /* Fill fields array. */
-        for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+        for (uint64_t i = 0; i < LNF_FLD_TERM_; ++i) {
                 if (fi[i].id == 0) {
                         continue; //field is not present
                 }
@@ -823,9 +832,9 @@ void output_setup(struct output_params op, const struct field_info *fi)
 
 void print_rec(const uint8_t *data)
 {
-        size_t off = 0;
+        uint64_t off = 0;
         static bool first_rec = true;
-        static size_t col_width[LNF_FLD_TERM_];
+        static uint64_t col_width[LNF_FLD_TERM_];
 
 
         if (output_params.print_records != OUTPUT_ITEM_YES) {
@@ -835,10 +844,10 @@ void print_rec(const uint8_t *data)
         if (first_rec) {
                 first_item = first_item ? false : (putchar('\n'), false);
 
-                for (size_t i = 0; i < fields_cnt; ++i) {
+                for (uint64_t i = 0; i < fields_cnt; ++i) {
                         const char *header_str = field_get_name(fields[i].id);
-                        const size_t header_str_len = strlen(header_str);
-                        const size_t field_str_len = strlen(field_to_str(
+                        const uint64_t header_str_len = strlen(header_str);
+                        const uint64_t field_str_len = strlen(field_to_str(
                                                 fields[i].id, data + off));
 
                         col_width[i] = header_str_len > field_str_len ?
@@ -857,7 +866,7 @@ void print_rec(const uint8_t *data)
         }
 
         /* Loop through the fields in one record. */
-        for (size_t i = 0; i < fields_cnt; ++i) {
+        for (uint64_t i = 0; i < fields_cnt; ++i) {
                 print_field(field_to_str(fields[i].id, data + off),
                                 col_width[i], PRETTY_PRINT_COL_WIDTH -
                                 COL_WIDTH_RESERVE,
@@ -866,14 +875,14 @@ void print_rec(const uint8_t *data)
         }
 }
 
-error_code_t print_mem(lnf_mem_t *mem, size_t limit)
+error_code_t print_mem(lnf_mem_t *mem, uint64_t limit)
 {
         lnf_rec_t *rec; //record = line
-        size_t rec_cntr = 0; //aka lines counter
+        uint64_t rec_cntr = 0; //aka lines counter
 
         lnf_mem_cursor_t *cursor; //current record (line) cursor
-        size_t fld_max_size = 0; //maximum data size length in bytes
-        size_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
+        uint64_t fld_max_size = 0; //maximum data size length in bytes
+        uint64_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
 
 
         if (output_params.print_records != OUTPUT_ITEM_YES) {
@@ -892,8 +901,8 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
          * Find out maximum data type size of present fields, length of headers
          * and last present field ID.
          */
-        for (size_t i = 0; i < fields_cnt; ++i) {
-                size_t header_str_len = strlen(field_get_name(fields[i].id));
+        for (uint64_t i = 0; i < fields_cnt; ++i) {
+                uint64_t header_str_len = strlen(field_get_name(fields[i].id));
 
                 MAX_ASSIGN(fld_max_size, fields[i].size);
                 MAX_ASSIGN(data_max_strlen[fields[i].id], header_str_len);
@@ -906,8 +915,8 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 
                 lnf_mem_read_c(mem, cursor, rec);
 
-                for (size_t i = 0; i < fields_cnt; ++i) { //column loop
-                        size_t data_str_len;
+                for (uint64_t i = 0; i < fields_cnt; ++i) { //column loop
+                        uint64_t data_str_len;
 
                         //XXX: lnf_rec_fget() may return LNF_ERR_UNKFLD even if
                         //field is present (e.g. if duration is zero).
@@ -926,7 +935,7 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 
 
         /* Actual printing: header. */
-        for (size_t i = 0; i < fields_cnt; ++i) { //column loop
+        for (uint64_t i = 0; i < fields_cnt; ++i) { //column loop
                 print_field(field_get_name(fields[i].id),
                                 data_max_strlen[fields[i].id],
                                 PRETTY_PRINT_COL_WIDTH, i == (fields_cnt - 1));
@@ -939,7 +948,7 @@ error_code_t print_mem(lnf_mem_t *mem, size_t limit)
 
                 lnf_mem_read_c(mem, cursor, rec);
 
-                for (size_t i = 0; i < fields_cnt; ++i) { //column loop
+                for (uint64_t i = 0; i < fields_cnt; ++i) { //column loop
                         //XXX: see above lnf_rec_fget()
                         lnf_rec_fget(rec, fields[i].id, buff);
 

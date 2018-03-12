@@ -37,29 +37,31 @@
  * if advised of the possibility of such damage.
  */
 
-#include "common.h"
+#include "config.h"
 #include "slave.h"
-#include "path_array.h"
-#include "print.h"
-#ifdef HAVE_LIBBFINDEX
-#include "bfindex.h"
-#endif  // HAVE_LIBBFINDEX
 
-#include <string.h> //strlen()
-#include <assert.h>
-#include <stdbool.h>
-#include <time.h>
-#include <errno.h>
-#include <limits.h> //PATH_MAX
+#include <assert.h>             // for assert
+#include <inttypes.h>           // for fixed-width integer types
+#include <stdbool.h>            // for bool, true, false
+#include <stdint.h>             // for SIZE_MAX, UINT32_MAX
+#include <stdlib.h>             // for free, malloc
+#include <string.h>             // for size_t, NULL, strlen
 
+#include <ffilter.h>            // for ff_t
+#include <libnf.h>              // for lnf_info, LNF_OK, lnf_rec_fget, LNF_EOF
+#include <mpi.h>                // for MPI_Wait, MPI_Bcast, MPI_Isend, MPI_R...
 #ifdef _OPENMP
 #include <omp.h>
 #endif //_OPENMP
-#include <mpi.h>
-#include <libnf.h>
-#include <ffilter.h>
-#include <dirent.h> //list directory
-#include <sys/stat.h> //stat()
+
+#include "arg_parse.h"          // for cmdline_args
+#ifdef HAVE_LIBBFINDEX
+#include "bfindex.h"            // for bfindex_contains, bfindex_flow_to_ind...
+#endif  // HAVE_LIBBFINDEX
+#include "common.h"             // for metadata_summ, ROOT_PROC, mpi_comm_main
+#include "path_array.h"         // for path_array_free
+#include "print.h"              // for PRINT_DEBUG, PRINT_WARNING, PRINT_INFO
+
 
 
 #if LNF_MAX_RAW_LEN > XCHG_BUFF_SIZE
@@ -307,7 +309,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
     assert(private && lnf_file);
 
     struct metadata_summ tmp;
-    int lnf_ret;
+    int lnf_ret = LNF_OK;
 
     // flows
     lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS, &tmp.flows,
@@ -320,7 +322,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
                         sizeof (tmp.flows_icmp));
     lnf_ret |= lnf_info(lnf_file, LNF_INFO_FLOWS_OTHER, &tmp.flows_other,
                         sizeof (tmp.flows_other));
-    assert(lnf_ret = LNF_OK);
+    assert(lnf_ret == LNF_OK);
 
     if (tmp.flows != tmp.flows_tcp + tmp.flows_udp + tmp.flows_icmp
             + tmp.flows_other) {
@@ -345,7 +347,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
                         sizeof (tmp.pkts_icmp));
     lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS_OTHER, &tmp.pkts_other,
                         sizeof (tmp.pkts_other));
-    assert(lnf_ret = LNF_OK);
+    assert(lnf_ret == LNF_OK);
 
     if (tmp.pkts != tmp.pkts_tcp + tmp.pkts_udp + tmp.pkts_icmp
             + tmp.pkts_other) {
@@ -370,7 +372,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
                         sizeof (tmp.bytes_icmp));
     lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES_OTHER, &tmp.bytes_other,
                         sizeof (tmp.bytes_other));
-    assert(lnf_ret = LNF_OK);
+    assert(lnf_ret == LNF_OK);
 
     if (tmp.bytes != tmp.bytes_tcp + tmp.bytes_udp + tmp.bytes_icmp
             + tmp.bytes_other) {

@@ -37,20 +37,21 @@
  * if advised of the possibility of such damage.
  */
 
-
-#include "common.h"
 #include "print.h"
 
-#include <stdarg.h> //variable argument list
-#include <assert.h>
+#include <assert.h>  // for assert
+#include <stdarg.h>  // for va_arg, va_end, va_list, va_start
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif //_OPENMP
-#include <mpi.h>
+#include <libnf.h>   // for lnf_error, LNF_MAX_STRING, LNF_ERR_OTHER_MSG
+#include <mpi.h>     // for MPI_Comm_rank, MPI_Comm_size, MPI_Get_processor_...
+
+#include "common.h"  // for MAX_STR_LEN, ::E_LNF, ::E_OK, error_code_t, ::E_ARG
 
 
-/* Default verbosity levele is warning. */
+// default verbosity level is warning
 verbosity_t verbosity = VERBOSITY_WARNING;
 
 

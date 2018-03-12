@@ -48,19 +48,19 @@
  * if advised of the possibility of such damage.
  */
 
-
-#include "print.h"
 #include "bfindex.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <assert.h>
-#include <unistd.h>
-#include <stdbool.h>
+#include <assert.h>             // for assert
+#include <inttypes.h>           // for fixed-width integer types
+#include <stdbool.h>            // for bool, true
+#include <stdio.h>              // for NULL, size_t
+#include <stdlib.h>             // for free, malloc
+#include <string.h>             // for strlen, memcmp, strcat, memcpy, strncmp
 
-#include <bf_index.h>
+#include <bf_index.h>           // for bfi_addr_is_stored, bfi_get_error_msg
+
+#include "print.h"              // for PRINT_DEBUG, PRINT_ERROR, PRINT_WARNING
+#include "common.h"             // for ::E_MEM, FLOW_FILE_NAME_PREFIX, STRLE...
 
 
 #define MAX_IP_ADDRESES 20  /**< Maximum number of IP addrs. used in a filter

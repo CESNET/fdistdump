@@ -42,17 +42,17 @@
  * if advised of the possibility of such damage.
  */
 
-#include "common.h"
-#include "master.h"
-#include "slave.h"
-#include "arg_parse.h"
-#include "print.h"
+#include "config.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
+#include <stdlib.h>     // for EXIT_SUCCESS
 
-#include <mpi.h>
+#include <mpi.h>        // for MPI_Abort, MPI_COMM_WORLD, MPI_Comm_rank, MPI...
+
+#include "arg_parse.h"  // for arg_parse, cmdline_args
+#include "common.h"     // for ::E_MPI, mpi_create_communicators, ::E_OK
+#include "master.h"     // for master_main
+#include "print.h"      // for ERROR_IF, PRINT_DEBUG
+#include "slave.h"      // for slave_main
 
 
 /**

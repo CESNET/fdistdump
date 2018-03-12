@@ -39,21 +39,26 @@
 
 #define _XOPEN_SOURCE  // strptime()
 
-#include "common.h"
+#include "config.h"             // for PACKAGE_NAME, PACKAGE_STRING
+
+#include <assert.h>             // for assert
+#include <ctype.h>              // for isspace
+#include <errno.h>              // for errno, ERANGE
+#include <limits.h>             // for INT_MIN, INT_MAX, LLONG_MAX, LLONG_MIN
+#include <stdbool.h>            // for false, true, bool
+#include <stdint.h>             // for SIZE_MAX
+#include <stdio.h>              // for printf
+#include <stdlib.h>             // for strtoll, strtoull
+#include <string.h>             // for strcmp, strtok_r, strerror, strchr
+#include <time.h>               // for NULL, gmtime_r, mktime, localtime_r
+
+#include <getopt.h>             // for required_argument, no_argument, getop...
+#include <libnf.h>              // for lnf_fld_info, LNF_FLD_ZERO_, LNF_SORT...
+
 #include "arg_parse.h"
-#include "print.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <limits.h>  // PATH_MAX, NAME_MAX
-#include <ctype.h>
-
-#include <getopt.h>
-#include <libnf.h>
+#include "common.h"             // for ::E_ARG, ::E_OK, error_code_t, field_...
+#include "print.h"              // for PRINT_ERROR, PRINT_DEBUG, ::VERBOSITY...
+#include "output.h"             // for output_params, ::OUTPUT_ITEM_NO, ::OU...
 
 
 #define STAT_DELIM '#'            // stat_spec#sort_spec
@@ -439,37 +444,6 @@ str_to_uint(const char *const string, unsigned int *res)
     *res = tmp_res;
     return NULL;
 }
-
-/**
- * @brief Convert an unsigned decimal integer from a string to size_t.
- *
- * @param[in] string Non null and non empty string to convert.
- * @param[out] res Pointer to a conversion destination variable.
- *
- * @return NULL on success, read-only error string on error.
- */
-inline static const char *
-str_to_size_t(const char *const string, size_t *res)
-{
-    assert(string && string[0] != '\0' && res);  // *nptr is not '\0'
-
-    long long unsigned int tmp_res;
-    const char *const error_string = str_to_lluint(string, &tmp_res);
-    if (error_string) {
-        return error_string;
-    }
-
-    // conversion to long long unsigned int was successful, try conversion to
-    // size_t
-    if (tmp_res > SIZE_MAX) {
-        errno = ERANGE;
-        return strerror(errno);
-    }
-
-    // conversion was successful
-    *res = tmp_res;
-    return NULL;
-}
 /**  @} */  // str_to_int_group
 
 
@@ -814,7 +788,7 @@ fields_print(const struct field_info fields[])
 
     printf("\t%-15s%-12s%-12s%-11s%s\n", "name", "aggr flags", "sort flags",
            "IPv4 bits", "IPv6 bits");
-    for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
+    for (uint64_t i = 0; i < LNF_FLD_TERM_; ++i) {
         if (!fields[i].id) {
             continue;
         }
@@ -876,7 +850,7 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
         token = strtok_r(time_str, TIME_DELIM, &saveptr); //first token
         while (token != NULL) {
                 /* Try to parse date. */
-                for (size_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
+                for (uint64_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
                         ret = strptime(token, date_formats[i], &garbage);
                         if (ret != NULL && *ret == '\0') {
                                 /* Conversion succeeded, fill real struct tm. */
@@ -886,7 +860,7 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
                 }
 
                 /* Check for UTC flag. */
-                for (size_t i = 0; i < ARRAY_SIZE(utc_strings); ++i) {
+                for (uint64_t i = 0; i < ARRAY_SIZE(utc_strings); ++i) {
                         if (strcmp(token, utc_strings[i]) == 0) {
                                 *utc = true;
                                 goto next_token;
@@ -1607,8 +1581,8 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
 
     // parse record limit argument option
     if (limit_optarg) {  // record limit specified
-        const char *const conversion_err = str_to_size_t(limit_optarg,
-                                                         &args->rec_limit);
+        const char *const conversion_err = str_to_luint(limit_optarg,
+                                                        &args->rec_limit);
         if (conversion_err) {
             PRINT_ERROR(E_ARG, 0, "record limit `%s': %s", limit_optarg,
                         conversion_err);

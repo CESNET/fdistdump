@@ -48,12 +48,18 @@
  * if advised of the possibility of such damage.
  */
 
-#include <stdbool.h>
-#include <libnf.h>
-#include <ffilter.h>
+#pragma once
+
+#include <stdbool.h>  // for bool
+
+#include <ffilter.h>  // for ff_node_t
 
 
 #define BFINDEX_FILE_NAME_PREFIX "bfi" /**< bfindex file prefix */
+
+
+// forward declarations
+struct bfindex_node;
 
 
 /** \brief Construct a bfindex IP address tree from a filter tree.

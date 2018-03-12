@@ -39,12 +39,12 @@
 
 #pragma once
 
+#include <inttypes.h>           // for fixed-width integer types
+#include <stdbool.h>            // for bool
 
-#include "common.h"
+#include <libnf.h>              // for lnf_mem_t
 
-#include <stddef.h> //size_t
-
-#include <libnf.h>
+#include "common.h"             // for error_code_t
 
 
 typedef enum {
@@ -119,6 +119,6 @@ void output_setup(struct output_params op, const struct field_info *fi);
 
 void print_rec(const uint8_t *data);
 
-error_code_t print_mem(lnf_mem_t *mem, size_t limit);
+error_code_t print_mem(lnf_mem_t *mem, uint64_t limit);
 void print_processed_summ(const struct processed_summ *s, double duration);
 void print_metadata_summ(const struct metadata_summ *s);

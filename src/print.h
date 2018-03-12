@@ -39,10 +39,12 @@
 
 #pragma once
 
-#include "config.h"
-#include "common.h"
+#include <stdbool.h>  // for false
+#include <stdio.h>    // for snprintf, size_t
 
-#include <mpi.h>
+#include <mpi.h>      // for MPI_COMM_WORLD
+
+#include "common.h"   // for error_code_t
 
 
 typedef enum {
@@ -122,7 +124,7 @@ extern verbosity_t verbosity;
  * @param ecode
  * @param ...
  *
- * @return 
+ * @return
  */
 #define ERROR_IF(cond, ecode, ...) \
     do { \

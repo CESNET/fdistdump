@@ -37,15 +37,15 @@
  * if advised of the possibility of such damage.
  */
 
-
 #include "common.h"
-#include "print.h"
 
-#include <stdio.h>
-#include <assert.h>
-#include <string.h>
-#include <stdarg.h> //variable argument list
-#include <stddef.h> //offsetof()
+#include <assert.h>                // for assert
+#include <stddef.h>                // for NULL, size_t
+#include <stdio.h>                 // for snprintf
+#include <stdlib.h>                // for setenv, unsetenv, getenv
+#include <string.h>                // for strlen, strncpy
+
+#include "print.h"                 // for PRINT_ERROR
 
 
 #define TM_YEAR_BASE 1900
