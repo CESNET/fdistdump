@@ -80,13 +80,8 @@ static const struct cmdline_args *args;
 /*
  * Data types declarations.
  */
-struct slave_ctx {  // thread-shared context
-    lnf_filter_t *lnf_filter; // libnf compiled filter expression
-                              // TODO: can thread-private filter be faster?
-#ifdef HAVE_LIBBFINDEX
-    struct bfindex_node *bfindex_root;  // indexing IP address tree root
-                                        // (created from the the libnf filter)
-#endif  // HAVE_LIBBFINDEX
+// thread-shared context
+struct slave_ctx {
     uint64_t proc_rec_cntr;  // processed record counter
     bool rec_limit_reached; // true if rec_limit records has been read
     struct processed_summ processed_summ;  // summary of processed records
@@ -98,7 +93,12 @@ struct slave_ctx {  // thread-shared context
     uint64_t tput_rec_cnt;
 };
 
-struct thread_ctx {  // thread-private context
+// thread-private context
+// lnf_filter and bfindex_root are the same for all threads and could be part of
+// the thread-shared slave_ctx structure, but thread-private thread_ctx
+// structure is slightly faster
+struct thread_ctx {
+    lnf_filter_t *lnf_filter; // libnf compiled filter expression
     lnf_mem_t *lnf_mem;  // libnf memory used for record storage
     lnf_file_t *lnf_file;  // libnf file
     lnf_rec_t *lnf_rec;    // libnf record
@@ -106,6 +106,11 @@ struct thread_ctx {  // thread-private context
     uint8_t *buff[2];  // two chunks of memory for the record storage
     struct processed_summ processed_summ;  // summary of processed records
     struct metadata_summ metadata_summ;    // summary of flow files metadata
+
+#ifdef HAVE_LIBBFINDEX
+    struct bfindex_node *bfindex_root;  // indexing IP address tree root
+                                        // (created from the the libnf filter)
+#endif  // HAVE_LIBBFINDEX
 };
 
 
@@ -117,21 +122,15 @@ struct thread_ctx {  // thread-private context
  *
  * @param lnf_filter
  * @param filter_str
- *
- * @return 
  */
-static error_code_t
+static void
 init_filter(lnf_filter_t **lnf_filter, char *filter_str)
 {
     assert(lnf_filter && filter_str && strlen(filter_str) != 0);
 
     int lnf_ret = lnf_filter_init_v2(lnf_filter, filter_str);
-    if (lnf_ret != LNF_OK) {
-        PRINT_ERROR(E_LNF, lnf_ret, "cannot initialise filter `%s'", filter_str);
-        return E_LNF;
-    }
-
-    return E_OK;
+    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "cannot initialise filter `%s'",
+             filter_str);
 }
 
 #ifdef HAVE_LIBBFINDEX
@@ -157,15 +156,27 @@ static void
 slave_ctx_init(struct slave_ctx *const s_ctx)
 {
     assert(s_ctx);
+}
+
+static void
+slave_ctx_free(struct slave_ctx *const s_ctx)
+{
+    assert(s_ctx);
+}
+
+static void
+thread_ctx_init(struct thread_ctx *const t_ctx)
+{
+    assert(t_ctx);
 
     // initialize the filter and the Bloom filter index, if possible
     if (args->filter_str) {
-        init_filter(&s_ctx->lnf_filter, args->filter_str);
+        init_filter(&t_ctx->lnf_filter, args->filter_str);
 
 #ifdef HAVE_LIBBFINDEX
         if (args->use_bfindex) {
-            s_ctx->bfindex_root = init_bfindex(s_ctx->lnf_filter);
-            if (s_ctx->bfindex_root) {
+            t_ctx->bfindex_root = init_bfindex(t_ctx->lnf_filter);
+            if (t_ctx->bfindex_root) {
                 PRINT_INFO("Bloom filter indexes enabled");
             } else {
                 PRINT_INFO("Bloom filter indexes disabled involuntarily");
@@ -175,27 +186,6 @@ slave_ctx_init(struct slave_ctx *const s_ctx)
         }
 #endif  // HAVE_LIBBFINDEX
     }
-}
-
-static void
-slave_ctx_free(struct slave_ctx *const s_ctx)
-{
-    assert(s_ctx);
-
-    if (s_ctx->lnf_filter) {
-        lnf_filter_free(s_ctx->lnf_filter);
-    }
-#ifdef HAVE_LIBBFINDEX
-    if (s_ctx->bfindex_root){
-        bfindex_free(s_ctx->bfindex_root);
-    }
-#endif  // HAVE_LIBBFINDEX
-}
-
-static void
-thread_ctx_init(struct thread_ctx *const t_ctx)
-{
-    assert(t_ctx);
 
     // initialize the libnf record, only once for each thread
     int lnf_ret = lnf_rec_init(&t_ctx->lnf_rec);
@@ -240,6 +230,15 @@ static void
 thread_ctx_free(struct thread_ctx *const t_ctx)
 {
     assert(t_ctx);
+
+    if (t_ctx->lnf_filter) {
+        lnf_filter_free(t_ctx->lnf_filter);
+    }
+#ifdef HAVE_LIBBFINDEX
+    if (t_ctx->bfindex_root){
+        bfindex_free(t_ctx->bfindex_root);
+    }
+#endif  // HAVE_LIBBFINDEX
 
     lnf_rec_free(t_ctx->lnf_rec);
 
@@ -475,7 +474,7 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (s_ctx->lnf_filter && !lnf_filter_match(s_ctx->lnf_filter, t_ctx->lnf_rec)) {
+        if (t_ctx->lnf_filter && !lnf_filter_match(t_ctx->lnf_filter, t_ctx->lnf_rec)) {
             continue;
         }
         file_proc_rec_cntr++;
@@ -574,7 +573,7 @@ ff_read_and_store(const char *ff_path, struct slave_ctx *s_ctx,
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (s_ctx->lnf_filter && !lnf_filter_match(s_ctx->lnf_filter,
+        if (t_ctx->lnf_filter && !lnf_filter_match(t_ctx->lnf_filter,
                                                    t_ctx->lnf_rec)) {
             continue;
         }
@@ -944,12 +943,12 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
     metadata_summ_update(&t_ctx->metadata_summ, t_ctx->lnf_file);
 
 #ifdef HAVE_LIBBFINDEX
-    if (s_ctx->bfindex_root) {  // Bloom filter indexing is enabled
+    if (t_ctx->bfindex_root) {  // Bloom filter indexing is enabled
         char *bfindex_file_path = bfindex_flow_to_index_path(ff_path);
         if (bfindex_file_path) {
             PRINT_DEBUG("`%s': using bfindex file `%s'", ff_path,
                         bfindex_file_path);
-            const bool contains = bfindex_contains(s_ctx->bfindex_root,
+            const bool contains = bfindex_contains(t_ctx->bfindex_root,
                                                    bfindex_file_path);
             free(bfindex_file_path);
             if (contains) {
