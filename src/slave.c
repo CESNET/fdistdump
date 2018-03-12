@@ -51,7 +51,6 @@
 #include <time.h>
 #include <errno.h>
 #include <limits.h> //PATH_MAX
-#include <unistd.h> //access
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -191,7 +190,7 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
     int lnf_ret = lnf_rec_init(&t_ctx->lnf_rec);
     if (lnf_ret != LNF_OK) {
         PRINT_ERROR(E_LNF, lnf_ret, "lnf_rec_init()");
-        MPI_Abort(MPI_COMM_WORLD, E_LNF);
+        MPI_Abort(mpi_comm_main, E_LNF);
     }
 
     // allocate two new data buffers for the records storage.
@@ -490,7 +489,7 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
 
             MPI_Wait(&request, MPI_STATUS_IGNORE);
             MPI_Isend(t_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC,
-                      mpi_tag, MPI_COMM_WORLD, &request);
+                      mpi_tag, mpi_comm_main, &request);
 
             // increment the thread-shared counter of processed records
             #pragma omp atomic
@@ -530,7 +529,7 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
     if (buff_rec_cntr != 0) {
         MPI_Wait(&request, MPI_STATUS_IGNORE);
         MPI_Isend(t_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
-                  MPI_COMM_WORLD, &request);
+                  mpi_comm_main, &request);
 
         // increment the thread-shared counter of processed records
         #pragma omp atomic
@@ -596,7 +595,7 @@ ff_read_and_store(const char *ff_path, struct slave_ctx *s_ctx,
 static void
 send_terminator(const int mpi_tag)
 {
-    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, mpi_tag, MPI_COMM_WORLD);
+    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, mpi_tag, mpi_comm_main);
 }
 
 /**
@@ -659,7 +658,7 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
         } else {  // no, send the full buffer
             MPI_Wait(&request, MPI_STATUS_IGNORE);
             MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
-                      MPI_COMM_WORLD, &request);
+                      mpi_comm_main, &request);
 
             // clear the buffer context variables and toggle the buffers
             buff_off = 0;
@@ -669,14 +668,14 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
     }
     if (rec_limit == SIZE_MAX && lnf_ret != LNF_EOF) {
         PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_next_c() or lnf_mem_first_c()");
-        MPI_Abort(MPI_COMM_WORLD, 1);
+        MPI_Abort(mpi_comm_main, 1);
     }
 
     // send the remaining records if the record buffer is not empty
     if (buff_rec_cntr != 0) {
         MPI_Wait(&request, MPI_STATUS_IGNORE);
         MPI_Isend(buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
-                  MPI_COMM_WORLD, &request);
+                  mpi_comm_main, &request);
     }
 
     // the buffers will be invalid after return, wait for the send to complete
@@ -689,6 +688,10 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
 
 
 /**
+ * @defgroup progress_bar_slave TODO
+ * @{
+ */
+/**
  * @brief TODO
  *
  * This function is not thread-safe without MPI_THREAD_MULTIPLE.
@@ -696,10 +699,12 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
  * @param files_cnt
  */
 static void
-progress_report_init(size_t files_cnt)
+progress_report_init(uint64_t files_cnt)
 {
-    MPI_Gather(&files_cnt, 1, MPI_UNSIGNED_LONG, NULL, 0, MPI_UNSIGNED_LONG,
-               ROOT_PROC, MPI_COMM_WORLD);
+    assert(mpi_comm_progress_bar != MPI_COMM_NULL);
+
+    MPI_Gather(&files_cnt, 1, MPI_UINT64_T, NULL, 0, MPI_UINT64_T, ROOT_PROC,
+               mpi_comm_progress_bar);
 }
 
 /**
@@ -711,11 +716,13 @@ progress_report_init(size_t files_cnt)
 static void
 progress_report_next(void)
 {
-    MPI_Request request = MPI_REQUEST_NULL;
-    MPI_Isend(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS, MPI_COMM_WORLD,
-              &request);
-    MPI_Request_free(&request);
+    assert(mpi_comm_progress_bar != MPI_COMM_NULL);
+
+    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS, mpi_comm_progress_bar);
 }
+/**
+ * @}
+ */  // progress_bar_slave
 
 /**
  * @defgroup slave_tput Slaves's side of the TPUT Top-N algorithm.
@@ -812,6 +819,9 @@ tput_phase_2_find_threshold_cnt(lnf_mem_t *lnf_mem, const uint64_t threshold,
  * (see @ref tput_phase_2_find_threshold_cnt).
  *
  * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ * It is incorrect to start multiple collective communications on the same
+ * communicator in same time -- that is why every MPI collective function is in
+ * a OpenMP single construct.
  *
  * @param[in] s_ctx Thread-shared context.
  * @param[in] t_ctx Thread-local context.
@@ -824,7 +834,7 @@ tput_phase_2(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
     #pragma omp single
     {
         MPI_Bcast(&s_ctx->tput_threshold, 1, MPI_UINT64_T, ROOT_PROC,
-                  MPI_COMM_WORLD);
+                  mpi_comm_main);
         PRINT_DEBUG("have threshold %" PRIu64, s_ctx->tput_threshold);
     }  // implicit barrier and flush
 
@@ -850,6 +860,9 @@ tput_phase_2(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
  * records is send to the master.
  *
  * This function is not thread-safe without MPI_THREAD_MULTIPLE.
+ * It is incorrect to start multiple collective communications on the same
+ * communicator in same time -- that is why every MPI collective function is in
+ * a OpenMP single construct.
  *
  * @param[in] s_ctx Thread-shared context.
  * @param[in] t_ctx Thread-local context.
@@ -863,7 +876,7 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
     {
         // receive number of records in the masters memory
         MPI_Bcast(&s_ctx->tput_rec_cnt, 1, MPI_UINT64_T, ROOT_PROC,
-                  MPI_COMM_WORLD);
+                  mpi_comm_main);
     }  // implicit barrier and flush
 
     // initialize libnf memory for found records only
@@ -877,11 +890,11 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
         {
             // receive a key from the master
             MPI_Bcast(&s_ctx->tput_rec_len, 1, MPI_INT, ROOT_PROC,
-                      MPI_COMM_WORLD);
+                      mpi_comm_main);
             assert(IN_RANGE_INCL(s_ctx->tput_rec_len, 1,
                                  (int)sizeof (s_ctx->tput_rec_buff) + 1));
             MPI_Bcast(s_ctx->tput_rec_buff, s_ctx->tput_rec_len, MPI_BYTE,
-                      ROOT_PROC, MPI_COMM_WORLD);
+                      ROOT_PROC, mpi_comm_main);
         }  // implicit barrier and flush
 
         // lookup the received key in my libnf memory
@@ -1001,9 +1014,6 @@ return_label:
     if (t_ctx->lnf_file) {
         lnf_close(t_ctx->lnf_file);
     }
-
-    PRINT_DEBUG("`%s': done", ff_path);
-    return;
 }
 
 static void
@@ -1102,7 +1112,7 @@ slave_main(const struct cmdline_args *args_local)
     PRINT_DEBUG("using %d thread(s)", num_threads);
     // send a number of used threads
     MPI_Reduce(&num_threads, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
-               MPI_COMM_WORLD);
+               mpi_comm_main);
 
     #pragma omp parallel
     {
@@ -1146,9 +1156,9 @@ slave_main(const struct cmdline_args *args_local)
 
     // reduce statistic values to the master
     MPI_Reduce(&s_ctx.processed_summ, NULL, STRUCT_PROCESSED_SUMM_ELEMENTS,
-               MPI_UINT64_T, MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
+               MPI_UINT64_T, MPI_SUM, ROOT_PROC, mpi_comm_main);
     MPI_Reduce(&s_ctx.metadata_summ, NULL, STRUCT_METADATA_SUMM_ELEMENTS,
-               MPI_UINT64_T, MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
+               MPI_UINT64_T, MPI_SUM, ROOT_PROC, mpi_comm_main);
 
     slave_ctx_free(&s_ctx);
 }

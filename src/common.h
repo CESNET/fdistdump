@@ -39,7 +39,6 @@
 
 #pragma once
 
-
 #include "config.h"
 
 #include <stddef.h> //size_t
@@ -48,6 +47,7 @@
 #include <inttypes.h> //exact width integer types
 #include <assert.h>
 
+#include <mpi.h>
 #include <libnf.h>
 
 
@@ -63,6 +63,9 @@
 #define FLOW_FILE_NAME_FORMAT FLOW_FILE_NAME_PREFIX "." FLOW_FILE_NAME_SUFFIX
 #define FLOW_FILE_FORMAT FLOW_FILE_PATH_FORMAT "/" FLOW_FILE_NAME_FORMAT
 
+
+extern MPI_Comm mpi_comm_main;
+extern MPI_Comm mpi_comm_progress_bar;
 
 typedef uint32_t xchg_rec_size_t;
 
@@ -218,6 +221,54 @@ struct field_info {
 char * working_mode_to_str(working_mode_t working_mode);
 
 
+/** \brief Yield the time difference between a and b.
+ *
+ * Measured in seconds, ignoring leap seconds. Compute intervening leap days
+ * correctly even if year is negative. Take care to avoid int overflow in leap
+ * day calculations, but it's OK to assume that A and B are close to each other.
+ * Copy paste from glibc 2.22.
+ *
+ * \param[in] a Subtrahend.
+ * \param[in] b Minuend.
+ * \return Difference in seconds.
+ */
+int tm_diff(const struct tm a, const struct tm b);
+
+/** \brief Portable version of timegm().
+ *
+ * The mktime() function modifies the fields of the tm structure, if structure
+ * members are outside their valid interval, they will be normalized (so that,
+ * for  example,  40  October is changed  into  9 November). We need this. But
+ * also tm_isdst is set (regardless of its initial value) to a positive value or
+ * to 0, respectively, to indicate whether DST is or is not in effect at the
+ * specified time. This is what we don't need. Therefore, time zone is set to
+ * UTC before calling mktime() in this function and restore previous time zone
+ * afterwards. mktime() will normalize tm structure, nothing more.
+ *
+ * \param[inout] tm Broken-down time. May be altered (normalized).
+ * \return Calendar time representation of tm.
+ */
+time_t mktime_utc(struct tm *tm);
+
+
+/**
+ * @brief Create MPI communications mpi_comm_main and mpi_comm_progress_bar as a
+ *        duplicates of MPI_COMM_WORLD.
+ *
+ * From the MPI perspective it is incorrect to start multiple collective
+ * communications on the same communicator in same time (more info in Section
+ * 5.13 in the MPI standard). We need collective communication for progress bar
+ * and for general use during the query, and because this code is executed
+ * concurrently, we need two separate communicators.
+ *
+ * MPI_Comm_dup() is collective on the input communicator, so it is
+ * erroneous for a thread to attempt to duplicate a communicator that is
+ * simultaneously involved in any other collective in any other thread.
+ */
+void
+mpi_create_communicators(void);
+
+
 /**
  * @brief Allocate a libnf memory and configure for specified fields.
  *
@@ -268,36 +319,6 @@ libnf_mem_sort(lnf_mem_t *lnf_mem);
  */
 void
 libnf_mem_free(lnf_mem_t *const lnf_mem);
-
-
-/** \brief Yield the time difference between a and b.
- *
- * Measured in seconds, ignoring leap seconds. Compute intervening leap days
- * correctly even if year is negative. Take care to avoid int overflow in leap
- * day calculations, but it's OK to assume that A and B are close to each other.
- * Copy paste from glibc 2.22.
- *
- * \param[in] a Subtrahend.
- * \param[in] b Minuend.
- * \return Difference in seconds.
- */
-int tm_diff(const struct tm a, const struct tm b);
-
-/** \brief Portable version of timegm().
- *
- * The mktime() function modifies the fields of the tm structure, if structure
- * members are outside their valid interval, they will be normalized (so that,
- * for  example,  40  October is changed  into  9 November). We need this. But
- * also tm_isdst is set (regardless of its initial value) to a positive value or
- * to 0, respectively, to indicate whether DST is or is not in effect at the
- * specified time. This is what we don't need. Therefore, time zone is set to
- * UTC before calling mktime() in this function and restore previous time zone
- * afterwards. mktime() will normalize tm structure, nothing more.
- *
- * \param[inout] tm Broken-down time. May be altered (normalized).
- * \return Calendar time representation of tm.
- */
-time_t mktime_utc(struct tm *tm);
 
 
 int field_get_type(int field);

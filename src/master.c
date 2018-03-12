@@ -57,23 +57,12 @@
  */
 static const struct cmdline_args *args;
 
-static struct progress_bar_ctx {
-    progress_bar_type_t type;
-    size_t slave_cnt;         // TODO: is it needed?
-    size_t *files_slave_cur;  // slave_cnt sized
-    size_t *files_slave_sum;  // slave_cnt sized
-    size_t files_cur;
-    size_t files_sum;
-    FILE *out_stream;
-} progress_bar_ctx;
-
 
 /*
  * Data types declarations.
  */
 struct master_ctx {  // thread-shared context
     uint8_t *rec_buff[2];  // two record buffers for IO/communication overlap
-    uint64_t slave_cnt;   // number of slave processes
     uint64_t slave_threads_cnt;  // number threads on all slaves
 };
 
@@ -103,10 +92,6 @@ master_ctx_init(const uint64_t slave_threads_cnt)
     struct master_ctx *const m_ctx = calloc(1, sizeof (*m_ctx));
     ERROR_IF(!m_ctx, E_MEM, "master context structure allocation failed");
 
-    int world_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    assert(world_size >= 2);  // master and at least one slave
-    m_ctx->slave_cnt = world_size - 1;  // all nodes without master
     m_ctx->slave_threads_cnt = slave_threads_cnt;
 
     // allocate the record buffers
@@ -128,6 +113,7 @@ master_ctx_free(struct master_ctx *const m_ctx)
     for (uint8_t i = 0; i < 2; ++i) {
         free(m_ctx->rec_buff[i]);
     }
+    free(m_ctx);
 }
 
 
@@ -155,59 +141,78 @@ print_rec_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
 
 
 /**
+ * @defgroup progress_bar_master TODO
+ * @{
+ */
+struct progress_bar_ctx {
+    progress_bar_type_t type;
+    uint64_t sources_cnt;
+    uint64_t *files_cnt;      // sources_cnt sized
+    uint64_t *files_cnt_goal;  // sources_cnt sized
+    uint64_t files_cnt_sum;
+    uint64_t files_cnt_goal_sum;
+    FILE *out_stream;
+};
+
+/**
  * @brief TODO
  */
 static void
-progress_bar_print(void)
+progress_bar_print(const struct progress_bar_ctx *const pb_ctx)
 {
-    struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
+    assert(pb_ctx);
+    assert(pb_ctx->files_cnt_sum <= pb_ctx->files_cnt_goal_sum);
 
-    // calculate the percentage progress for each slave
-    double slave_percentage[pbc->slave_cnt];
-    for (size_t i = 0; i < pbc->slave_cnt; ++i) {
-        assert(pbc->files_slave_cur[i] <= pbc->files_slave_sum[i]);
-        if (pbc->files_slave_sum[i] == 0) {
-            slave_percentage[i] = 100.0;
+    // calculate a percentage progress for each source
+    double source_percentage[pb_ctx->sources_cnt];
+    for (uint64_t i = 0; i < pb_ctx->sources_cnt; ++i) {
+        assert(pb_ctx->files_cnt[i] <= pb_ctx->files_cnt_goal[i]);
+
+        if (pb_ctx->files_cnt_goal[i] == 0) {
+            source_percentage[i] = 100.0;
         } else {
-            slave_percentage[i] = (double)pbc->files_slave_cur[i]
-                / pbc->files_slave_sum[i] * 100.0;
+            source_percentage[i] = (double)pb_ctx->files_cnt[i]
+                / pb_ctx->files_cnt_goal[i] * 100.0;
         }
     }
 
-    // calculate the total percentage progress
-    assert(pbc->files_cur <= pbc->files_sum);
+    // calculate a total percentage progress
     double total_percentage;
-    if (pbc->files_sum == 0) {
+    if (pb_ctx->files_cnt_goal_sum == 0) {
         total_percentage = 100.0;
     } else {
-        total_percentage = (double)pbc->files_cur / pbc->files_sum * 100.0;
+        total_percentage =
+            (double)pb_ctx->files_cnt_sum / pb_ctx->files_cnt_goal_sum * 100.0;
     }
 
     // diverge for each progress bar type
-    switch (pbc->type) {
+#define PROGRESS_BAR_FMT "%" PRIu64 "/%" PRIu64 " (%.0f %%)"
+    switch (pb_ctx->type) {
     case PROGRESS_BAR_TOTAL:
-        fprintf(pbc->out_stream, "reading files: %zu/%zu (%.0f %%)",
-                pbc->files_cur, pbc->files_sum, total_percentage);
+        fprintf(pb_ctx->out_stream, "reading files: " PROGRESS_BAR_FMT,
+                pb_ctx->files_cnt_sum, pb_ctx->files_cnt_goal_sum,
+                total_percentage);
         break;
 
     case PROGRESS_BAR_PERSLAVE:
-        fprintf(pbc->out_stream, ":reading files: total: %zu/%zu (%.0f %%)",
-                pbc->files_cur, pbc->files_sum, total_percentage);
+        fprintf(pb_ctx->out_stream, "reading files: total: " PROGRESS_BAR_FMT,
+                pb_ctx->files_cnt_sum, pb_ctx->files_cnt_goal_sum,
+                total_percentage);
 
-        for (size_t i = 0; i < pbc->slave_cnt; ++i) {
-            fprintf(pbc->out_stream, " | %zu: %zu/%zu (%.0f %%)", i + 1,
-                    pbc->files_slave_cur[i], pbc->files_slave_sum[i],
-                    slave_percentage[i]);
+        for (uint64_t i = 0; i < pb_ctx->sources_cnt; ++i) {
+            fprintf(pb_ctx->out_stream, " | %" PRIu64 ": " PROGRESS_BAR_FMT,
+                    i + 1, pb_ctx->files_cnt[i], pb_ctx->files_cnt_goal[i],
+                    source_percentage[i]);
         }
         break;
 
     case PROGRESS_BAR_JSON:
-        fprintf(pbc->out_stream, "{\"total\":%.0f", total_percentage);
-        for (size_t i = 0; i < pbc->slave_cnt; ++i) {
-            fprintf(pbc->out_stream, ",\"slave%zu\":%.0f", i + 1,
-                    slave_percentage[i]);
+        fprintf(pb_ctx->out_stream, "{\"total\":%.0f", total_percentage);
+        for (uint64_t i = 0; i < pb_ctx->sources_cnt; ++i) {
+            fprintf(pb_ctx->out_stream, ",\"slave%" PRIu64 "\":%.0f", i + 1,
+                    source_percentage[i]);
         }
-        putc('}', pbc->out_stream);
+        putc('}', pb_ctx->out_stream);
         break;
 
     case PROGRESS_BAR_NONE: // fall through
@@ -219,144 +224,109 @@ progress_bar_print(void)
     }
 
     // handle different behavior for streams and for files
-    if (pbc->out_stream == stdout || pbc->out_stream == stderr) {  // stream
-        if (pbc->files_cur == pbc->files_sum) {
-            putc('\n', pbc->out_stream);  // finished, break line
+    if (pb_ctx->out_stream == stdout || pb_ctx->out_stream == stderr) {  // stream
+        if (pb_ctx->files_cnt_sum == pb_ctx->files_cnt_goal_sum) {
+            fprintf(pb_ctx->out_stream, " DONE\n");  // finished, break line
         } else {
-            putc('\r', pbc->out_stream);  // not finished, return carriage
+            fprintf(pb_ctx->out_stream, " ...\r");  // not finished, return carriage
         }
     } else {  // file
-        putc('\n', pbc->out_stream);  // proper text file termination
-        rewind(pbc->out_stream);
+        putc('\n', pb_ctx->out_stream);  // proper text file termination
+        rewind(pb_ctx->out_stream);
     }
 
-    fflush(pbc->out_stream);
+    fflush(pb_ctx->out_stream);
 }
 
 /**
  * @brief TODO
  *
- * Progress bar initialization: gather file count from each slave etc.
- *
  * This function is not thread-safe without MPI_THREAD_MULTIPLE.
- *
- * @param type
- * @param dest
- * @param slave_cnt
- *
- * @return 
  */
-static error_code_t
-progress_bar_init(progress_bar_type_t type, char *dest, size_t slave_cnt)
+static void
+progress_bar_thread(progress_bar_type_t type, char *dest)
 {
-    assert(slave_cnt > 0);
+    PRINT_DEBUG("launching master's progress bar thread");
 
-    struct progress_bar_ctx *pbc = &progress_bar_ctx; //global variable
-
-    pbc->type = type;  // store progress bar type
-    pbc->slave_cnt = slave_cnt;  // store slave count
+    ////////////////////////////////////////////////////////////////////////////
+    // initialization
+    struct progress_bar_ctx pb_ctx = { 0 };
+    pb_ctx.type = type;
+    int comm_size;
+    MPI_Comm_size(mpi_comm_progress_bar, &comm_size);
+    assert(comm_size > 0);
+    pb_ctx.sources_cnt = comm_size - 1;  // sources are only slaves
 
     // allocate memory to keep a context
-    pbc->files_slave_cur = calloc(pbc->slave_cnt,
-                                  sizeof (*pbc->files_slave_cur));
-    pbc->files_slave_sum = calloc(pbc->slave_cnt,
-                                  sizeof (*pbc->files_slave_sum));
-    if (!pbc->files_slave_cur || !pbc->files_slave_sum) {
-        PRINT_ERROR(E_MEM, 0, "calloc()");
-        return E_MEM;
-    }
+    pb_ctx.files_cnt = calloc(pb_ctx.sources_cnt, sizeof (*pb_ctx.files_cnt));
+    pb_ctx.files_cnt_goal = calloc(pb_ctx.sources_cnt, sizeof (*pb_ctx.files_cnt_goal));
+    ERROR_IF(!pb_ctx.files_cnt || !pb_ctx.files_cnt_goal, E_MEM,
+             "progress bar memory allocation failed");
 
     if (!dest || strcmp(dest, "stderr") == 0) {
-        pbc->out_stream = stderr;  // stderr is the default output stream
+        pb_ctx.out_stream = stderr;  // stderr is the default output stream
     } else if (strcmp(dest, "stdout") == 0) {
-        pbc->out_stream = stdout;
+        pb_ctx.out_stream = stdout;
     } else {  // destination is a file
-        pbc->out_stream = fopen(dest, "w");
-        if (!pbc->out_stream) {
+        pb_ctx.out_stream = fopen(dest, "w");
+        if (!pb_ctx.out_stream) {
             PRINT_WARNING(E_ARG, 0, "invalid progress bar destination `%s\': "
                           "%s", dest, strerror(errno));
-            pbc->type = PROGRESS_BAR_NONE;  // disable progress bar
+            pb_ctx.type = PROGRESS_BAR_NONE;  // disable progress bar
         }
     }
 
-    // gather the number of files to be processed by each slave
-    size_t tmp_zero = 0;  // sendbuf for MPI_Gather
-    size_t files_sum[slave_cnt + 1];  // recvbuf for MPI_Gather
-    MPI_Gather(&tmp_zero, 1, MPI_UNSIGNED_LONG, files_sum, 1, MPI_UNSIGNED_LONG,
-               ROOT_PROC, MPI_COMM_WORLD);
+    // gather the number of files to be processed by each source (goals)
+    uint64_t tmp_zero = 0;  // sendbuf for MPI_Gather
+    uint64_t files_cnt_goal_sum_tmp[pb_ctx.sources_cnt + 1];  // recvbuf
+    MPI_Gather(&tmp_zero, 1, MPI_UINT64_T, files_cnt_goal_sum_tmp, 1,
+               MPI_UINT64_T, ROOT_PROC, mpi_comm_progress_bar);
 
-    // compute a sum of number of files to be processed
-    for (size_t i = 0; i < slave_cnt; ++i) {
-        pbc->files_slave_sum[i] = files_sum[i + 1];
-        pbc->files_sum += pbc->files_slave_sum[i];
+    // compute a sum of number of files to be processed (goals sum)
+    for (uint64_t i = 0; i < pb_ctx.sources_cnt; ++i) {
+        pb_ctx.files_cnt_goal[i] = files_cnt_goal_sum_tmp[i + 1];
+        pb_ctx.files_cnt_goal_sum += pb_ctx.files_cnt_goal[i];
     }
 
     // print the progress bar for the first time
-    if (pbc->type != PROGRESS_BAR_NONE) {
-        progress_bar_print();
+    if (pb_ctx.type != PROGRESS_BAR_NONE) {
+        progress_bar_print(&pb_ctx);
     }
 
-    return E_OK;
-}
-
-/**
- * @brief TODO
- *
- * @param source
- *
- * @return 
- */
-static bool
-progress_bar_refresh(int source)
-{
-    assert(source > 0);
-
-    struct progress_bar_ctx *pbc = &progress_bar_ctx;  // global variable
-
-    pbc->files_slave_cur[source - 1]++;
-    pbc->files_cur++;
-
-    if (pbc->type != PROGRESS_BAR_NONE) {
-        progress_bar_print();
-    }
-
-    return pbc->files_cur == pbc->files_sum;
-}
-
-/**
- * @brief TODO
- *
- * This function is not thread-safe without MPI_THREAD_MULTIPLE.
- */
-static void
-progress_bar_loop(void)
-{
-    for (size_t i = 0; i < progress_bar_ctx.files_sum; ++i) {
+    ////////////////////////////////////////////////////////////////////////////
+    // receiving and printing loop
+    for (size_t i = 0; i < pb_ctx.files_cnt_goal_sum; ++i) {
         MPI_Status status;
         MPI_Recv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
-                 MPI_COMM_WORLD, &status);
-        progress_bar_refresh(status.MPI_SOURCE);
+                mpi_comm_progress_bar, &status);
+        assert(status.MPI_SOURCE > 0);
+        assert(status.MPI_TAG == TAG_PROGRESS);
+
+        const uint64_t source = status.MPI_SOURCE - 1;  // first source is n. 1
+        pb_ctx.files_cnt[source]++;
+        pb_ctx.files_cnt_sum++;
+
+        if (pb_ctx.type != PROGRESS_BAR_NONE) {
+            progress_bar_print(&pb_ctx);
+        }
     }
-}
 
-/**
- * @brief TODO
- */
-static void
-progress_bar_finish(void)
-{
-    struct progress_bar_ctx *pbc = &progress_bar_ctx;  // global variable
-
-    free(pbc->files_slave_cur);
-    free(pbc->files_slave_sum);
+    ////////////////////////////////////////////////////////////////////////////
+    // destruction
+    free(pb_ctx.files_cnt);
+    free(pb_ctx.files_cnt_goal);
 
     // close the output stream only if it's a file
-    if (pbc->out_stream && pbc->out_stream != stdout
-            && pbc->out_stream != stderr && fclose(pbc->out_stream) == EOF)
+    if (pb_ctx.out_stream && pb_ctx.out_stream != stdout
+            && pb_ctx.out_stream != stderr
+            && fclose(pb_ctx.out_stream) == EOF)
     {
         PRINT_WARNING(E_INTERNAL, 0, "progress bar: %s", strerror(errno));
     }
 }
+/**
+ * @}
+ */  // progress_bar_master
 
 
 /**
@@ -375,7 +345,7 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
     bool buff_idx = 0;
     MPI_Request request;
     MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
-              MPI_ANY_SOURCE, mpi_tag, MPI_COMM_WORLD, &request);
+              MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
 
     // receiving loop
     uint64_t rec_cntr = 0;  // processed records counter
@@ -402,7 +372,7 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
 
             // start receiving next message into the same buffer
             MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
-                      MPI_ANY_SOURCE, mpi_tag, MPI_COMM_WORLD, &request);
+                      MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
             continue;  // do not receive any more messages from this source
         }
         msg_cntr++;  // do not include terminators in the counter
@@ -415,7 +385,7 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
         // toggle buffers and start receiving next message into the free buffer
         buff_idx = !buff_idx;
         MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
-                  MPI_ANY_SOURCE, mpi_tag, MPI_COMM_WORLD, &request);
+                  MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
 
         if (limit_exceeded) {
             continue;  // do not process further, but continue receiving
@@ -586,7 +556,7 @@ tput_phase_2(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem,
 
     // calculate threshold from the phase 1 bottom and broadcast it
     uint64_t threshold = ceil((double)phase_1_bottom / m_ctx->slave_threads_cnt);
-    MPI_Bcast(&threshold, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
+    MPI_Bcast(&threshold, 1, MPI_UINT64_T, ROOT_PROC, mpi_comm_main);
     PRINT_DEBUG("master TPUT phase 2: broadcasted threshold = %" PRIu64,
                 threshold);
 
@@ -618,7 +588,7 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
 
     // query and broadcast the number of records in the memory
     uint64_t rec_cnt = libnf_mem_rec_cnt(*lnf_mem);
-    MPI_Bcast(&rec_cnt, 1, MPI_UINT64_T, ROOT_PROC, MPI_COMM_WORLD);
+    MPI_Bcast(&rec_cnt, 1, MPI_UINT64_T, ROOT_PROC, mpi_comm_main);
 
     // read and broadcast all records
     lnf_mem_cursor_t *cursor;
@@ -631,8 +601,8 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
                                      sizeof (rec_buff));
         assert(rec_len > 0 && lnf_ret == LNF_OK);
 
-        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, MPI_COMM_WORLD);
-        MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, MPI_COMM_WORLD);
+        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, mpi_comm_main);
+        MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, mpi_comm_main);
 
         lnf_ret = lnf_mem_next_c(*lnf_mem, &cursor);
         assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
@@ -738,6 +708,47 @@ aggr_main(struct master_ctx *const m_ctx)
     libnf_mem_free(lnf_mem);
 }
 
+/**
+ * @brief TODO
+ */
+static void
+master_main_thread(void)
+{
+    PRINT_DEBUG("launching master's main thread");
+
+    // get a sum of number of threads used on all slaves
+    int slave_threads_cnt = 0;
+    MPI_Reduce(MPI_IN_PLACE, &slave_threads_cnt, 1, MPI_INT, MPI_SUM, ROOT_PROC,
+               mpi_comm_main);
+    assert(slave_threads_cnt > 0);
+
+    // initialize a master_ctx structure
+    struct master_ctx *const m_ctx =
+        master_ctx_init((uint64_t)slave_threads_cnt);
+    PRINT_DEBUG("using %d slave thread(s) in total", m_ctx->slave_threads_cnt);
+
+    output_setup(args->output_params, args->fields);
+
+    // send, receive, process according to the specified working mode
+    switch (args->working_mode) {
+    case MODE_LIST:
+        list_main(m_ctx);
+        break;
+    case MODE_SORT:
+        sort_main(m_ctx);
+        break;
+    case MODE_AGGR:
+        aggr_main(m_ctx);
+        break;
+    case MODE_META:
+        // receive only the progress
+        break;
+    default:
+        assert(!"unknown working mode");
+    }
+
+    master_ctx_free(m_ctx);
+}
 
 /*
  * Public functions.
@@ -760,56 +771,35 @@ master_main(const struct cmdline_args *args_local)
     double duration = -MPI_Wtime();  // start the time measurement
     args = args_local;  // share the command-line arguments by a global variable
 
-    // get a sum of number of threads used on all slaves
-    int slave_threads_cnt = 0;
-    MPI_Reduce(MPI_IN_PLACE, &slave_threads_cnt, 1, MPI_INT, MPI_SUM, ROOT_PROC,
-               MPI_COMM_WORLD);
-    assert(slave_threads_cnt > 0);
+    // spawn one thread for each section
+    #pragma omp parallel sections num_threads(2)
+    {
+        // master's main thread
+        #pragma omp section
+        {
+            assert(mpi_comm_main != MPI_COMM_NULL);
+            master_main_thread();
+        }
 
-    // initialize a master_ctx structure
-    struct master_ctx *const m_ctx =
-        master_ctx_init((uint64_t)slave_threads_cnt);
-    PRINT_DEBUG("using %d slave(s), %d slave thread(s) in total",
-                m_ctx->slave_cnt, m_ctx->slave_threads_cnt);
-
-    output_setup(args->output_params, args->fields);
-
-    progress_bar_init(args->progress_bar_type, args->progress_bar_dest,
-                      m_ctx->slave_cnt);
-
-    // send, receive, process according to the specified working mode
-    switch (args->working_mode) {
-    case MODE_LIST:
-        list_main(m_ctx);
-        break;
-    case MODE_SORT:
-        sort_main(m_ctx);
-        break;
-    case MODE_AGGR:
-        aggr_main(m_ctx);
-        break;
-    case MODE_META:
-        // receive only the progress
-        progress_bar_loop();
-        break;
-    default:
-        assert(!"unknown working mode");
+        // progress bar handling section (thread)
+        #pragma omp section
+        {
+            assert(mpi_comm_progress_bar != MPI_COMM_NULL);
+            progress_bar_thread(args->progress_bar_type,
+                                args->progress_bar_dest);
+        }
     }
-
-    progress_bar_finish();
 
     // reduce statistic values from each slave
     struct processed_summ processed_summ = { 0 };  // processed data statistics
     MPI_Reduce(MPI_IN_PLACE, &processed_summ, STRUCT_PROCESSED_SUMM_ELEMENTS,
-               MPI_UINT64_T, MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
+               MPI_UINT64_T, MPI_SUM, ROOT_PROC, mpi_comm_main);
     struct metadata_summ metadata_summ = { 0 }; // metadata statistics
     MPI_Reduce(MPI_IN_PLACE, &metadata_summ, STRUCT_METADATA_SUMM_ELEMENTS,
-               MPI_UINT64_T, MPI_SUM, ROOT_PROC, MPI_COMM_WORLD);
+               MPI_UINT64_T, MPI_SUM, ROOT_PROC, mpi_comm_main);
 
-    duration += MPI_Wtime();  // finish the time measurement
+    duration += MPI_Wtime();  // stop the time measurement
 
     print_processed_summ(&processed_summ, duration);
     print_metadata_summ(&metadata_summ);
-
-    master_ctx_free(m_ctx);
 }

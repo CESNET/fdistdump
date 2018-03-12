@@ -47,14 +47,19 @@
 #include <stdarg.h> //variable argument list
 #include <stddef.h> //offsetof()
 
-#include <mpi.h>
-
 
 #define TM_YEAR_BASE 1900
 
 
+/*
+ * Global variables.
+ */
+MPI_Comm mpi_comm_main = MPI_COMM_NULL;
+MPI_Comm mpi_comm_progress_bar = MPI_COMM_NULL;
+
+
 /**
- * \defgroup to_str_func Various elements to string converting functions
+ * @defgroup to_str_func Various elements to string converting functions
  * @{
  */
 char * working_mode_to_str(working_mode_t working_mode)
@@ -90,7 +95,157 @@ char * working_mode_to_str(working_mode_t working_mode)
 
 
 /**
- * \defgroup libnf_mem Functions operating with libnf aggregation/sorting memory
+ * @defgroup time_func Time related functions
+ * @{
+ */
+int tm_diff(const struct tm a, const struct tm b)
+{
+        int a4 = (a.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (a.tm_year & 3);
+        int b4 = (b.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (b.tm_year & 3);
+        int a100 = a4 / 25 - (a4 % 25 < 0);
+        int b100 = b4 / 25 - (b4 % 25 < 0);
+        int a400 = a100 >> 2;
+        int b400 = b100 >> 2;
+        int intervening_leap_days = (a4 - b4) - (a100 - b100) + (a400 - b400);
+        int years = a.tm_year - b.tm_year;
+        int days = (365 * years + intervening_leap_days +
+                        (a.tm_yday - b.tm_yday));
+
+        return (60 * (60 * (24 * days + (a.tm_hour - b.tm_hour)) +
+                                (a.tm_min - b.tm_min)) + (a.tm_sec - b.tm_sec));
+}
+
+time_t mktime_utc(struct tm *tm)
+{
+        time_t ret;
+        char orig_tz[128];
+        char *tz;
+
+        /* Save current time zone environment variable. */
+        tz = getenv("TZ");
+        if (tz != NULL) {
+                assert(strlen(tz) < sizeof (orig_tz));
+                strncpy(orig_tz, tz, sizeof (orig_tz) - 1);
+                orig_tz[sizeof (orig_tz) - 1] = '\0';
+        }
+
+        /* Set time zone to UTC. mktime() would be affected by daylight saving
+         * otherwise.
+         */
+        setenv("TZ", "", 1);
+        tzset();
+
+        ret = mktime(tm); //actual normalization within UTC time zone
+
+        /* Restore time zone to stored value. */
+        if (tz != NULL) {
+                assert(setenv("TZ", orig_tz, 1) == 0);
+        } else {
+                assert(unsetenv("TZ") == 0);
+        }
+        tzset();
+
+        return ret;
+}
+/**
+ * @}
+ */ //time_func
+
+/**
+ * @defgroup mpi_common
+ * @{
+ */
+/**
+ * @brief Create MPI communications mpi_comm_main and mpi_comm_progress_bar as a
+ *        duplicates of MPI_COMM_WORLD.
+ *
+ * From the MPI perspective it is incorrect to start multiple collective
+ * communications on the same communicator in same time (more info in Section
+ * 5.13 in the MPI standard). We need collective communication for progress bar
+ * and for general use during the query, and because this code is executed
+ * concurrently, we need two separate communicators.
+ *
+ * MPI_Comm_dup() is collective on the input communicator, so it is
+ * erroneous for a thread to attempt to duplicate a communicator that is
+ * simultaneously involved in any other collective in any other thread.
+ */
+void
+mpi_create_communicators(void)
+{
+    MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_main);
+    MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_progress_bar);
+}
+/**
+ * @}
+ */  // mpi_common
+
+
+/**
+ * @defgroup libnf_fields Functions operating with libnf fields
+ * @{
+ */
+int field_get_type(int field)
+{
+        int type;
+
+        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
+                return -1;
+        }
+
+        lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
+
+        return type;
+}
+
+size_t field_get_size(int field)
+{
+        const int type = field_get_type(field);
+
+        if (type == -1) {
+                return 0;
+        }
+
+        switch (type) {
+        case LNF_UINT8:
+                return sizeof (uint8_t);
+
+        case LNF_UINT16:
+                return sizeof (uint16_t);
+
+        case LNF_UINT32:
+                return sizeof (uint32_t);
+
+        case LNF_UINT64:
+                return sizeof (uint64_t);
+
+        case LNF_DOUBLE:
+                return sizeof (double);
+
+        case LNF_ADDR:
+                return sizeof (lnf_ip_t);
+
+        case LNF_MAC:
+                return sizeof (lnf_mac_t);
+
+        case LNF_BASIC_RECORD1:
+                return sizeof (lnf_brec1_t);
+
+        case LNF_NONE:
+        case LNF_STRING:
+        case LNF_MPLS:
+                assert(!"unimplemented LNF data type");
+
+        default:
+                assert(!"unknown LNF data type");
+        }
+}
+/**
+ * @}
+ */  // libnf_fields
+
+
+/**
+ * @defgroup libnf_mem Functions operating with libnf aggregation/sorting memory
  * @{
  */
 /**
@@ -258,125 +413,3 @@ libnf_mem_free(lnf_mem_t *const lnf_mem)
 /**
  * @}
  */  // libnf_mem
-
-
-/**
- * \defgroup time_func Time related functions
- * @{
- */
-int tm_diff(const struct tm a, const struct tm b)
-{
-        int a4 = (a.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (a.tm_year & 3);
-        int b4 = (b.tm_year >> 2) + (TM_YEAR_BASE >> 2) - ! (b.tm_year & 3);
-        int a100 = a4 / 25 - (a4 % 25 < 0);
-        int b100 = b4 / 25 - (b4 % 25 < 0);
-        int a400 = a100 >> 2;
-        int b400 = b100 >> 2;
-        int intervening_leap_days = (a4 - b4) - (a100 - b100) + (a400 - b400);
-        int years = a.tm_year - b.tm_year;
-        int days = (365 * years + intervening_leap_days +
-                        (a.tm_yday - b.tm_yday));
-
-        return (60 * (60 * (24 * days + (a.tm_hour - b.tm_hour)) +
-                                (a.tm_min - b.tm_min)) + (a.tm_sec - b.tm_sec));
-}
-
-time_t mktime_utc(struct tm *tm)
-{
-        time_t ret;
-        char orig_tz[128];
-        char *tz;
-
-        /* Save current time zone environment variable. */
-        tz = getenv("TZ");
-        if (tz != NULL) {
-                assert(strlen(tz) < sizeof (orig_tz));
-                strncpy(orig_tz, tz, sizeof (orig_tz) - 1);
-                orig_tz[sizeof (orig_tz) - 1] = '\0';
-        }
-
-        /* Set time zone to UTC. mktime() would be affected by daylight saving
-         * otherwise.
-         */
-        setenv("TZ", "", 1);
-        tzset();
-
-        ret = mktime(tm); //actual normalization within UTC time zone
-
-        /* Restore time zone to stored value. */
-        if (tz != NULL) {
-                assert(setenv("TZ", orig_tz, 1) == 0);
-        } else {
-                assert(unsetenv("TZ") == 0);
-        }
-        tzset();
-
-        return ret;
-}
-/**
- * @}
- */ //time_func
-
-
-/**
- * \defgroup lnf_fields_func LNF fields related functions
- * @{
- */
-int field_get_type(int field)
-{
-        int type;
-
-        if (field <= LNF_FLD_ZERO_ || field >= LNF_FLD_TERM_) {
-                return -1;
-        }
-
-        lnf_fld_info(field, LNF_FLD_INFO_TYPE, &type, sizeof (type));
-
-        return type;
-}
-
-size_t field_get_size(int field)
-{
-        const int type = field_get_type(field);
-
-        if (type == -1) {
-                return 0;
-        }
-
-        switch (type) {
-        case LNF_UINT8:
-                return sizeof (uint8_t);
-
-        case LNF_UINT16:
-                return sizeof (uint16_t);
-
-        case LNF_UINT32:
-                return sizeof (uint32_t);
-
-        case LNF_UINT64:
-                return sizeof (uint64_t);
-
-        case LNF_DOUBLE:
-                return sizeof (double);
-
-        case LNF_ADDR:
-                return sizeof (lnf_ip_t);
-
-        case LNF_MAC:
-                return sizeof (lnf_mac_t);
-
-        case LNF_BASIC_RECORD1:
-                return sizeof (lnf_brec1_t);
-
-        case LNF_NONE:
-        case LNF_STRING:
-        case LNF_MPLS:
-                assert(!"unimplemented LNF data type");
-
-        default:
-                assert(!"unknown LNF data type");
-        }
-}
-/**
- * @}
- */ //lnf_fields_func
