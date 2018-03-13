@@ -98,7 +98,7 @@ main(int argc, char *argv[])
     ERROR_IF(ecode != E_OK, ecode, "parsing arguments failed");
 
     // duplicate MPI_COMM_WORLD and create mpi_comm_main and mpi_comm_progress_bar
-    mpi_create_communicators();
+    mpi_comm_init();
     PRINT_DEBUG("created MPI communicators mpi_comm_main and mpi_comm_progress_bar");
 
     // split master and slave code
@@ -107,6 +107,9 @@ main(int argc, char *argv[])
     } else {
         slave_main(&args);
     }
+
+    // deallocate MPI communicators created by mpi_comm_init()
+    mpi_comm_free();
 
     if (ecode == E_OK || ecode == E_HELP) {
         PRINT_DEBUG("terminating with success");

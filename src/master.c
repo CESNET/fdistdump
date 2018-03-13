@@ -371,14 +371,17 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
         assert(msg_size >= 0);
 
         if (msg_size == 0) {  // empty message is a terminator
-            active_sources--;
-            PRINT_DEBUG("recv_loop: received termination, %" PRIu64
-                        " source(s) remaining", active_sources);
-
-            // start receiving next message into the same buffer
-            MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
-                      MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
-            continue;  // do not receive any more messages from this source
+            if (--active_sources) {
+                PRINT_DEBUG("recv_loop: received termination, %" PRIu64
+                            " source(s) remaining, continuing", active_sources);
+                // start receiving next message into the same buffer
+                MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
+                          MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
+            } else {
+                PRINT_DEBUG("recv_loop: received termination, no sources "
+                            " remaining, breaking");
+            }
+            continue;
         }
         msg_cntr++;  // do not include terminators in the counter
 
@@ -416,6 +419,7 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
         }
     }
 
+    assert(request == MPI_REQUEST_NULL);
     PRINT_DEBUG("recv_loop: received %" PRIu64 " message(s) with tag %d "
                 "containing %" PRIu64 " records", msg_cntr, mpi_tag, rec_cntr);
 }

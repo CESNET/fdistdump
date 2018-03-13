@@ -156,7 +156,7 @@ time_t mktime_utc(struct tm *tm)
  * @{
  */
 /**
- * @brief Create MPI communications mpi_comm_main and mpi_comm_progress_bar as a
+ * @brief Create MPI communicators mpi_comm_main and mpi_comm_progress_bar as a
  *        duplicates of MPI_COMM_WORLD.
  *
  * From the MPI perspective it is incorrect to start multiple collective
@@ -170,10 +170,20 @@ time_t mktime_utc(struct tm *tm)
  * simultaneously involved in any other collective in any other thread.
  */
 void
-mpi_create_communicators(void)
+mpi_comm_init(void)
 {
     MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_main);
     MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_progress_bar);
+}
+
+/**
+ * @brief Deallocate MPI communicators created by mpi_comm_init().
+ */
+void
+mpi_comm_free(void)
+{
+    MPI_Comm_free(&mpi_comm_main);
+    MPI_Comm_free(&mpi_comm_progress_bar);
 }
 /**
  * @}

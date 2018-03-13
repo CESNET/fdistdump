@@ -453,7 +453,7 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
         size_t size;
     } fast_fields[LNF_FLD_TERM_];//fields array compressed for faster access
     size_t fast_fields_cnt = 0;
-    uint32_t rec_size = 0;
+    xchg_rec_size_t rec_size = 0;
     for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
         if (args->fields[i].id == 0) {
             continue;  // the field is not used
@@ -475,7 +475,9 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
         file_rec_cntr++;
 
         // try to match the filter (if there is one)
-        if (t_ctx->lnf_filter && !lnf_filter_match(t_ctx->lnf_filter, t_ctx->lnf_rec)) {
+        if (t_ctx->lnf_filter && !lnf_filter_match(t_ctx->lnf_filter,
+                                                   t_ctx->lnf_rec))
+        {
             continue;
         }
         file_proc_rec_cntr++;
@@ -514,11 +516,13 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
         processed_summ_update(&t_ctx->processed_summ, t_ctx->lnf_rec);
 
         // write the 4 byte long record size before each record
-        *(uint32_t *)(t_ctx->buff[buff_idx] + buff_off) = rec_size;
+        xchg_rec_size_t *const rec_size_ptr =
+            (xchg_rec_size_t *)(t_ctx->buff[buff_idx] + buff_off);
+        *rec_size_ptr = rec_size;
         buff_off += sizeof (rec_size);
 
         // loop through the fields in the record and fill the data buffer
-        for (size_t i = 0; i < fast_fields_cnt; ++i) {
+        for (uint64_t i = 0; i < fast_fields_cnt; ++i) {
             lnf_rec_fget(t_ctx->lnf_rec, fast_fields[i].id,
                          t_ctx->buff[buff_idx] + buff_off);
             buff_off += fast_fields[i].size;
@@ -531,7 +535,7 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
     if (buff_rec_cntr != 0) {
         MPI_Wait(&request, MPI_STATUS_IGNORE);
         MPI_Isend(t_ctx->buff[buff_idx], buff_off, MPI_BYTE, ROOT_PROC, mpi_tag,
-                  mpi_comm_main, &request);
+                mpi_comm_main, &request);
 
         // increment the thread-shared counter of processed records
         #pragma omp atomic
@@ -548,6 +552,7 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
 
     // the buffers will be invalid after return, wait for the send to complete
     MPI_Wait(&request, MPI_STATUS_IGNORE);
+    assert(request == MPI_REQUEST_NULL);
 
     PRINT_DEBUG("`%s': read %zu records, processed %zu records", ff_path,
                 file_rec_cntr, file_proc_rec_cntr);
@@ -682,6 +687,7 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
 
     // the buffers will be invalid after return, wait for the send to complete
     MPI_Wait(&request, MPI_STATUS_IGNORE);
+    assert(request == MPI_REQUEST_NULL);
 
     send_terminator(mpi_tag);
     PRINT_DEBUG("send_raw_mem: sent %zu record(s) with tag %d", rec_cntr,
