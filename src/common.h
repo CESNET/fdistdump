@@ -307,6 +307,19 @@ uint64_t
 libnf_mem_rec_cnt(lnf_mem_t *lnf_mem);
 
 /**
+ * @brief Return length of the first record in the libnf memory in bytes.
+ *
+ * For now, all records in the libnf memory has same length, because libnf does
+ * not support variable-sized records.
+ *
+ * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
+ *
+ * @return Length of the first record in the libnf memory in bytes.
+ */
+uint64_t
+libnf_mem_rec_len(lnf_mem_t *lnf_mem);
+
+/**
  * @brief Sort the records in the memory if sort key is set
  *
  * It is not necessar to call this function to sort the records, because libnf

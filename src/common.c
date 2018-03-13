@@ -391,6 +391,37 @@ libnf_mem_rec_cnt(lnf_mem_t *lnf_mem)
 }
 
 /**
+ * @brief Return length of the first record in the libnf memory in bytes.
+ *
+ * For now, all records in the libnf memory has same length, because libnf does
+ * not support variable-sized records.
+ *
+ * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
+ *
+ * @return Length of the first record in the libnf memory in bytes.
+ */
+uint64_t
+libnf_mem_rec_len(lnf_mem_t *lnf_mem)
+{
+    // initialize the libnf cursor
+    lnf_mem_cursor_t *cursor;
+    int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+    if (!cursor) {
+        return 0;
+    }
+
+    // query size of one record
+    char rec_buff[LNF_MAX_RAW_LEN];
+    int rec_len = 0;
+    lnf_ret = lnf_mem_read_raw_c(lnf_mem, cursor, rec_buff, &rec_len,
+                                 sizeof (rec_buff));
+    assert(rec_len > 0 && lnf_ret == LNF_OK);
+
+    return rec_len;
+}
+
+/**
  * @brief Sort the records in the memory if sort key is set
  *
  * It is not necessar to call this function to sort the records, because libnf

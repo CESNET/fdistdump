@@ -595,35 +595,45 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
 {
     assert(m_ctx && lnf_mem && *lnf_mem);
 
-    // query and broadcast the number of records in the memory
-    uint64_t rec_cnt = libnf_mem_rec_cnt(*lnf_mem);
-    MPI_Bcast(&rec_cnt, 1, MPI_UINT64_T, ROOT_PROC, mpi_comm_main);
+    // query and broadcast number of records and their length
+    uint64_t rec_info[2] = { libnf_mem_rec_cnt(*lnf_mem),
+                             libnf_mem_rec_len(*lnf_mem) };
+    MPI_Bcast(rec_info, 2, MPI_UINT64_T, ROOT_PROC, mpi_comm_main);
 
-    // read and broadcast all records
+    // allocate required memory
+    const uint64_t rec_buff_size = rec_info[0] * rec_info[1];
+    char *const rec_buff = malloc(rec_buff_size);
+    ERROR_IF(!rec_buff, E_MEM, "master TPUT phase 3 buffer allocation failed");
+
+    // store all records into the buffer
+    uint64_t rec_buff_off = 0;
     lnf_mem_cursor_t *cursor;
     int lnf_ret = lnf_mem_first_c(*lnf_mem, &cursor);
     assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
-    for (size_t i = 0; i < rec_cnt; ++i) {
-        char rec_buff[LNF_MAX_RAW_LEN];
-        int rec_len = 0;
-        lnf_ret = lnf_mem_read_raw_c(*lnf_mem, cursor, rec_buff, &rec_len,
-                                     sizeof (rec_buff));
-        assert(rec_len > 0 && lnf_ret == LNF_OK);
-
-        MPI_Bcast(&rec_len, 1, MPI_INT, ROOT_PROC, mpi_comm_main);
-        MPI_Bcast(rec_buff, rec_len, MPI_BYTE, ROOT_PROC, mpi_comm_main);
+    for (uint64_t i = 0; i < rec_info[0]; ++i) {
+        int this_rec_len;
+        lnf_ret = lnf_mem_read_raw_c(*lnf_mem, cursor, rec_buff + rec_buff_off,
+                                     &this_rec_len,
+                                     rec_buff_size - rec_buff_off);
+        assert(lnf_ret == LNF_OK && this_rec_len > 0
+               && (uint64_t)this_rec_len == rec_info[1]);
+        rec_buff_off += rec_info[1]; // add record length
 
         lnf_ret = lnf_mem_next_c(*lnf_mem, &cursor);
         assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
     }
+    // broadcast all records at once
+    MPI_Bcast(rec_buff, rec_buff_size, MPI_BYTE, ROOT_PROC, mpi_comm_main);
+    free(rec_buff);
     PRINT_DEBUG("master TPUT phase 3: broadcasted %" PRIu64 " records",
-                rec_cnt);
+                rec_info[0]);
 
     // clear the libnf memory
     libnf_mem_free(*lnf_mem);
     error_code_t ecode = libnf_mem_init(lnf_mem, args->fields, false);
     assert(ecode == E_OK);
 
+    // receive the filnal top N records from the slaves
     recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT3,
               mem_write_raw_callback, *lnf_mem);
     PRINT_DEBUG("master TPUT phase 3: done");

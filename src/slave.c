@@ -89,9 +89,8 @@ struct slave_ctx {
     struct metadata_summ metadata_summ;    // summary of flow files metadata
 
     uint64_t tput_threshold;
-    char tput_rec_buff[LNF_MAX_RAW_LEN];
-    int tput_rec_len;
-    uint64_t tput_rec_cnt;
+    uint64_t tput_rec_info[2];  // 0: record count, 1: record size
+    char *tput_rec_buff;
 };
 
 // thread-private context
@@ -882,34 +881,34 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
 
     #pragma omp single
     {
-        // receive number of records in the masters memory
-        MPI_Bcast(&s_ctx->tput_rec_cnt, 1, MPI_UINT64_T, ROOT_PROC,
+        // receive the rec_info buffer size and allocate required memory
+        MPI_Bcast(s_ctx->tput_rec_info, 2, MPI_UINT64_T, ROOT_PROC,
+                  mpi_comm_main);
+        const uint64_t rec_buff_size =
+            s_ctx->tput_rec_info[0] * s_ctx->tput_rec_info[1];
+        s_ctx->tput_rec_buff = malloc(rec_buff_size);
+        ERROR_IF(!s_ctx->tput_rec_buff, E_MEM,
+                 "slave TPUT phase 3 buffer allocation failed");
+
+        // receive all records at once
+        MPI_Bcast(s_ctx->tput_rec_buff, rec_buff_size, MPI_BYTE, ROOT_PROC,
                   mpi_comm_main);
     }  // implicit barrier and flush
 
-    // initialize libnf memory for found records only
+    // initialize libnf memory designated for found records -- no aggregation
     lnf_mem_t *found_records;
     libnf_mem_init(&found_records, args->fields, true);
 
+    // loop through the received records
     uint64_t found_rec_cntr = 0;
-    for (uint64_t i = 0; i < s_ctx->tput_rec_cnt; ++i) {
-        int lnf_ret;
-        #pragma omp single
-        {
-            // receive a key from the master
-            MPI_Bcast(&s_ctx->tput_rec_len, 1, MPI_INT, ROOT_PROC,
-                      mpi_comm_main);
-            assert(IN_RANGE_INCL(s_ctx->tput_rec_len, 1,
-                                 (int)sizeof (s_ctx->tput_rec_buff) + 1));
-            MPI_Bcast(s_ctx->tput_rec_buff, s_ctx->tput_rec_len, MPI_BYTE,
-                      ROOT_PROC, mpi_comm_main);
-        }  // implicit barrier and flush
-
+    for (uint64_t i = 0; i < s_ctx->tput_rec_info[0]; ++i) {
         // lookup the received key in my libnf memory
+        char *const received_rec =
+            s_ctx->tput_rec_buff + i * s_ctx->tput_rec_info[1];
+        const int received_rec_len = s_ctx->tput_rec_info[1];
         lnf_mem_cursor_t *cursor;
-        lnf_ret = lnf_mem_lookup_raw_c(t_ctx->lnf_mem, s_ctx->tput_rec_buff,
-                                       s_ctx->tput_rec_len, &cursor);
-        #pragma omp barrier  // wait for each thred to finish the lookup
+        int lnf_ret = lnf_mem_lookup_raw_c(t_ctx->lnf_mem, received_rec,
+                                           received_rec_len, &cursor);
         assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
         if (lnf_ret == LNF_OK) {  // key found
             found_rec_cntr++;
@@ -923,11 +922,16 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
         }
     }
     PRINT_DEBUG("slave TPUT phase 3: received %" PRIu64 " records, found %"
-                PRIu64 " records", s_ctx->tput_rec_cnt, found_rec_cntr);
+                PRIu64 " records", s_ctx->tput_rec_info[0], found_rec_cntr);
 
+    // send the found records to the master
     send_raw_mem(found_records, 0, TAG_TPUT3, t_ctx->buff, XCHG_BUFF_SIZE);
-
     libnf_mem_free(found_records);
+
+    #pragma omp barrier  // ensure nobody is using the buffer any more
+    #pragma omp single
+    free(s_ctx->tput_rec_buff);
+
     PRINT_DEBUG("slave TPUT phase 3: done");
 }
 /**
