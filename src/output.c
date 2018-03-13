@@ -45,15 +45,6 @@
 #include <string.h>             // for strlen
 #include <time.h>               // for strftime, gmtime, localtime
 
-#include <arpa/inet.h>          // for inet_ntop
-#include <features.h>           // for __GLIBC_MINOR__, __GLIBC__
-#include <netinet/in.h>         // for ntohl, INET6_ADDRSTRLEN, IN6_IS_ADDR_...
-#include <sys/socket.h>         // for AF_INET, AF_INET6
-
-#include "common.h"             // for metadata_summ, processed_summ, ARRAY_...
-#include "print.h"              // for SNPRINTF_APPEND, PRINT_ERROR
-
-
 /*
  * Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED can
  * use undefined s6_addr32" GNU C library bug (fixed in version 2.25).
@@ -61,10 +52,16 @@
  */
 #if __GLIBC__ <= 2 && __GLIBC_MINOR__ < 25
 #define __USE_MISC
-#include <arpa/inet.h> //inet_ntop(), ntohl()
+#include <arpa/inet.h>          // for inet_ntop
 #else
-#include <arpa/inet.h> //inet_ntop(), ntohl()
+#include <arpa/inet.h>          // for inet_ntop
 #endif
+#include <features.h>           // for __GLIBC_MINOR__, __GLIBC__
+#include <netinet/in.h>         // for ntohl, INET6_ADDRSTRLEN, IN6_IS_ADDR_...
+#include <sys/socket.h>         // for AF_INET, AF_INET6
+
+#include "common.h"             // for metadata_summ, processed_summ, ARRAY_...
+#include "print.h"              // for SNPRINTF_APPEND, PRINT_ERROR
 
 
 #define PRETTY_PRINT_SEP " "
