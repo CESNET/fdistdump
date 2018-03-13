@@ -97,9 +97,9 @@ main(int argc, char *argv[])
     error_code_t ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
     ERROR_IF(ecode != E_OK, ecode, "parsing arguments failed");
 
-    // duplicate MPI_COMM_WORLD and create mpi_comm_main and mpi_comm_progress_bar
+    // duplicate MPI_COMM_WORLD and create mpi_comm_main and mpi_comm_progress
     mpi_comm_init();
-    PRINT_DEBUG("created MPI communicators mpi_comm_main and mpi_comm_progress_bar");
+    PRINT_DEBUG("created MPI communicators mpi_comm_main and mpi_comm_progress");
 
     // split master and slave code
     if (world_rank == ROOT_PROC) {

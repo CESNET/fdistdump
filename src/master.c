@@ -47,6 +47,7 @@
 #include <stdio.h>              // for fprintf, fclose, fflush, fopen, rewind
 #include <stdlib.h>             // for free, calloc, malloc
 #include <string.h>             // for strcmp, strerror, size_t, NULL
+#include <time.h>               // for timespec
 
 #include <libnf.h>              // for LNF_OK, lnf_mem_t, lnf_mem_first_c
 #include <mpi.h>                // for MPI_Bcast, MPI_Irecv, MPI_Reduce, MPI...
@@ -258,7 +259,7 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
     struct progress_bar_ctx pb_ctx = { 0 };
     pb_ctx.type = type;
     int comm_size;
-    MPI_Comm_size(mpi_comm_progress_bar, &comm_size);
+    MPI_Comm_size(mpi_comm_progress, &comm_size);
     assert(comm_size > 0);
     pb_ctx.sources_cnt = comm_size - 1;  // sources are only slaves
 
@@ -285,7 +286,7 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
     uint64_t tmp_zero = 0;  // sendbuf for MPI_Gather
     uint64_t files_cnt_goal_sum_tmp[pb_ctx.sources_cnt + 1];  // recvbuf
     MPI_Gather(&tmp_zero, 1, MPI_UINT64_T, files_cnt_goal_sum_tmp, 1,
-               MPI_UINT64_T, ROOT_PROC, mpi_comm_progress_bar);
+               MPI_UINT64_T, ROOT_PROC, mpi_comm_progress);
 
     // compute a sum of number of files to be processed (goals sum)
     for (uint64_t i = 0; i < pb_ctx.sources_cnt; ++i) {
@@ -301,9 +302,15 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
     ////////////////////////////////////////////////////////////////////////////
     // receiving and printing loop
     for (size_t i = 0; i < pb_ctx.files_cnt_goal_sum; ++i) {
+        // start receiving the message
+        MPI_Request request;
+        MPI_Irecv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
+                  mpi_comm_progress, &request);
         MPI_Status status;
-        MPI_Recv(NULL, 0, MPI_BYTE, MPI_ANY_SOURCE, TAG_PROGRESS,
-                mpi_comm_progress_bar, &status);
+        // use constant receive polling interval of 10 ms
+        mpi_wait_poll(&request, &status,
+                      (const struct timespec){ 0, 10000000ul });
+
         assert(status.MPI_SOURCE > 0);
         assert(status.MPI_TAG == TAG_PROGRESS);
 
@@ -352,17 +359,20 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
     MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
               MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
 
+
     // receiving loop
     uint64_t rec_cntr = 0;  // processed records counter
     uint64_t msg_cntr = 0;  // received messages counter
     bool limit_exceeded = false;
     uint64_t active_sources = source_cnt;
+    struct timespec polling_interval = { 0u, 1000000ul }; // start with 1 ms
     PRINT_DEBUG("recv_loop: receiving from %" PRIu64 " source(s)",
                 active_sources);
     while (active_sources) {
         // wait for a message from any source
         MPI_Status status;
-        MPI_Wait(&request, &status);
+        mpi_wait_poll(&request, &status, polling_interval);
+        polling_interval.tv_nsec = 0;  // switch to busy wait after first message
         assert(status.MPI_TAG == mpi_tag);
 
         // determine actual size of received message
@@ -790,20 +800,21 @@ master_main(const struct cmdline_args *args_local)
     double duration = -MPI_Wtime();  // start the time measurement
     args = args_local;  // share the command-line arguments by a global variable
 
-    // spawn one thread for each section
-    #pragma omp parallel sections num_threads(2)
+    // spawn one thread for each section -- sections are not used, because
+    // master's main thread should run as an OpenMP master thread
+    #pragma omp parallel num_threads(2)
     {
         // master's main thread
-        #pragma omp section
+        #pragma omp master
         {
             assert(mpi_comm_main != MPI_COMM_NULL);
             master_main_thread();
         }
 
-        // progress bar handling section (thread)
-        #pragma omp section
+        // progress bar handling thread
+        #pragma omp single
         {
-            assert(mpi_comm_progress_bar != MPI_COMM_NULL);
+            assert(mpi_comm_progress != MPI_COMM_NULL);
             progress_bar_thread(args->progress_bar_type,
                                 args->progress_bar_dest);
         }

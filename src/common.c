@@ -39,13 +39,14 @@
 
 #include "common.h"
 
-#include <assert.h>                // for assert
-#include <stddef.h>                // for NULL, size_t
-#include <stdio.h>                 // for snprintf
-#include <stdlib.h>                // for setenv, unsetenv, getenv
-#include <string.h>                // for strlen, strncpy
+#include <assert.h>  // for assert
+#include <stddef.h>  // for NULL, size_t
+#include <stdio.h>   // for snprintf
+#include <stdlib.h>  // for setenv, unsetenv, getenv
+#include <string.h>  // for strlen, strncpy
+#include <time.h>    // for nanosleep, timespec
 
-#include "print.h"                 // for PRINT_ERROR
+#include "print.h"   // for PRINT_ERROR
 
 
 #define TM_YEAR_BASE 1900
@@ -55,7 +56,7 @@
  * Global variables.
  */
 MPI_Comm mpi_comm_main = MPI_COMM_NULL;
-MPI_Comm mpi_comm_progress_bar = MPI_COMM_NULL;
+MPI_Comm mpi_comm_progress = MPI_COMM_NULL;
 
 
 /**
@@ -156,7 +157,7 @@ time_t mktime_utc(struct tm *tm)
  * @{
  */
 /**
- * @brief Create MPI communicators mpi_comm_main and mpi_comm_progress_bar as a
+ * @brief Create MPI communicators mpi_comm_main and mpi_comm_progress as a
  *        duplicates of MPI_COMM_WORLD.
  *
  * From the MPI perspective it is incorrect to start multiple collective
@@ -173,7 +174,7 @@ void
 mpi_comm_init(void)
 {
     MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_main);
-    MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_progress_bar);
+    MPI_Comm_dup(MPI_COMM_WORLD, &mpi_comm_progress);
 }
 
 /**
@@ -183,7 +184,43 @@ void
 mpi_comm_free(void)
 {
     MPI_Comm_free(&mpi_comm_main);
-    MPI_Comm_free(&mpi_comm_progress_bar);
+    MPI_Comm_free(&mpi_comm_progress);
+}
+
+/**
+ * @brief Alternative for MPI_Wait() without busy wait.
+ *
+ * Use MPI_Test() to tests for the completion of a specific send or receive and
+ * nanosleep() to avoid busy wait (which is what MPI_Wait() uses by default). If
+ * poll_interval is zero, use MPI_Wait().
+ *
+ * @param[in] request Communication request (handle).
+ * @param[out] status Status object (status).
+ * @param[in] poll_interval Suspend execution between consecutive MPI_Test()
+ *                          calls for (at least) this time has elapsed.
+ *
+ * @return Return code of the last MPI call or -1 if nanosleep() was interrupted
+ *         by a signal.
+ */
+int
+mpi_wait_poll(MPI_Request *request, MPI_Status *status,
+              const struct timespec poll_interval)
+{
+    if (poll_interval.tv_sec == 0 && poll_interval.tv_nsec == 0) {
+        return MPI_Wait(request, status);
+    }
+
+    int ret;
+    while (true) {
+        int op_completed;
+        ret = MPI_Test(request, &op_completed, status);
+        if (op_completed) {
+            return ret;
+        }
+        if (nanosleep(&poll_interval, NULL) != 0) {
+            return -1;  // interrupted by a signal
+        }
+    }
 }
 /**
  * @}

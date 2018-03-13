@@ -43,7 +43,7 @@
 #include <inttypes.h>           // for fixed-width integer types
 #include <stdbool.h>            // for bool
 #include <stddef.h>             // for NULL, size_t
-#include <time.h>               // for tzset, mktime
+#include <time.h>               // for time_t
 
 #include <libnf.h>              // for lnf_mem_t
 #include <mpi.h>                // for MPI_Comm
@@ -63,10 +63,11 @@
 
 // forward declarations
 struct tm;
+struct timespec;
 
 // exported global variabled
 extern MPI_Comm mpi_comm_main;
-extern MPI_Comm mpi_comm_progress_bar;
+extern MPI_Comm mpi_comm_progress;
 
 typedef uint32_t xchg_rec_size_t;
 
@@ -253,7 +254,7 @@ time_t mktime_utc(struct tm *tm);
 
 
 /**
- * @brief Create MPI communicators mpi_comm_main and mpi_comm_progress_bar as a
+ * @brief Create MPI communicators mpi_comm_main and mpi_comm_progress as a
  *        duplicates of MPI_COMM_WORLD.
  *
  * From the MPI perspective it is incorrect to start multiple collective
@@ -274,6 +275,25 @@ mpi_comm_init(void);
  */
 void
 mpi_comm_free(void);
+
+/**
+ * @brief Alternative for MPI_Wait() without busy wait.
+ *
+ * Use MPI_Test() to tests for the completion of a specific send or receive and
+ * nanosleep() to avoid busy wait (which is what MPI_Wait() uses by default). If
+ * poll_interval is zero, use MPI_Wait().
+ *
+ * @param[in] request Communication request (handle).
+ * @param[out] status Status object (status).
+ * @param[in] poll_interval Suspend execution between consecutive MPI_Test()
+ *                          calls for (at least) this time has elapsed.
+ *
+ * @return Return code of the last MPI call or -1 if nanosleep() was interrupted
+ *         by a signal.
+ */
+int
+mpi_wait_poll(MPI_Request *request, MPI_Status *status,
+              const struct timespec poll_interval);
 
 
 /**

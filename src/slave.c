@@ -708,10 +708,10 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
 static void
 progress_report_init(uint64_t files_cnt)
 {
-    assert(mpi_comm_progress_bar != MPI_COMM_NULL);
+    assert(mpi_comm_progress != MPI_COMM_NULL);
 
     MPI_Gather(&files_cnt, 1, MPI_UINT64_T, NULL, 0, MPI_UINT64_T, ROOT_PROC,
-               mpi_comm_progress_bar);
+               mpi_comm_progress);
 }
 
 /**
@@ -723,9 +723,9 @@ progress_report_init(uint64_t files_cnt)
 static void
 progress_report_next(void)
 {
-    assert(mpi_comm_progress_bar != MPI_COMM_NULL);
+    assert(mpi_comm_progress != MPI_COMM_NULL);
 
-    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS, mpi_comm_progress_bar);
+    MPI_Send(NULL, 0, MPI_BYTE, ROOT_PROC, TAG_PROGRESS, mpi_comm_progress);
 }
 /**
  * @}
