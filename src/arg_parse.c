@@ -75,10 +75,6 @@
 
 #define DEFAULT_PRETTY_TS_CONV "%F %T"
 
-#define MIN_IP_BITS 0
-#define MAX_IPV4_BITS 32
-#define MAX_IPV6_BITS 128
-
 
 /* Global variables. */
 static const char *usage_string =
@@ -110,6 +106,8 @@ static const char *help_string =
 "            Set verbosity level.\n"
 "\n"
 "Controlling output\n"
+"     --output-fields=field[,...]\n"
+"            Set the list of output fields.\n"
 "     --output-items= item_list\n"
 "            Set output items.\n"
 "     --output-format=format\n"
@@ -128,8 +126,6 @@ static const char *help_string =
 "            Set IP protocol output conversion format.\n"
 "     --output-duration-conv=duration_conversion\n"
 "            Set duration conversion format.\n"
-"     --fields=field[,...]\n"
-"            Set the list of printed fields.\n"
 "     --progress-bar-type=progress_bar_type\n"
 "            Set progress bar type.\n"
 "     --progress-bar-dest=progress_bar_destination\n"
@@ -150,8 +146,9 @@ enum {  // command line options, have to start above the ASCII table
     OPT_NO_TPUT = 256,  // disable the TPUT algorithm for Top-N queries
     OPT_NO_BFINDEX,  // disable Bloom filter indexes
 
-    OPT_OUTPUT_ITEMS,  // output items (records, processed records summary,
-                       // metadata summary)
+    OPT_OUTPUT_FIELDS,  // specification of listed fields
+    OPT_OUTPUT_ITEMS,   // output items (records, processed records summary,
+                        // metadata summary)
     OPT_OUTPUT_FORMAT,          // output (print) format
     OPT_OUTPUT_TS_CONV,         // output timestamp conversion
     OPT_OUTPUT_TS_LOCALTIME,    // output timestamp in localtime
@@ -161,7 +158,6 @@ enum {  // command line options, have to start above the ASCII table
     OPT_OUTPUT_IP_PROTO_CONV,   // output IP protocol conversion
     OPT_OUTPUT_DURATION_CONV,   // output IP protocol conversion
 
-    OPT_FIELDS,  // specification of listed fields
     OPT_PROGRESS_BAR_TYPE,  // type of the progress bar
     OPT_PROGRESS_BAR_DEST,  // destination of the progress bar
 
@@ -186,6 +182,7 @@ static const struct option long_opts[] = {
     {"no-tput", no_argument, NULL, OPT_NO_TPUT},
     {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
 
+    {"output-fields", required_argument, NULL, OPT_OUTPUT_FIELDS},
     {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
     {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
     {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
@@ -196,7 +193,6 @@ static const struct option long_opts[] = {
     {"output-proto-conv", required_argument, NULL, OPT_OUTPUT_IP_PROTO_CONV},
     {"output-duration-conv", required_argument, NULL, OPT_OUTPUT_DURATION_CONV},
 
-    {"fields", required_argument, NULL, OPT_FIELDS},
     {"progress-bar-type", required_argument, NULL, OPT_PROGRESS_BAR_TYPE},
     {"progress-bar-dest", required_argument, NULL, OPT_PROGRESS_BAR_DEST},
 
@@ -445,363 +441,6 @@ str_to_uint(const char *const string, unsigned int *res)
     return NULL;
 }
 /**  @} */  // str_to_int_group
-
-
-/**
- * @defgroup fields_group Functionality for manipulating with libnf fields.
- * @{
- */
-
-/**
- * @brief Convert libnf field ID to its textual representation.
- *
- * @param field_id ID of the field.
- *
- * @return Static read-only null-terminated string.
- */
-static const char *
-fields_id_to_str(const int field_id)
-{
-    assert(IN_RANGE_EXCL(field_id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
-
-    static char field_name_buff[LNF_INFO_BUFSIZE];
-    const int ret = lnf_fld_info(field_id, LNF_FLD_INFO_NAME, field_name_buff,
-                                 sizeof (field_name_buff));
-    assert(ret == LNF_OK);
-    return field_name_buff;
-}
-
-/**
- * @brief Add ordinary field to the field_info array.
- *
- * Ordinary field is non-aggregation-key and non-sort-key field. Aliases are not
- * allowed due to problems it causes later (conversion etc.). Dependencties of
- * computed fields LNF_FLD_CALC_* (e.g., LNF_FLD_FIRST and LNF_FLD_LAST for
- * LNF_FLD_CALC_DURATION, LNF_FLD_DOCTETS and LNF_FLD_CALC_DURATION for
- * LNF_FLD_CALC_BPS, ...) are handled by libnf.
- *
- * TODO: --fields srcport,srcport without an aggregation causes
- *       WARNING: command line argument: field `srcport' already set as an
- *       aggregation key
- *
- * @param[out] field_info Pointer to the structure to fill with the new field.
- * @param[in] field_id ID of the new ordinary field.
- * @param[in] ipv4_bits Use ony first bits of the IPv4 address; [0, 32].
- * @param[in] ipv6_bits Use ony first bits of the IPv6 address; [0, 128].
- *
- * @return E_OK on success, E_ARG on failure.
- */
-static error_code_t
-fields_add_ordinary(struct field_info *field_info, int field_id, int ipv4_bits,
-                    int ipv6_bits)
-{
-    assert(field_info && IN_RANGE_EXCL(field_id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
-    assert(IN_RANGE_INCL(ipv4_bits, MIN_IP_BITS, MAX_IPV4_BITS));
-    assert(IN_RANGE_INCL(ipv6_bits, MIN_IP_BITS, MAX_IPV6_BITS));
-
-    // test aliases
-    if (IN_RANGE_INCL(field_id, LNF_FLD_DPKTS_ALIAS, LNF_FLD_DSTADDR_ALIAS)
-            || field_id == LNF_FLD_PAIR_ADDR_ALIAS)
-    {
-        PRINT_ERROR(E_ARG, 0, "libnf field `%s' is an alias, use the original name",
-                    fields_id_to_str(field_id));
-        return E_ARG;
-    }
-
-    if ((field_info->flags & LNF_AGGR_FLAGS) == LNF_AGGR_KEY) {
-        // field was previously added as an aggregation key
-        PRINT_WARNING(E_ARG, 0, "field `%s' already set as an aggregation key",
-                      fields_id_to_str(field_id));
-    } else {
-        PRINT_DEBUG("fields: adding `%s' as an ordinary field",
-                    fields_id_to_str(field_id));
-        field_info->id = field_id;
-        // query and set default aggregation function (min, max, sum, OR, ... )
-        int aggr_func;
-        const int ret = lnf_fld_info(field_id, LNF_FLD_INFO_AGGR, &aggr_func,
-                                     sizeof (aggr_func));
-        assert(ret == LNF_OK);
-        field_info->flags |= aggr_func;  // OR with sort flags
-        // set IPv4/IPv6 bits, otherwise libnf memory would clear IP address
-        // fields which is undesired with pure sorting mode
-        field_info->ipv4_bits = ipv4_bits;
-        field_info->ipv6_bits = ipv6_bits;
-    }
-
-    return E_OK;
-}
-
-/**
- * @brief Add aggregation key field to the field_info array.
- *
- * Almost every libnf field can operate as an aggregation key, except for the
- * following limitations:
- *   - calculated fields (except for the durataion),
- *   - composite fields (such as LNF_FLD_BREC1).
- *
- * Dependencties of computed field LNF_FLD_CALC_DURATION (LNF_FLD_FIRST and
- * LNF_FLD_LAST) are handled by libnf; they are both used as aggregation keys
- * (using MIN/MAX aggregation functions) internally.
- *
- * If field_id is already present in fields[] (as an ordinary field or a sort
- * key), it is also made an aggregation key. One field can be both aggregation
- * and sort key at the same time.
- *
- * @param[out] field_info Pointer to the structure to fill with the new
- *                        aggregation key field.
- * @param[in] field_id ID of the new aggregation key field.
- * @param[in] ipv4_bits Use ony first bits of the IPv4 address; [0, 32].
- * @param[in] ipv6_bits Use ony first bits of the IPv6 address; [0, 128].
- *
- * @return E_OK on success, E_ARG on failure.
- */
-static error_code_t
-fields_add_aggr_key(struct field_info *field_info, int field_id, int ipv4_bits,
-                    int ipv6_bits)
-{
-    assert(field_info && IN_RANGE_EXCL(field_id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
-    assert(IN_RANGE_INCL(ipv4_bits, MIN_IP_BITS, MAX_IPV4_BITS));
-    assert(IN_RANGE_INCL(ipv6_bits, MIN_IP_BITS, MAX_IPV6_BITS));
-
-    // test aliases
-    if (IN_RANGE_INCL(field_id, LNF_FLD_DPKTS_ALIAS, LNF_FLD_DSTADDR_ALIAS)
-            || field_id == LNF_FLD_PAIR_ADDR_ALIAS)
-    {
-        PRINT_ERROR(E_ARG, 0, "libnf field `%s' is an alias, use the original name",
-                    fields_id_to_str(field_id));
-        return E_ARG;
-    }
-
-    // test fields which cannot be used as aggregation keys (libnf limitation)
-    if (IN_RANGE_INCL(field_id, LNF_FLD_CALC_BPS, LNF_FLD_CALC_BPP)
-            || field_id == LNF_FLD_BREC1)
-    {
-        PRINT_ERROR(E_ARG, 0, "libnf field `%s' cannot be set as an aggregation key",
-                    fields_id_to_str(field_id));
-        return E_ARG;
-    }
-
-    // add field as an aggregation key
-    const int aggr_flags = field_info->flags & LNF_AGGR_FLAGS;
-    if (aggr_flags && aggr_flags != LNF_AGGR_KEY) {
-        // field was previously added as an ordinary field
-        PRINT_WARNING(E_ARG, 0, "field `%s' already set as an ordinary field",
-                      fields_id_to_str(field_id));
-    } else {
-        PRINT_DEBUG("fields: adding `%s' as an aggregation key",
-                    fields_id_to_str(field_id));
-        field_info->id = field_id;
-        field_info->flags &= ~LNF_AGGR_FLAGS;  // clear aggregation flags
-        field_info->flags |= LNF_AGGR_KEY;     // merge with sort flags
-        field_info->ipv4_bits = ipv4_bits;
-        field_info->ipv6_bits = ipv6_bits;
-    }
-
-    return E_OK;
-}
-
-/**
- * @brief Add sort key field to the field_info array.
- *
- * Wheter libnf field can operate as a sort key depends on its default sort
- * direction: LNF_SORT_NONE means it cannot. Dependencties of the computed
- * fields are handled by libnf. If field_id is already present in fields[] (as
- * an ordinary field or an aggregation key), it is also made a sort key. One
- * field can be both aggregation and sort key at the same time.
- *
- * @param[out] field_info Pointer to the structure to fill with the new sort key
- *                        field.
- * @param[in] field_id ID of the new sort key field.
- * @param[in] direction Sort direction -- ascending, descending, or
- *                      LNF_SORT_NONE for default direction of the given field.
- * @param[in] ipv4_bits Use ony first bits of the IPv4 address; [0, 32].
- * @param[in] ipv6_bits Use ony first bits of the IPv6 address; [0, 128].
- *
- * @return E_OK on success, E_ARG on failure.
- */
-static error_code_t
-fields_add_sort_key(struct field_info *field_info, int field_id, int direction,
-                    int ipv4_bits, int ipv6_bits)
-{
-    assert(field_info && IN_RANGE_EXCL(field_id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
-    assert(direction == LNF_SORT_NONE || direction == LNF_SORT_ASC
-           || direction == LNF_SORT_DESC);
-    assert(IN_RANGE_INCL(ipv4_bits, MIN_IP_BITS, MAX_IPV4_BITS));
-    assert(IN_RANGE_INCL(ipv6_bits, MIN_IP_BITS, MAX_IPV6_BITS));
-
-    // this function may be called only once
-    static int sort_key_set = false;
-    if (sort_key_set) {
-        PRINT_WARNING(E_ARG, 0, "sort key already set, only one sort key is allowed");
-    } else {
-        sort_key_set = true;
-    }
-
-    // test aliases
-    if (IN_RANGE_INCL(field_id, LNF_FLD_DPKTS_ALIAS, LNF_FLD_DSTADDR_ALIAS)
-            || field_id == LNF_FLD_PAIR_ADDR_ALIAS)
-    {
-        PRINT_ERROR(E_ARG, 0, "libnf field `%s' is an alias, use the original name",
-                    fields_id_to_str(field_id));
-        return E_ARG;
-    }
-
-    // test if the field can operate as a sort key by querying default direction
-    int default_direction;
-    const int ret = lnf_fld_info(field_id, LNF_FLD_INFO_SORT,
-                                 &default_direction,
-                                 sizeof (default_direction));
-    assert(ret == LNF_OK);
-    assert(default_direction == LNF_SORT_NONE
-           || default_direction == LNF_SORT_ASC
-           || default_direction == LNF_SORT_DESC);
-    if (default_direction == LNF_SORT_NONE) {
-        PRINT_ERROR(E_ARG, 0, "libnf field `%s' cannot be used as a sort key",
-                    fields_id_to_str(field_id));
-        return E_ARG;
-    }
-
-    PRINT_DEBUG("fields: adding `%s' as a sort key",
-                fields_id_to_str(field_id));
-
-    if (direction == LNF_SORT_NONE) {
-        direction = default_direction;
-    }
-    field_info->id = field_id;
-    field_info->flags |= direction;  // merge with aggregation flags
-    // set IPv4/IPv6 bits, otherwise libnf memory would clear IP address fields
-    // which is undesired with pure sorting mode
-    field_info->ipv4_bits = ipv4_bits;
-    field_info->ipv6_bits = ipv6_bits;
-
-    return E_OK;
-}
-
-/**
- * @brief Parse single field info from its text representation.
- *
- * Valid text representation is field[/[IPv4 bits][/[IPv6 bits]]], e.g., srcip
- * or srcip/24 or srcip/24/64 or srcip//. If slashes are part of the string but
- * bits are not, bits default to 0. Bits are accepted for every field, but only
- * makes sense for IP address fields.
- *
- * @param[in] field_str Field in its text representation.
- * @param[out] field_id Parsed field ID.
- * @param[out] ipv4_bits Parsed IPv4 bits for IP address fields, 0 otherwise.
- * @param[out] ipv6_bits Parsed IPv6 bits for IP address fields, 0 otherwise.
- *
- * @return E_OK on success, E_ARG on failure.
- */
-static error_code_t
-fields_parse_str(const char field_str[], int *field_id, int *ipv4_bits,
-                 int *ipv6_bits)
-{
-    assert(field_str && field_id && ipv4_bits && ipv6_bits);
-
-    int ipv4_bits_in;
-    int ipv6_bits_in;
-    int field_id_in = lnf_fld_parse(field_str, &ipv4_bits_in, &ipv6_bits_in);
-
-    // test field string validity
-    if (field_id_in == LNF_FLD_ZERO_ || field_id_in == LNF_ERR_OTHER) {
-        PRINT_ERROR(E_ARG, 0, "unknown libnf field `%s'", field_str);
-        return E_ARG;
-    }
-
-    // test netmask validity (in case of IPv4/IPv6 address field)
-    if (!IN_RANGE_INCL(ipv4_bits_in, MIN_IP_BITS, MAX_IPV4_BITS)) {
-        PRINT_ERROR(E_ARG, 0, "invalid number of IPv4 bits: %d", ipv4_bits_in);
-        return E_ARG;
-    } else if (!IN_RANGE_INCL(ipv6_bits_in, MIN_IP_BITS, MAX_IPV6_BITS)) {
-        PRINT_ERROR(E_ARG, 0, "invalid number of IPv6 bits: %d", ipv6_bits_in);
-        return E_ARG;
-    }
-
-    // everything went fine, set output variables
-    *field_id = field_id_in;
-    *ipv4_bits = ipv4_bits_in;
-    *ipv6_bits = ipv6_bits_in;
-
-    return E_OK;
-}
-
-/**
- * @brief Parse multiple field infos from a string.
- *
- * Valid string contains of a FIELDS_DELIM separated field specifications (as
- * described in @ref fields_parse_str).
- *
- * @param[in,out] fields Array of field_info structures to be filled.
- * @param[in] fields_str FIELDS_DELIM separated field specifiacations.
- * @param[in] are_aggr_keys Flag determining whether fields should be added as
- *                          aggregation keys or as a ordinary fields.
- *
- * @return E_OK on success, other error code on failure.
- */
-static error_code_t
-fields_add_from_str(struct field_info fields[], char *fields_str,
-                    bool are_aggr_keys)
-{
-    assert(fields && fields_str);
-
-    error_code_t ecode = E_OK;
-
-    char *saveptr = NULL;
-    for (char *token = strtok_r(fields_str, FIELDS_DELIM, &saveptr);
-            token != NULL;
-            token = strtok_r(NULL, FIELDS_DELIM, &saveptr))
-    {
-        int field_id;
-        int ipv4_bits;  // use ony first bits of the IP address
-        int ipv6_bits;  // --- || ---
-        ecode = fields_parse_str(token, &field_id, &ipv4_bits, &ipv6_bits);
-        if (ecode != E_OK) {
-            return ecode;
-        }
-
-        if (are_aggr_keys) {
-            ecode = fields_add_aggr_key(fields + field_id, field_id, ipv4_bits,
-                                        ipv6_bits);
-        } else {
-            ecode = fields_add_ordinary(fields + field_id, field_id, ipv4_bits,
-                                        ipv6_bits);
-        }
-
-        if (ecode != E_OK) {
-            break;
-        }
-    }
-
-    return ecode;
-}
-
-#if 0
-/**
- * @brief Print all non-zero fields from supplied field_info array.
- *
- * @param[in] fields Array of field_info structures to be printed.
- */
-static void
-fields_print(const struct field_info fields[])
-{
-    assert(fields);
-
-    printf("\t%-15s%-12s%-12s%-11s%s\n", "name", "aggr flags", "sort flags",
-           "IPv4 bits", "IPv6 bits");
-    for (uint64_t i = 0; i < LNF_FLD_TERM_; ++i) {
-        if (!fields[i].id) {
-            continue;
-        }
-
-        printf("\t%-15s0x%-10x0x%-10x%-11d%d\n", fields_id_to_str(i),
-                fields[i].flags & LNF_AGGR_FLAGS,
-                fields[i].flags & LNF_SORT_FLAGS,
-                fields[i].ipv4_bits, fields[i].ipv6_bits);
-    }
-}
-#endif
-
-/**  @} */  // fields_group
 
 
 /**
@@ -1114,31 +753,81 @@ static error_code_t set_time_point(struct cmdline_args *args, char *time_str)
 
 
 /**
- * @brief Parse sort specification string and save the results.
+ * @brief Parse multiple libnf field from a string and save the results into the
+ *        fields structure.
+ *
+ * Valid string contains of a FIELDS_DELIM separated field specifications (as
+ * described in @ref fields_parse).
+ *
+ * @param[in] fields_spec FIELDS_DELIM separated field specifiacations.
+ * @param[in,out] fields Pointer to the fields structure to be filled.
+ * @param[in] are_aggr_keys Flag determining whether fields should be added as
+ *                          aggregation keys or as a output fields.
+ *
+ * @return True on success, false on failure.
+ */
+static bool
+parse_fields(char *const fields_spec, struct fields *const fields,
+             const bool are_aggr_keys)
+{
+    assert(fields_spec && fields_spec[0] != '\0' && fields);
+
+    PRINT_DEBUG("args: parsing fields spec `%s'", fields_spec);
+
+    char *saveptr = NULL;
+    for (char *token = strtok_r(fields_spec, FIELDS_DELIM, &saveptr);
+            token != NULL;
+            token = strtok_r(NULL, FIELDS_DELIM, &saveptr))
+    {
+        int field_id;
+        int field_alignment;
+        int ipv6_alignment;
+        bool success = field_parse(token, &field_id, &field_alignment,
+                                   &ipv6_alignment);
+        if (!success) {
+            return false;
+        }
+
+        if (are_aggr_keys) {
+            success = fields_add_aggr_key(fields, field_id, field_alignment,
+                                          ipv6_alignment);
+        } else {
+            success = fields_add_output_field(fields, field_id);
+        }
+        if (!success) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * @brief Parse sort specification string and save the results into the fields
+ *        structure.
  *
  * Sort specification string is expected in "field[#direction]" format, where
- * field is libnf field capable of working as sort key (see \ref
- * fields_add_sort_key) and direction is either "asc" for ascending direction or
- * "desc" for descending direction.
+ * the field is a libnf field able to work as sort key (see \ref fields_set_sort_key)
+ * and direction is either "asc" for ascending direction or "desc" for
+ * descending sort direction.
  *
- * @param[in,out] fields Array of field_info structures to be filled.
  * @param[in] stat_spec Sort specification string, usually gathered from the
  *                      command line.
+ * @param[in,out] fields Pointer to the fields structure to be filled.
  *
- * @return E_OK on success, E_ARG otherwise.
+ * @return True on success, false otherwise.
  */
-static error_code_t
-parse_sort_spec(struct cmdline_args *args, struct field_info fields[],
-                char *sort_spec)
+static bool
+parse_sort_spec(char *const sort_spec, struct fields *const fields)
 {
-    assert(fields && sort_spec && sort_spec[0] != '\0');
+    assert(sort_spec && sort_spec[0] != '\0' && fields);
 
     PRINT_DEBUG("args: parsing sort spec `%s'", sort_spec);
-    error_code_t ecode;
+
     int direction = LNF_SORT_NONE;
-    char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find first
+    char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find first #
     if (delim_pos) {  // delimiter found, direction should follow
-        *delim_pos = '\0';  // to distinguish between the sort key and direction
+        *delim_pos = '\0';  // to distinguish between the field and direction
         char *const direction_str = delim_pos + 1;
         PRINT_DEBUG("args: sort spec delimiter found, using `%s' as a sort key and `%s' as a direction",
                     sort_spec, direction_str);
@@ -1156,19 +845,13 @@ parse_sort_spec(struct cmdline_args *args, struct field_info fields[],
 
     // parse sort key from string; netmask is pointless in case of sort key
     int field_id;
-    int ipv4_bits;
-    int ipv6_bits;
-    ecode = fields_parse_str(sort_spec, &field_id, &ipv4_bits, &ipv6_bits);
-    if (ecode != E_OK) {
-        return ecode;
+    int field_alignment;
+    int ipv6_alignment;
+    if (!field_parse(sort_spec, &field_id, &field_alignment, &ipv6_alignment)) {
+        return false;
     }
 
-    ecode = fields_add_sort_key(fields + field_id, field_id, direction,
-                                ipv4_bits, ipv6_bits);
-    args->fields_sort_key = field_id;
-    args->fields_sort_dir = fields[field_id].flags & LNF_SORT_FLAGS;
-
-    return ecode;
+    return fields_set_sort_key(fields, field_id, direction);
 }
 
 
@@ -1229,7 +912,7 @@ static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
         /* Try to initialize filter. */
         int lnf_ret = lnf_filter_init_v2(&filter, filter_str);  // new fltr.
         if (lnf_ret != LNF_OK) {
-                PRINT_ERROR(E_ARG, lnf_ret, "cannot initialise filter `%s'",
+                PRINT_ERROR(E_ARG, lnf_ret, "cannot initialize filter `%s'",
                             filter_str);
                 return E_ARG;
         }
@@ -1416,8 +1099,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     args->use_tput = true;
     args->use_bfindex = true;
     args->rec_limit = SIZE_MAX;  // SIZE_MAX means record limit is unset
-    args->fields_sort_key = LNF_FLD_ZERO_;
-    args->fields_sort_dir = LNF_SORT_NONE;
 
     // revent all non-root processes from printing getopt_long() errors
     if (!root_proc) {
@@ -1431,7 +1112,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     char *time_point_optarg = NULL;
     char *time_range_optarg = NULL;
     char *verbosity_optarg = NULL;
-    char *ordinary_fields_optarg = NULL;
+    char *output_fields_optarg = NULL;
     // loop through all the command-line arguments
     while (true) {
         const int opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
@@ -1472,7 +1153,10 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             args->use_bfindex = false;
             break;
 
-        // output format affecting options
+        // output-affecting options
+        case OPT_OUTPUT_FIELDS:
+            output_fields_optarg = optarg;
+            break;
         case OPT_OUTPUT_ITEMS:
             ecode = set_output_items(&args->output_params, optarg);
             break;
@@ -1501,9 +1185,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             ecode = set_output_duration_conv(&args->output_params, optarg);
             break;
 
-        case OPT_FIELDS:
-            ordinary_fields_optarg = optarg;
-            break;
         case OPT_PROGRESS_BAR_TYPE:
             ecode = set_progress_bar_type(&args->progress_bar_type, optarg);
             break;
@@ -1531,7 +1212,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         if (ecode != E_OK) {
             return ecode;
         }
-    }  // while (true) loop through all the command-line arguments
+    }  // while (true) loop through all command-line arguments
 
     ////////////////////////////////////////////////////////////////////////////
     // parse and set verbosity level (early to affect also argument parsing)
@@ -1554,15 +1235,13 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     // parse aggregation and sort option argument options
     if (aggr_optarg) {  // aggregation mode with optional sorting
         args->working_mode = MODE_AGGR;
-        ecode = fields_add_from_str(args->fields, aggr_optarg, true);
-        if (ecode != E_OK) {
-            return ecode;
+        if (!parse_fields(aggr_optarg, &args->fields, true)) {
+            return E_ARG;
         }
         if (sort_optarg) {
             PRINT_DEBUG("args: using aggregation mode with sorting");
-            ecode = parse_sort_spec(args, args->fields, sort_optarg);
-            if (ecode != E_OK) {
-                return ecode;
+            if (!parse_sort_spec(sort_optarg, &args->fields)) {
+                return E_ARG;
             }
         } else {
             PRINT_DEBUG("args: using aggregation mode without sorting");
@@ -1570,9 +1249,8 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     } else if (sort_optarg) {  // sort mode
         PRINT_DEBUG("args: using sorting mode");
         args->working_mode = MODE_SORT;
-        ecode = parse_sort_spec(args, args->fields, sort_optarg);
-        if (ecode != E_OK) {
-            return ecode;
+        if (!parse_sort_spec(sort_optarg, &args->fields)) {
+            return E_ARG;
         }
     } else {  // listing mode
         PRINT_DEBUG("args: using listing mode");
@@ -1629,15 +1307,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         args->paths_cnt = argc - optind;
     }
 
-    // TODO
-    //// loop through all non-option args and copy them into the path string
-    //for (int i = optind; i < argc; ++i) {
-    //    strcat(args->path_str, argv[i]);
-    //    if (i != argc - 1) {  //not the last option, add separator
-    //        args->path_str[strlen(args->path_str)] = FILE_SEPARATOR;
-    //    }
-    //}
-
     ////////////////////////////////////////////////////////////////////////////
     // enable metadata-only mode if neither records nor
     // processed-records-summary is desired
@@ -1652,34 +1321,29 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         args->progress_bar_type = PROGRESS_BAR_TOTAL;
     }
 
-    // parse ordinary fields option argument
-    if (ordinary_fields_optarg) {
-        ecode = fields_add_from_str(args->fields, ordinary_fields_optarg,
-                                    false);
-        if (ecode != E_OK) {
-            return ecode;
+    // parse output fields option argument
+    if (output_fields_optarg) {
+        if (!parse_fields(output_fields_optarg, &args->fields, false)) {
+            return E_ARG;
         }
-    } else {  // ordinary fields not specidied, use default values
+    } else {  // output fields not specidied, use default values
         switch (args->working_mode) {
         case MODE_LIST:
         {
             char tmp[] = DEFAULT_LIST_FIELDS;  // modifiable copy
-            ecode = fields_add_from_str(args->fields, tmp, false);
-            assert(ecode == E_OK);
+            assert(parse_fields(tmp, &args->fields, false));
             break;
         }
         case MODE_SORT:
         {
             char tmp[] = DEFAULT_SORT_FIELDS;
-            ecode = fields_add_from_str(args->fields, tmp, false);
-            assert(ecode == E_OK);
+            assert(parse_fields(tmp, &args->fields, false));
             break;
         }
         case MODE_AGGR:
         {
             char tmp[] = DEFAULT_AGGR_FIELDS;
-            ecode = fields_add_from_str(args->fields, tmp, false);
-            assert(ecode == E_OK);
+            assert(parse_fields(tmp, &args->fields, false));
             break;
         }
         case MODE_META:
@@ -1775,50 +1439,50 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     if (args->use_tput) {
         if (args->working_mode != MODE_AGGR
                 || !args->rec_limit
-                || !IN_RANGE_INCL(args->fields_sort_key, LNF_FLD_DOCTETS,
-                                  LNF_FLD_AGGR_FLOWS))
+                || !args->fields.sort_key.field
+                || !IN_RANGE_INCL(args->fields.sort_key.field->id,
+                                  LNF_FLD_DOCTETS, LNF_FLD_AGGR_FLOWS))
         {
             PRINT_INFO("disabling TPUT, one or more conditions were not met");
             args->use_tput = false;
         }
     }
 
+    assert(fields_check(&args->fields));
     ////////////////////////////////////////////////////////////////////////////
-    // TODO: cleanup this
-    // if (root_proc && verbosity >= VERBOSITY_DEBUG) {
-    //     char begin[255], end[255];
-    //     char *path = args->path_str;
-    //     int c;
+    if (root_proc && verbosity >= VERBOSITY_DEBUG) {
+        fields_print_debug(&args->fields);
 
-    //     printf("------------------------------------------------------\n");
-    //     printf("mode: %s\n", working_mode_to_str(args->working_mode));
-    //     if (args->working_mode == MODE_AGGR && args->use_tput) {
-    //         printf("flags: using the TPUT algorithm for Top-N queries\n");
-    //     }
+        //char begin[255], end[255];
+        //char *path = args->path_str;
+        //int c;
 
-    //     printf("fields:\n");
-    //     fields_print(args->fields);
+        //printf("------------------------------------------------------\n");
+        //printf("mode: %s\n", working_mode_to_str(args->working_mode));
+        //if (args->working_mode == MODE_AGGR && args->use_tput) {
+        //    printf("flags: using the TPUT algorithm for Top-N queries\n");
+        //}
 
-    //     if(args->filter_str) {
-    //         printf("filter: %s\n", args->filter_str);
-    //     }
+        //if(args->filter_str) {
+        //    printf("filter: %s\n", args->filter_str);
+        //}
 
-    //     printf("paths:\n\t");
-    //     while ((c = *path++)) {
-    //         if (c == 0x1C) { //substitute separator with end of line
-    //             putchar('\n');
-    //             putchar('\t');
-    //         } else {
-    //             putchar(c);
-    //         }
-    //     }
-    //     putchar('\n');
+        //printf("paths:\n\t");
+        //while ((c = *path++)) {
+        //    if (c == 0x1C) { //substitute separator with end of line
+        //        putchar('\n');
+        //        putchar('\t');
+        //    } else {
+        //        putchar(c);
+        //    }
+        //}
+        //putchar('\n');
 
-    //     strftime(begin, sizeof(begin), "%c", &args->time_begin);
-    //     strftime(end, sizeof(end), "%c", &args->time_end);
-    //     printf("time range: %s - %s\n", begin, end);
-    //     printf("------------------------------------------------------\n\n");
-    // }
+        //strftime(begin, sizeof(begin), "%c", &args->time_begin);
+        //strftime(end, sizeof(end), "%c", &args->time_end);
+        //printf("time range: %s - %s\n", begin, end);
+        //printf("------------------------------------------------------\n\n");
+    }
 
     return E_OK;
 }

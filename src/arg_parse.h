@@ -43,10 +43,9 @@
 #include <stdbool.h>   // for bool
 #include <time.h>      // for struct tm
 
-#include <libnf.h>     // for LNF_FLD_TERM_
-
+#include "fields.h"    // for struct fields
 #include "common.h"    // for error_code_t, field_info, progress...
-#include "output.h"    // for output_params
+#include "output.h"    // for struct output_params
 
 
 struct cmdline_args {
@@ -57,19 +56,17 @@ struct cmdline_args {
     struct tm time_begin;  // beginning of the time range
     struct tm time_end;    // end of the time range
 
-    struct field_info fields[LNF_FLD_TERM_];  // used libnf fields
-    int fields_sort_key;  // TODO: remove
-    int fields_sort_dir;  // TODO: remove
-
     char *filter_str;  // input filter expression string
     uint64_t rec_limit;  // output record limit
     bool use_tput;  // enables the TPUT algorithm
     bool use_bfindex;    // enables the Bloom filter indexes
 
-    // output (printing) parameters
-    struct output_params output_params;
     progress_bar_type_t progress_bar_type;
     char *progress_bar_dest;
+
+    struct output_params output_params;
+
+    struct fields fields;  // libnf fields (aggregation/sort/output keys)
 };
 
 

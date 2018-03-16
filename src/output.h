@@ -1,4 +1,5 @@
-/** Declarations for printing IP flow records and fields.
+/**
+ * @brief Declarations for printing IP flow records and fields.
  */
 
 /*
@@ -47,6 +48,9 @@
 #include "common.h"             // for error_code_t
 
 
+/*
+ * Data types declarations.
+ */
 typedef enum {
         OUTPUT_ITEM_UNSET,
         OUTPUT_ITEM_YES,
@@ -115,10 +119,22 @@ struct output_params {
         output_duration_conv_t duration_conv;
 };
 
-void output_setup(struct output_params op, const struct field_info *fi);
 
-void print_rec(const uint8_t *data);
+/*
+ * Public function prototypes.
+ */
+void
+output_init(struct output_params op, const struct fields *const fields);
 
-error_code_t print_mem(lnf_mem_t *mem, uint64_t limit);
-void print_processed_summ(const struct processed_summ *s, double duration);
-void print_metadata_summ(const struct metadata_summ *s);
+void
+print_rec(const uint8_t *const data);
+
+void
+print_mem(lnf_mem_t *const mem, const uint64_t limit);
+
+void
+print_processed_summ(const struct processed_summ *const s,
+                     const double duration);
+
+void
+print_metadata_summ(const struct metadata_summ *const s);

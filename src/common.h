@@ -64,6 +64,7 @@
 // forward declarations
 struct tm;
 struct timespec;
+struct fields;
 
 // exported global variabled
 extern MPI_Comm mpi_comm_main;
@@ -152,13 +153,6 @@ struct metadata_summ {
         uint64_t bytes_icmp;
         uint64_t bytes_other;
 };
-
-struct field_info {
-        int id;
-        int flags;
-        int ipv4_bits;
-        int ipv6_bits;
-};
 /**
  * @}
  */ //common_struct
@@ -168,7 +162,7 @@ struct field_info {
  * \defgroup func_like_macros Function-like macros
  * @{
  */
-//size of staticly allocated array
+// number of elements in staticly allocated array
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 // compile-time strlen for static strings (minus one for terminating null-byte)
@@ -211,155 +205,100 @@ struct field_info {
                  _a > _b ? _a : _b; \
          })
 #endif
+
+
+/**
+* @brief Wrapper for a safer string appending using snprintf(). UNSAFE MACRO!
+*
+* The functions snprintf() and vsnprintf() do not write more than size bytes
+* (including the terminating null byte). The main reason behind this macro is
+* that if the output was truncated due to this limit, then THE RETURN VALUE IS
+* THE NUMBER OF CHARACTERS (EXCLUDING THE TERMINATING NULL BYTE) WHICH WOULD
+* HAVE BEEN WRITTEN to the final string if enough space had been available.
+* Thus, a return value of size or more means that the output was truncated.
+*
+* Both str_term and remaining_size are modified in each call:
+* If the added string did not have to be truncated, then str_term pointer is
+* moved to point to the new first terminating null byte and remaining_size size
+* is decreased by the length of the added string.
+* If snprintf() could not write all the bytes (the added string had to be
+* truncated) or completely skipped, remaining_size is set to 0 so the future
+* expansions of SNPRINTF_APPEND would not case buffer overflow.
+*
+* The usage should be something like:
+* char *const string = calloc(STR_LEN, sizeof (*string));
+* char *str_term = string;  // to prevent loss of the original pointer
+* size_t str_size = STR_LEN;
+* SNPRINTF_APPEND(str_term, str_size, "some format", ...);
+* SNPRINTF_APPEND(str_term, str_size, "some other format", ...);
+*
+* @param[in,out] str_term Pointer to the place in the string, where the
+*                         appending should start. Usually, it is the first
+*                         terminating null byte.
+* @param[in,out] remaining_size Number of bytes remaining in the string.
+* @param[in] format Format string to pass to snprintf().
+* @param[in] ... Additional argument corresponding to the format string.
+*/
+#define SNPRINTF_APPEND(str_term, remaining_size, format, ...) \
+    do { \
+        const size_t _would_write = snprintf(str_term, remaining_size, format, \
+                                             __VA_ARGS__); \
+        if (_would_write >= remaining_size) {  /* the output was truncated */ \
+            remaining_size = 0; \
+        } else {  /* the output was not truncated */ \
+            str_term += _would_write; \
+            remaining_size -= _would_write; \
+        } \
+    } while (false)
 /**
  * @}
  */ //func_like_macros
 
 
-/** \brief Convert working_mode_t working mode to human-readable string.
- *
- * \return Static string at most MAX_STR_LEN long.
- */
-char * working_mode_to_str(working_mode_t working_mode);
+// time_func
+int
+tm_diff(const struct tm a, const struct tm b);
+
+time_t
+mktime_utc(struct tm *tm);
 
 
-/** \brief Yield the time difference between a and b.
- *
- * Measured in seconds, ignoring leap seconds. Compute intervening leap days
- * correctly even if year is negative. Take care to avoid int overflow in leap
- * day calculations, but it's OK to assume that A and B are close to each other.
- * Copy paste from glibc 2.22.
- *
- * \param[in] a Subtrahend.
- * \param[in] b Minuend.
- * \return Difference in seconds.
- */
-int tm_diff(const struct tm a, const struct tm b);
-
-/** \brief Portable version of timegm().
- *
- * The mktime() function modifies the fields of the tm structure, if structure
- * members are outside their valid interval, they will be normalized (so that,
- * for  example,  40  October is changed  into  9 November). We need this. But
- * also tm_isdst is set (regardless of its initial value) to a positive value or
- * to 0, respectively, to indicate whether DST is or is not in effect at the
- * specified time. This is what we don't need. Therefore, time zone is set to
- * UTC before calling mktime() in this function and restore previous time zone
- * afterwards. mktime() will normalize tm structure, nothing more.
- *
- * \param[inout] tm Broken-down time. May be altered (normalized).
- * \return Calendar time representation of tm.
- */
-time_t mktime_utc(struct tm *tm);
-
-
-/**
- * @brief Create MPI communicators mpi_comm_main and mpi_comm_progress as a
- *        duplicates of MPI_COMM_WORLD.
- *
- * From the MPI perspective it is incorrect to start multiple collective
- * communications on the same communicator in same time (more info in Section
- * 5.13 in the MPI standard). We need collective communication for progress bar
- * and for general use during the query, and because this code is executed
- * concurrently, we need two separate communicators.
- *
- * MPI_Comm_dup() is collective on the input communicator, so it is
- * erroneous for a thread to attempt to duplicate a communicator that is
- * simultaneously involved in any other collective in any other thread.
- */
+// mpi_common
 void
 mpi_comm_init(void);
 
-/**
- * @brief Deallocate MPI communicators created by mpi_comm_init().
- */
 void
 mpi_comm_free(void);
 
-/**
- * @brief Alternative for MPI_Wait() without busy wait.
- *
- * Use MPI_Test() to tests for the completion of a specific send or receive and
- * nanosleep() to avoid busy wait (which is what MPI_Wait() uses by default). If
- * poll_interval is zero, use MPI_Wait().
- *
- * @param[in] request Communication request (handle).
- * @param[out] status Status object (status).
- * @param[in] poll_interval Suspend execution between consecutive MPI_Test()
- *                          calls for (at least) this time has elapsed.
- *
- * @return Return code of the last MPI call or -1 if nanosleep() was interrupted
- *         by a signal.
- */
 int
 mpi_wait_poll(MPI_Request *request, MPI_Status *status,
               const struct timespec poll_interval);
 
 
-/**
- * @brief Allocate a libnf memory and configure for specified fields.
- *
- * If sort_only_mode is false, the memory will be a hash table to perform
- * aggregation based on one or more aggregation keys.
- * If sort_only_mode is true, the memory will be a linked list to store each
- * record as it is.
- * Destructor function libnf_mem_free() should be called to free the memory.
- *
- * @param[in] lnf_mem Double pointer to the libnf memory data type.
- * @param[in] fields Array of field_info structures based on which the memory
- *                   will be configured.
- * @param sort_only_mode Switches between hash table and linked list.
- *
- * @return E_OK on success, E_LNF on failure.
- */
-error_code_t
-libnf_mem_init(lnf_mem_t **const lnf_mem, const struct field_info fields[],
-               const bool sort_only_mode);
-
-/**
- * @brief Calculate number of records in the libnf memory.
- *
- * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
- *
- * @return Number of records in the supplied memory.
- */
-uint64_t
-libnf_mem_rec_cnt(lnf_mem_t *lnf_mem);
-
-/**
- * @brief Return length of the first record in the libnf memory in bytes.
- *
- * For now, all records in the libnf memory has same length, because libnf does
- * not support variable-sized records.
- *
- * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
- *
- * @return Length of the first record in the libnf memory in bytes.
- */
-uint64_t
-libnf_mem_rec_len(lnf_mem_t *lnf_mem);
-
-/**
- * @brief Sort the records in the memory if sort key is set
- *
- * It is not necessar to call this function to sort the records, because libnf
- * does the sorting automatically with every access. This function triggers the
- * sorting process by requiring first record, then it returns. This is useful
- * for example for measuring how long does the sorting take.
- *
- * @param[in] lnf_mem Pointer to the libnf memory (will not be modified).
- */
+// libnf_mem
 void
-libnf_mem_sort(lnf_mem_t *lnf_mem);
+libnf_mem_init_ht(lnf_mem_t **const lnf_mem, const struct fields *const fields);
 
-/**
- * @brief Free memory allocated by libnf_mem_init().
- *
- * @param[in] lnf_mem Pointer to the libnf memory data type.
- */
+void
+libnf_mem_init_list(lnf_mem_t **const lnf_mem,
+                    const struct fields *const fields);
+
 void
 libnf_mem_free(lnf_mem_t *const lnf_mem);
 
+uint64_t
+libnf_mem_rec_cnt(lnf_mem_t *const lnf_mem);
 
-int field_get_type(int field);
-size_t field_get_size(int field);
+uint64_t
+libnf_mem_rec_len(lnf_mem_t *const lnf_mem);
+
+void
+libnf_mem_sort(lnf_mem_t *const lnf_mem);
+
+const char *
+libnf_sort_dir_to_str(const int sort_dir);
+
+
+// libnf_common
+const char *
+libnf_aggr_func_to_str(const int aggr_func);

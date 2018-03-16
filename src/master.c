@@ -53,7 +53,7 @@
 #include <mpi.h>                // for MPI_Bcast, MPI_Irecv, MPI_Reduce, MPI...
 
 #include "arg_parse.h"          // for cmdline_args
-#include "common.h"             // for libnf_mem_free, libnf_mem_init, ...
+#include "common.h"             // for libnf_mem_free, libnf_mem_init_*, ...
 #include "output.h"             // for print_mem, output_setup, ...
 #include "print.h"              // for PRINT_DEBUG, ERROR_IF, PRINT_WARNING
 
@@ -70,17 +70,6 @@ static const struct cmdline_args *args;
 struct master_ctx {  // thread-shared context
     uint8_t *rec_buff[2];  // two record buffers for IO/communication overlap
     uint64_t slave_threads_cnt;  // number threads on all slaves
-};
-
-struct mem_write_callback_data {
-    lnf_mem_t *lnf_mem;
-    lnf_rec_t *lnf_rec;
-
-    struct {
-        int id;
-        size_t size;
-    } fields[LNF_FLD_TERM_];  // fields array compressed for faster access
-    size_t fields_cnt;        // number of fields present in the fields array
 };
 
 typedef error_code_t (*recv_callback_t)(uint8_t *data, xchg_rec_size_t data_len,
@@ -505,8 +494,8 @@ tput_phase_1_find_bottom(lnf_mem_t *const lnf_mem)
 
     // extract the value of the sort key from the record
     uint64_t bottom;
-    assert(args->fields_sort_key);
-    lnf_ret = lnf_rec_fget(lnf_rec, args->fields_sort_key, &bottom);
+    assert(args->fields.sort_key.field);
+    lnf_ret = lnf_rec_fget(lnf_rec, args->fields.sort_key.field->id, &bottom);
     assert(lnf_ret == LNF_OK);
 
     lnf_rec_free(lnf_rec);
@@ -570,8 +559,7 @@ tput_phase_2(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem,
 
     // clear the libnf memory
     libnf_mem_free(*lnf_mem);
-    error_code_t ecode = libnf_mem_init(lnf_mem, args->fields, false);
-    assert(ecode == E_OK);
+    libnf_mem_init_ht(lnf_mem, &args->fields);
 
     // calculate threshold from the phase 1 bottom and broadcast it
     uint64_t threshold = ceil((double)phase_1_bottom / m_ctx->slave_threads_cnt);
@@ -640,8 +628,7 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
 
     // clear the libnf memory
     libnf_mem_free(*lnf_mem);
-    error_code_t ecode = libnf_mem_init(lnf_mem, args->fields, false);
-    assert(ecode == E_OK);
+    libnf_mem_init_ht(lnf_mem, &args->fields);
 
     // receive the filnal top N records from the slaves
     recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT3,
@@ -673,39 +660,22 @@ sort_main(struct master_ctx *const m_ctx)
 {
     assert(m_ctx);
 
-    struct mem_write_callback_data mwcd = { 0 };
-
-    // fill the compressed fields array
-    for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
-        if (args->fields[i].id == 0) {
-            continue;  // field is not present
-        }
-        mwcd.fields[mwcd.fields_cnt].id = i;
-        mwcd.fields[mwcd.fields_cnt].size = field_get_size(i);
-        mwcd.fields_cnt++;
-    }
-
     // initialize the libnf sorting memory and set its parameters
-    libnf_mem_init(&mwcd.lnf_mem, args->fields, true);
-
-    // initialize empty libnf record for writing
-    int lnf_ret = lnf_rec_init(&mwcd.lnf_rec);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+    lnf_mem_t *lnf_mem;
+    libnf_mem_init_list(&lnf_mem, &args->fields);
 
     // fill the libnf linked list memory with records received from the slaves
     recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_SORT,
-              mem_write_raw_callback, mwcd.lnf_mem);
+              mem_write_raw_callback, lnf_mem);
 
     // sort record in the libnf memory (not needed)
     PRINT_DEBUG("sorting records in master's libnf memory...");
-    libnf_mem_sort(mwcd.lnf_mem);
+    libnf_mem_sort(lnf_mem);
     PRINT_DEBUG("sorting records in master's libnf memory done");
 
     // print all records in the libnf linked list memory
-    print_mem(mwcd.lnf_mem, args->rec_limit);
-
-    lnf_rec_free(mwcd.lnf_rec);
-    libnf_mem_free(mwcd.lnf_mem);
+    print_mem(lnf_mem, args->rec_limit);
+    libnf_mem_free(lnf_mem);
 }
 
 /**
@@ -718,7 +688,7 @@ aggr_main(struct master_ctx *const m_ctx)
 
     // initialize aggregation memory and set its parameters
     lnf_mem_t *lnf_mem;
-    libnf_mem_init(&lnf_mem, args->fields, false);
+    libnf_mem_init_ht(&lnf_mem, &args->fields);
 
     if (args->use_tput) {
         // use the TPUT Top-N algorithm
@@ -756,7 +726,7 @@ master_main_thread(void)
         master_ctx_init((uint64_t)slave_threads_cnt);
     PRINT_DEBUG("using %d slave thread(s) in total", m_ctx->slave_threads_cnt);
 
-    output_setup(args->output_params, args->fields);
+    output_init(args->output_params, &args->fields);
 
     // send, receive, process according to the specified working mode
     switch (args->working_mode) {

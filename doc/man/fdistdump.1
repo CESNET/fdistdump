@@ -56,7 +56,7 @@ Both MPI program launch modes are supported: single program, multiple data (SPMD
 .TP
 .B SPMD
 The SPMD mode is demonstrated by the first line in the \fBSYNOPSIS\fR section above.
-In the this mode, all \fIoptions\fR and \fIpath\fRs are identical for each \fBfdistdump\fR instance.
+In the this mode, all \fIoptions\fR and \fIpath\fRs are identical for each \fBfdistdump\fR process.
 Every specified \fIpath\fR will be processed separately by each slave, therefore each \fIpath\fR should be accessible from every node where the slave process is invoked.
 Typical use case for this mode is when the slaves use a local storage for flow files, because each slave stores different set of flow files on the same path.
 If this mode would be used with a shared storage, multiple slaves would process the same set of flow files, which is usually not what you want.
@@ -70,7 +70,7 @@ $ mpiexec -host MasterNode,SlaveNode1,SlaveNode2 fdistdump \fI/local/flow/storag
 .TP
 .B MPMD
 The MPMD mode is invoked using the colon notation and is demonstrated by the second line in the \fBSYNOPSIS\fR section above.
-It allows to set different \fIlocal_MPI_options\fR and \fIpath\fRs for each \fBfdistdump\fR instance.
+It allows to set different \fIlocal_MPI_options\fR and \fIpath\fRs for each \fBfdistdump\fR process.
 All \fIoptions\fR should be identical for each \fBfdistdump\fR process, otherwise the behavior is undefined.
 Typical use case for this mode is when the slaves use a shared storage for flow files, because each slave can be assigned with a different set of flow files.
 .PP
@@ -149,7 +149,7 @@ This may be used to read different files by each slave from a shared storage.
 .BR -a , \ --aggregation=\fIfield\fR[,...]
 Aggregate flow records together by any number of \fIfield\fRs.
 Option argument is comma separated list of \fIfield\fRs, at least one \fIfield\fR is mandatory.
-For more informations about valid \fIfield\fR strings see the \fB--fields\fR argument description.
+For more informations about valid \fIfield\fR strings see the \fBFIELDS\fR section.
 
 .TP
 .BR -f , \ --filter=\fIfilter
@@ -183,7 +183,7 @@ On the other hand, without aggregation, this may vastly reduce the number of pro
 Set record sort order.
 Sort key is specified by \fIfield\fR.
 Sort \fIdirection\fR is either \fBasc\fR or \fBdesc\fR string, which are abbreviations for ascending and descending direction, respectively.
-For more informations about valid \fIfield\fR strings see the \fB--fields\fR argument description.
+For more informations about valid \fIfield\fR strings see the \fBFIELDS\fR section.
 
 .TP
 .BR -s , \ --statistic=\fIstatistic
@@ -258,6 +258,20 @@ Default level is 2, i.e. show errors and warnings.
 
 .\" Controlling the output subsection ---------------------
 .SS Controlling the Output
+.TP
+.BI --output-fields= field \fR[,...]
+Set the list of output fields.
+Option argument is comma separated list of \fIfield\fRs.
+Sort key (\fB-s\fR) and all aggregation keys (\fB-a\fR) are added implicitly.
+If the argument is missing, default output fields are used (see the \fBFIELDS\fR section).
+If the option argument is empty, no additional output fields are used (only the implicit fields).
+
+Without aggregation, default output fields are
+.BR first ,\  packets ,\  bytes ,\  srcip ,\  dstip ,\  srcport ,\  dstport ,\ and\  proto .
+.br
+With aggregation enabled, default output fields are
+.BR duration ,\  flows ,\  packets ,\  bytes ,\  bps ,\  pps ,\ and\  bpp .
+
 .TP
 .BI --output-items= item_list
 Set output items.
@@ -404,36 +418,6 @@ raw integer is printed. Using
 duration is converted into HH:MM:SS.MS string.
 
 .TP
-.BI --fields= field \fR[,...]
-Set the list of printed fields.
-Option argument is comma separated list of \fIfield\fRs.
-If the option argument is empty, no fields are added.
-
-Valid text representation of a single item is \fIfield\fR[/[\fIIPv4 bits\fR][/[\fIIPv6 bits\fR]]], e.g., srcip or srcip/24 or srcip/24/64 or srcip//.
-If slashes are not part of the string, bits default to the whole IP address.
-If slashes are part of the string but bits are not, bits default to 0.
-Bits are accepted for every field, but only makes sense for IP addresses.
-Set of supported \fBfield\fRs depends on your version of \fBlibnf\fR library.
-To discover currently supported fields, \fBlibnf\fR comes with \fBlibnf-info\fR executable, which prints out list of currently supported fields and their meaning.
-
-Without enabled aggregation, default fields are
-.BR first ,\  packets ,\  bytes ,\  srcip ,\  dstip ,\  srcport ,\  dstport \ and\  proto ,
-with aggregation enabled, default fields are
-.BR duration ,\  flows ,\  packets ,\  bytes ,\  bps ,\  pps \ and\  bpp
-plus aggregation keys.
-
-Without aggregation, you can add every valid field.
-Just keep in mind, that the more fields are present, the more data have to processed and transferred from slaves to master.
-With \fBnfdump\fR file format, it isn't possible to determine if the field is present in the flow record or not.
-If the desired field isn't present, it will be printed as zero (or what the specified output conversion creates from zero).
-
-With aggregation, this can be a little tricky.
-You can add only some fields without actually making the field an aggregation key.
-Those fields are
-.BR first ,\  last ,\  received ,\  bytes ,\  packets ,\  outbytes ,\ outpackets ,\  flows ,\  tcpflags ,\  eventtime ,\  duration ,\  bps ,\  pps \ and\  bpp .
-If any other \fIfield\fR is present in the list, it will be used as an aggregation key.
-
-.TP
 .BI --progress-bar-type= progress_bar_type
 Set progress bar type.
 Progress is calculated with resolution of one file.
@@ -496,6 +480,23 @@ Print a help message and exit.
 .B --version
 Display version information and exit.
 
+
+.\" FIELDS section -------------------------------------------------------------
+.SH FIELDS
+Valid text representation of a single libnf field is \fIfield\fR[/\fIalignment\fR[/\fIIPv6 alignment\fR]], e.g., srcip or srcip/24, or srcip/24/64.
+Alignment is accepted for every field, but are only used when the field is an aggregation key.
+Moreover, only IP addresses and timestamps are currently affected.
+Alignment in conjunction with IP addresses works as a netmask.
+In conjunction with timestamps (e.g., \fBfirst\fR or \fBlast\fR), the greater the alignment value is, the less precise the timestamp is.
+If slashes are not part of the string, no alignment is used.
+If slashes are part of the string but alignment is not, the behaviour is undefined.
+
+Set of supported \fBfield\fRs depends on the installed version of \fBlibnf\fR library.
+To discover currently supported fields, \fBlibnf\fR comes with \fBlibnf-info\fR executable, which prints out list of currently supported fields and their meaning.
+Keep in mind that the more fields are present, the more data have to processed, transferred from slaves to master, etc.
+
+With \fBnfdump\fR file format it is not possible to determine whether the field is present in the flow record or not.
+If the desired field is not present, it will be printed as a zero (or what the specified output conversion creates from the zero).
 
 .\" EXIT STATUS section --------------------------------------------------------
 .SH EXIT STATUS

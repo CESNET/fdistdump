@@ -129,7 +129,7 @@ init_filter(lnf_filter_t **lnf_filter, char *filter_str)
     assert(lnf_filter && filter_str && strlen(filter_str) != 0);
 
     int lnf_ret = lnf_filter_init_v2(lnf_filter, filter_str);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "cannot initialise filter `%s'",
+    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "cannot initialize filter `%s'",
              filter_str);
 }
 
@@ -209,12 +209,12 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
 
     case MODE_SORT:
         // initialize the libnf sorting memory and set its parameters
-        libnf_mem_init(&t_ctx->lnf_mem, args->fields, true);
+        libnf_mem_init_list(&t_ctx->lnf_mem, &args->fields);
         break;
 
     case MODE_AGGR:
         // initialize the libnf aggregation memory and set its parameters
-        libnf_mem_init(&t_ctx->lnf_mem, args->fields, false);
+        libnf_mem_init_ht(&t_ctx->lnf_mem, &args->fields);
         break;
 
     case MODE_META:
@@ -446,23 +446,9 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
 {
     assert(ff_path && s_ctx && t_ctx);
 
-    // fill the fast fields array and calculate constant record size
-    struct {
-        int id;
-        size_t size;
-    } fast_fields[LNF_FLD_TERM_];//fields array compressed for faster access
-    size_t fast_fields_cnt = 0;
-    xchg_rec_size_t rec_size = 0;
-    for (size_t i = 0; i < LNF_FLD_TERM_; ++i) {
-        if (args->fields[i].id == 0) {
-            continue;  // the field is not used
-        }
-        fast_fields[fast_fields_cnt].id = i;
-        rec_size += fast_fields[fast_fields_cnt].size = field_get_size(i);
-        fast_fields_cnt++;
-    }
 
     // loop through all records, HOT PATH!
+    const xchg_rec_size_t rec_size = args->fields.all_sizes_sum;
     size_t file_rec_cntr = 0;
     size_t file_proc_rec_cntr = 0;
     bool buff_idx = 0; //index to the currently used data buffer
@@ -521,10 +507,10 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
         buff_off += sizeof (rec_size);
 
         // loop through the fields in the record and fill the data buffer
-        for (uint64_t i = 0; i < fast_fields_cnt; ++i) {
-            lnf_rec_fget(t_ctx->lnf_rec, fast_fields[i].id,
+        for (size_t i = 0; i < args->fields.all_cnt; ++i) {
+            lnf_rec_fget(t_ctx->lnf_rec, args->fields.all[i].id,
                          t_ctx->buff[buff_idx] + buff_off);
-            buff_off += fast_fields[i].size;
+            buff_off += args->fields.all[i].size;
         }
 
         buff_rec_cntr++;
@@ -846,12 +832,12 @@ tput_phase_2(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
     }  // implicit barrier and flush
 
     // find number of records satisfying the threshold
-    assert(args->fields_sort_key);
-    assert(args->fields_sort_dir == LNF_SORT_DESC
-           || args->fields_sort_dir == LNF_SORT_ASC);
+    assert(args->fields.sort_key.field);
+    assert(args->fields.sort_key.direction == LNF_SORT_DESC
+           || args->fields.sort_key.direction == LNF_SORT_ASC);
     const uint64_t threshold_cnt = tput_phase_2_find_threshold_cnt(
-            t_ctx->lnf_mem, s_ctx->tput_threshold, args->fields_sort_key,
-            args->fields_sort_dir);
+            t_ctx->lnf_mem, s_ctx->tput_threshold,
+            args->fields.sort_key.field->id, args->fields.sort_key.direction);
 
     // send all records satisfying the threshold
     send_raw_mem(t_ctx->lnf_mem, threshold_cnt, TAG_TPUT2, t_ctx->buff,
@@ -897,7 +883,7 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
 
     // initialize libnf memory designated for found records -- no aggregation
     lnf_mem_t *found_records;
-    libnf_mem_init(&found_records, args->fields, true);
+    libnf_mem_init_list(&found_records, &args->fields);
 
     // loop through the received records
     uint64_t found_rec_cntr = 0;
