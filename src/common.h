@@ -66,7 +66,7 @@ struct tm;
 struct timespec;
 struct fields;
 
-// exported global variabled
+// exported global variables
 extern MPI_Comm mpi_comm_main;
 extern MPI_Comm mpi_comm_progress;
 

@@ -59,8 +59,8 @@
 #include "bfindex.h"            // for bfindex_contains, bfindex_flow_to_ind...
 #endif  // HAVE_LIBBFINDEX
 #include "common.h"             // for metadata_summ, ROOT_PROC, mpi_comm_main
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 #include "path_array.h"         // for path_array_free
-#include "print.h"              // for PRINT_DEBUG, PRINT_WARNING, PRINT_INFO
 
 
 
@@ -129,7 +129,7 @@ init_filter(lnf_filter_t **lnf_filter, char *filter_str)
     assert(lnf_filter && filter_str && strlen(filter_str) != 0);
 
     int lnf_ret = lnf_filter_init_v2(lnf_filter, filter_str);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "cannot initialize filter `%s'",
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "cannot initialize filter `%s'",
              filter_str);
 }
 
@@ -177,27 +177,24 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
         if (args->use_bfindex) {
             t_ctx->bfindex_root = init_bfindex(t_ctx->lnf_filter);
             if (t_ctx->bfindex_root) {
-                PRINT_INFO("Bloom filter indexes enabled");
+                INFO("Bloom filter indexes enabled");
             } else {
-                PRINT_INFO("Bloom filter indexes disabled involuntarily");
+                INFO("Bloom filter indexes disabled involuntarily");
             }
         } else {
-            PRINT_INFO("Bloom filter indexes disabled voluntarily");
+            INFO("Bloom filter indexes disabled voluntarily");
         }
 #endif  // HAVE_LIBBFINDEX
     }
 
     // initialize the libnf record, only once for each thread
-    int lnf_ret = lnf_rec_init(&t_ctx->lnf_rec);
-    if (lnf_ret != LNF_OK) {
-        PRINT_ERROR(E_LNF, lnf_ret, "lnf_rec_init()");
-        MPI_Abort(mpi_comm_main, E_LNF);
-    }
+    const int lnf_ret = lnf_rec_init(&t_ctx->lnf_rec);
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
 
     // allocate two new data buffers for the records storage.
     t_ctx->buff[0] = malloc(XCHG_BUFF_SIZE * sizeof (*t_ctx->buff[0]));
     t_ctx->buff[1] = malloc(XCHG_BUFF_SIZE * sizeof (*t_ctx->buff[1]));
-    ERROR_IF(!t_ctx->buff[0] || !t_ctx->buff[1], E_MEM,
+    ABORT_IF(!t_ctx->buff[0] || !t_ctx->buff[1], E_MEM,
              "thread record buffer allocation failed");
 
     // perform allocations and initializations of the libnf memory record
@@ -325,8 +322,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
 
     if (tmp.flows != tmp.flows_tcp + tmp.flows_udp + tmp.flows_icmp
             + tmp.flows_other) {
-        PRINT_WARNING(E_LNF, 0, "metadata flow count mismatch "
-                      "(total != TCP + UDP + ICMP + other)");
+        WARNING(E_LNF, "metadata flow count mismatch (total != TCP + UDP + ICMP + other)");
     }
 
     private->flows += tmp.flows;
@@ -350,8 +346,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
 
     if (tmp.pkts != tmp.pkts_tcp + tmp.pkts_udp + tmp.pkts_icmp
             + tmp.pkts_other) {
-        PRINT_WARNING(E_LNF, 0, "metadata packet count mismatch "
-                      "(total != TCP + UDP + ICMP + other)");
+        WARNING(E_LNF, "metadata packet count mismatch (total != TCP + UDP + ICMP + other)");
     }
 
     private->pkts += tmp.pkts;
@@ -375,8 +370,7 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
 
     if (tmp.bytes != tmp.bytes_tcp + tmp.bytes_udp + tmp.bytes_icmp
             + tmp.bytes_other) {
-        PRINT_WARNING(E_LNF, 0, "metadata bytes count mismatch "
-                      "(total != TCP + UDP + ICMP + other)");
+        WARNING(E_LNF, "metadata bytes count mismatch (total != TCP + UDP + ICMP + other)");
     }
 
     private->bytes += tmp.bytes;
@@ -532,15 +526,15 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
         s_ctx->rec_limit_reached = true;
         #pragma omp flush
     } else if (lnf_ret != LNF_EOF) {
-        PRINT_WARNING(E_LNF, lnf_ret, "`%s': EOF was not reached", ff_path);
+        WARNING(E_LNF, "`%s': EOF was not reached", ff_path);
     }
 
     // the buffers will be invalid after return, wait for the send to complete
     MPI_Wait(&request, MPI_STATUS_IGNORE);
     assert(request == MPI_REQUEST_NULL);
 
-    PRINT_DEBUG("`%s': read %zu records, processed %zu records", ff_path,
-                file_rec_cntr, file_proc_rec_cntr);
+    DEBUG("`%s': read %zu records, processed %zu records", ff_path,
+          file_rec_cntr, file_proc_rec_cntr);
 }
 
 /**
@@ -575,12 +569,14 @@ ff_read_and_store(const char *ff_path, struct slave_ctx *s_ctx,
 
         // write the record into the libnf memory (a hash table)
         lnf_ret = lnf_mem_write(t_ctx->lnf_mem, t_ctx->lnf_rec);
-        ERROR_IF(lnf_ret != LNF_OK, E_LNF, "`%s': lnf_mem_write()", ff_path);
+        ABORT_IF(lnf_ret != LNF_OK, E_LNF, "`%s': lnf_mem_write()", ff_path);
     }
-    WARN_IF(lnf_ret != LNF_EOF, E_LNF, "`%s': EOF was not reached", ff_path);
+    if (lnf_ret != LNF_EOF) {
+        WARNING(E_LNF, "`%s': EOF was not reached", ff_path);
+    }
 
-    PRINT_DEBUG("`%s': read %zu records, processed %zu records", ff_path,
-                file_rec_cntr, file_proc_rec_cntr);
+    DEBUG("`%s': read %zu records, processed %zu records", ff_path,
+          file_rec_cntr, file_proc_rec_cntr);
 }
 
 
@@ -658,10 +654,8 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
             buff_idx = !buff_idx;
         }
     }
-    if (rec_limit == SIZE_MAX && lnf_ret != LNF_EOF) {
-        PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_next_c() or lnf_mem_first_c()");
-        MPI_Abort(mpi_comm_main, 1);
-    }
+    ABORT_IF(rec_limit == SIZE_MAX && lnf_ret != LNF_EOF, E_LNF,
+             "lnf_mem_next_c() or lnf_mem_first_c() failed");
 
     // send the remaining records if the record buffer is not empty
     if (buff_rec_cntr != 0) {
@@ -675,8 +669,7 @@ send_raw_mem(lnf_mem_t *const lnf_mem, size_t rec_limit, int mpi_tag,
     assert(request == MPI_REQUEST_NULL);
 
     send_terminator(mpi_tag);
-    PRINT_DEBUG("send_raw_mem: sent %zu record(s) with tag %d", rec_cntr,
-                mpi_tag);
+    DEBUG("send_raw_mem: sent %zu record(s) with tag %d", rec_cntr, mpi_tag);
 }
 
 
@@ -739,7 +732,7 @@ tput_phase_1(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
     send_raw_mem(t_ctx->lnf_mem, args->rec_limit, TAG_TPUT1, t_ctx->buff,
                  XCHG_BUFF_SIZE);
 
-    PRINT_DEBUG("slave TPUT phase 1: done");
+    DEBUG("slave TPUT phase 1: done");
 }
 
 /**
@@ -768,7 +761,7 @@ tput_phase_2_find_threshold_cnt(lnf_mem_t *lnf_mem, const uint64_t threshold,
     int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
     assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
     if (lnf_ret == LNF_EOF) {
-        PRINT_DEBUG("slave TPUT phase 2: 0 records are satisfying the threshold");
+        DEBUG("slave TPUT phase 2: 0 records are satisfying the threshold");
         return 0;  // memory is empty, zero records are satisfactory
     }
 
@@ -799,8 +792,8 @@ tput_phase_2_find_threshold_cnt(lnf_mem_t *lnf_mem, const uint64_t threshold,
 
     lnf_rec_free(lnf_rec);
 
-    PRINT_DEBUG("slave TPUT phase 2: %" PRIu64
-                " records are satisfying the threshold", rec_cntr);
+    DEBUG("slave TPUT phase 2: %" PRIu64 " records are satisfying the threshold",
+          rec_cntr);
     return rec_cntr;
 }
 
@@ -828,7 +821,7 @@ tput_phase_2(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
     {
         MPI_Bcast(&s_ctx->tput_threshold, 1, MPI_UINT64_T, ROOT_PROC,
                   mpi_comm_main);
-        PRINT_DEBUG("have threshold %" PRIu64, s_ctx->tput_threshold);
+        DEBUG("have threshold %" PRIu64, s_ctx->tput_threshold);
     }  // implicit barrier and flush
 
     // find number of records satisfying the threshold
@@ -842,7 +835,7 @@ tput_phase_2(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
     // send all records satisfying the threshold
     send_raw_mem(t_ctx->lnf_mem, threshold_cnt, TAG_TPUT2, t_ctx->buff,
                  XCHG_BUFF_SIZE);
-    PRINT_DEBUG("slave TPUT phase 2: done");
+    DEBUG("slave TPUT phase 2: done");
 }
 
 /**
@@ -873,7 +866,7 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
         const uint64_t rec_buff_size =
             s_ctx->tput_rec_info[0] * s_ctx->tput_rec_info[1];
         s_ctx->tput_rec_buff = malloc(rec_buff_size);
-        ERROR_IF(!s_ctx->tput_rec_buff, E_MEM,
+        ABORT_IF(!s_ctx->tput_rec_buff, E_MEM,
                  "slave TPUT phase 3 buffer allocation failed");
 
         // receive all records at once
@@ -907,8 +900,8 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
             assert(lnf_ret == LNF_OK);
         }
     }
-    PRINT_DEBUG("slave TPUT phase 3: received %" PRIu64 " records, found %"
-                PRIu64 " records", s_ctx->tput_rec_info[0], found_rec_cntr);
+    DEBUG("slave TPUT phase 3: received %" PRIu64 " records, found %" PRIu64
+          " records", s_ctx->tput_rec_info[0], found_rec_cntr);
 
     // send the found records to the master
     send_raw_mem(found_records, 0, TAG_TPUT3, t_ctx->buff, XCHG_BUFF_SIZE);
@@ -918,7 +911,7 @@ tput_phase_3(struct slave_ctx *s_ctx, struct thread_ctx *const t_ctx)
     #pragma omp single
     free(s_ctx->tput_rec_buff);
 
-    PRINT_DEBUG("slave TPUT phase 3: done");
+    DEBUG("slave TPUT phase 3: done");
 }
 /**
  * @}
@@ -938,14 +931,13 @@ static void
 process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
                 const char *const ff_path)
 {
-    PRINT_DEBUG("`%s': processing...", ff_path);
+    DEBUG("`%s': processing...", ff_path);
 
     // open the flow file
     // TODO: open and update metadata counters before or after bfindex?
     int lnf_ret = lnf_open(&t_ctx->lnf_file, ff_path, LNF_READ, NULL);
     if (lnf_ret != LNF_OK) {
-        PRINT_WARNING(E_LNF, lnf_ret, "`%s\': unable to open flow file",
-                      ff_path);
+        WARNING(E_LNF, "`%s\': unable to open flow file", ff_path);
         t_ctx->lnf_file = NULL;
         goto return_label;
     }
@@ -957,25 +949,21 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
     if (t_ctx->bfindex_root) {  // Bloom filter indexing is enabled
         char *bfindex_file_path = bfindex_flow_to_index_path(ff_path);
         if (bfindex_file_path) {
-            PRINT_DEBUG("`%s': using bfindex file `%s'", ff_path,
-                        bfindex_file_path);
+            DEBUG("`%s': using bfindex file `%s'", ff_path, bfindex_file_path);
             const bool contains = bfindex_contains(t_ctx->bfindex_root,
                                                    bfindex_file_path);
             free(bfindex_file_path);
             if (contains) {
-                PRINT_INFO("`%s': bfindex query returned "
-                           "``required IP address(es) possibly in file''",
-                           ff_path);
+                INFO("`%s': bfindex query returned ``required IP address(es) possibly in file''",
+                     ff_path);
             } else {
-                PRINT_INFO("`%s': bfindex query returned "
-                           "``required IP address(es) definitely not in file''",
-                           ff_path);
+                INFO("`%s': bfindex query returned ``required IP address(es) definitely not in file''",
+                     ff_path);
                 goto return_label;
             }
         } else {
-            PRINT_WARNING(E_BFINDEX, 0, "`%s': "
-                          "unable to convert flow file name into bfindex file name",
-                          ff_path);
+            WARNING(E_BFINDEX, "`%s': unable to convert flow file name into bfindex file name",
+                    ff_path);
         }
     }
 #endif  // HAVE_LIBBFINDEX
@@ -1027,9 +1015,9 @@ postprocess_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
 
     case MODE_SORT:
         // merge thread-specific hash tables into thread-shared one
-        PRINT_DEBUG("sorting records in thread-local libnf memory...");
+        DEBUG("sorting records in thread-local libnf memory...");
         libnf_mem_sort(t_ctx->lnf_mem);
-        PRINT_DEBUG("sorting records in thread-local libnf memory done");
+        DEBUG("sorting records in thread-local libnf memory done");
         send_raw_mem(t_ctx->lnf_mem, args->rec_limit, TAG_SORT, t_ctx->buff,
                      XCHG_BUFF_SIZE);
         break;
@@ -1056,7 +1044,7 @@ postprocess_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
         assert(!"unknown working mode");
     }
 
-    PRINT_DEBUG("postprocess_mt done");
+    DEBUG("postprocess_mt done");
 }
 
 /*
@@ -1088,7 +1076,7 @@ slave_main(const struct cmdline_args *args_local)
                                      args->time_begin, args->time_end,
             &ff_paths_cnt);
     assert(ff_paths);
-    PRINT_DEBUG("going to process %" PRIu64 " flow file(s)", ff_paths_cnt);
+    DEBUG("going to process %" PRIu64 " flow file(s)", ff_paths_cnt);
 
     // report number of files to be processed
     progress_report_init(ff_paths_cnt);
@@ -1107,7 +1095,7 @@ slave_main(const struct cmdline_args *args_local)
         }
     }
 #endif  //_OPENMP
-    PRINT_DEBUG("using %d thread(s)", num_threads);
+    DEBUG("using %d thread(s)", num_threads);
     // send a number of used threads
     MPI_Reduce(&num_threads, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
                mpi_comm_main);
@@ -1137,7 +1125,7 @@ slave_main(const struct cmdline_args *args_local)
             progress_report_next();
 
         }  // end of the parallel loop through all files, no barrier
-        PRINT_DEBUG("thread processed %" PRIu64 " flow file(s)", file_cntr);
+        DEBUG("thread processed %" PRIu64 " flow file(s)", file_cntr);
 
         // atomic update of the thread-shared counters
         processed_summ_share(&s_ctx.processed_summ, &t_ctx.processed_summ);

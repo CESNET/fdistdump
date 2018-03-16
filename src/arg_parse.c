@@ -57,7 +57,7 @@
 
 #include "arg_parse.h"
 #include "common.h"             // for ::E_ARG, ::E_OK, error_code_t, field_...
-#include "print.h"              // for PRINT_ERROR, PRINT_DEBUG, ::VERBOSITY...
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 #include "output.h"             // for output_params, ::OUTPUT_ITEM_NO, ::OU...
 
 
@@ -506,7 +506,7 @@ static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
                         }
                 }
 
-                PRINT_ERROR(E_ARG, 0, "invalid time specifier `%s'", token);
+                ERROR(E_ARG, "invalid time specifier `%s'", token);
                 return E_ARG; //conversion failure
 next_token:
                 token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
@@ -612,15 +612,13 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
         // TODO: change to strchr()
         begin_str = strtok_r(range_str, TIME_RANGE_DELIM, &saveptr);
         if (begin_str == NULL) {
-                PRINT_ERROR(E_ARG, 0, "invalid time range string `%s'\n",
-                                range_str);
+                ERROR(E_ARG, "invalid time range string `%s'\n", range_str);
                 return E_ARG;
         }
         end_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr); //NULL is valid
         trailing_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr);
         if (trailing_str != NULL) {
-                PRINT_ERROR(E_ARG, 0, "time range trailing string `%s'\n",
-                                trailing_str);
+                ERROR(E_ARG, "time range trailing string `%s'\n", trailing_str);
                 return E_ARG;
         }
 
@@ -672,9 +670,9 @@ static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
                 strftime(begin, sizeof(begin), "%c", &args->time_begin);
                 strftime(end, sizeof(end), "%c", &args->time_end);
 
-                PRINT_ERROR(E_ARG, 0, "zero or negative time range duration");
-                PRINT_ERROR(E_ARG, 0, "time range (after the alignment): %s - %s",
-                                begin, end);
+                ERROR(E_ARG, "zero or negative time range duration");
+                ERROR(E_ARG, "time range (after the alignment): %s - %s", begin,
+                      end);
 
                 return E_ARG;
         }
@@ -772,7 +770,7 @@ parse_fields(char *const fields_spec, struct fields *const fields,
 {
     assert(fields_spec && fields_spec[0] != '\0' && fields);
 
-    PRINT_DEBUG("args: parsing fields spec `%s'", fields_spec);
+    DEBUG("args: parsing fields spec `%s'", fields_spec);
 
     char *saveptr = NULL;
     for (char *token = strtok_r(fields_spec, FIELDS_DELIM, &saveptr);
@@ -822,25 +820,25 @@ parse_sort_spec(char *const sort_spec, struct fields *const fields)
 {
     assert(sort_spec && sort_spec[0] != '\0' && fields);
 
-    PRINT_DEBUG("args: parsing sort spec `%s'", sort_spec);
+    DEBUG("args: parsing sort spec `%s'", sort_spec);
 
     int direction = LNF_SORT_NONE;
     char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find first #
     if (delim_pos) {  // delimiter found, direction should follow
         *delim_pos = '\0';  // to distinguish between the field and direction
         char *const direction_str = delim_pos + 1;
-        PRINT_DEBUG("args: sort spec delimiter found, using `%s' as a sort key and `%s' as a direction",
-                    sort_spec, direction_str);
+        DEBUG("args: sort spec delimiter found, using `%s' as a sort key and `%s' as a direction",
+              sort_spec, direction_str);
         if (strcmp(direction_str, "asc") == 0) {  // ascending direction
             direction = LNF_SORT_ASC;
         } else if (strcmp(direction_str, "desc") == 0) {  // descending dir.
             direction = LNF_SORT_DESC;
         } else {  // invalid sort direction
-            PRINT_ERROR(E_ARG, 0, "invalid sort direction `%s'", direction_str);
+            ERROR(E_ARG, "invalid sort direction `%s'", direction_str);
             return E_ARG;
         }
     } else {  // delimiter not found, direction not specified; use the default
-        PRINT_DEBUG("args: sort spec delimiter not found, using whole sort spec as a sort key and its default direction");
+        DEBUG("args: sort spec delimiter not found, using whole sort spec as a sort key and its default direction");
     }
 
     // parse sort key from string; netmask is pointless in case of sort key
@@ -875,7 +873,7 @@ parse_stat_spec(char *stat_optarg, char *aggr_optarg[], char *sort_optarg[],
     assert(stat_optarg && stat_optarg[0] != '\0' && aggr_optarg && sort_optarg
            && limit_optarg);
 
-    PRINT_DEBUG("args: stat spec: parsing `%s'", stat_optarg);
+    DEBUG("args: stat spec: parsing `%s'", stat_optarg);
     *aggr_optarg = stat_optarg;
 
     char *const delim_pos = strchr(stat_optarg, STAT_DELIM);  // find first
@@ -887,8 +885,8 @@ parse_stat_spec(char *stat_optarg, char *aggr_optarg[], char *sort_optarg[],
     }
 
     *limit_optarg = DEFAULT_STAT_REC_LIMIT;
-    PRINT_DEBUG("args: stat spec: aggr spec = `%s', sort spec = `%s', limit spec = `%s'",
-                *aggr_optarg, *sort_optarg, *limit_optarg);
+    DEBUG("args: stat spec: aggr spec = `%s', sort spec = `%s', limit spec = `%s'",
+          *aggr_optarg, *sort_optarg, *limit_optarg);
 }
 
 
@@ -912,8 +910,7 @@ static error_code_t set_filter(struct cmdline_args *args, char *filter_str)
         /* Try to initialize filter. */
         int lnf_ret = lnf_filter_init_v2(&filter, filter_str);  // new fltr.
         if (lnf_ret != LNF_OK) {
-                PRINT_ERROR(E_ARG, lnf_ret, "cannot initialize filter `%s'",
-                            filter_str);
+                ERROR(E_ARG, "cannot initialize filter `%s'", filter_str);
                 return E_ARG;
         }
 
@@ -948,7 +945,7 @@ static error_code_t set_output_items(struct output_params *op, char *items_str)
                                 strcmp(token, "m") == 0) {
                         op->print_metadata_summ = OUTPUT_ITEM_YES;
                 } else {
-                        PRINT_ERROR(E_ARG, 0, "unknown output item `%s'", token);
+                        ERROR(E_ARG, "unknown output item `%s'", token);
                         return E_ARG;
                 }
         }
@@ -965,8 +962,7 @@ static error_code_t set_output_format(struct output_params *op,
         } else if (strcmp(format_str, "pretty") == 0) {
                 op->format = OUTPUT_FORMAT_PRETTY;
         } else {
-                PRINT_ERROR(E_ARG, 0, "unknown output format string `%s'",
-                                format_str);
+                ERROR(E_ARG, "unknown output format string `%s'", format_str);
                 return E_ARG;
         }
 
@@ -996,9 +992,8 @@ static error_code_t set_output_volume_conv(struct output_params *op,
         } else if (strcmp(volume_conv_str, "binary-prefix") == 0) {
                 op->volume_conv = OUTPUT_VOLUME_CONV_BINARY_PREFIX;
         } else {
-                PRINT_ERROR(E_ARG, 0,
-                            "unknown output volume conversion string `%s'",
-                            volume_conv_str);
+                ERROR(E_ARG, "unknown output volume conversion string `%s'",
+                      volume_conv_str);
                 return E_ARG;
         }
 
@@ -1013,8 +1008,8 @@ static error_code_t set_output_tcp_flags_conv(struct output_params *op,
         } else if (strcmp(tcp_flags_conv_str, "str") == 0) {
                 op->tcp_flags_conv = OUTPUT_TCP_FLAGS_CONV_STR;
         } else {
-                PRINT_ERROR(E_ARG, 0, "unknown tcp flags conversion string `%s'",
-                            tcp_flags_conv_str);
+                ERROR(E_ARG, "unknown tcp flags conversion string `%s'",
+                      tcp_flags_conv_str);
                 return E_ARG;
         }
 
@@ -1029,8 +1024,8 @@ static error_code_t set_output_ip_addr_conv(struct output_params *op,
         } else if (strcmp(ip_addr_conv_str, "str") == 0) {
                 op->ip_addr_conv = OUTPUT_IP_ADDR_CONV_STR;
         } else {
-                PRINT_ERROR(E_ARG, 0, "unknown IP address conversion string `%s'",
-                            ip_addr_conv_str);
+                ERROR(E_ARG, "unknown IP address conversion string `%s'",
+                      ip_addr_conv_str);
                 return E_ARG;
         }
 
@@ -1045,8 +1040,8 @@ static error_code_t set_output_ip_proto_conv(struct output_params *op,
         } else if (strcmp(ip_proto_conv_str, "str") == 0) {
                 op->ip_proto_conv = OUTPUT_IP_PROTO_CONV_STR;
         } else {
-                PRINT_ERROR(E_ARG, 0, "unknown internet protocol conversion string `%s'",
-                            ip_proto_conv_str);
+                ERROR(E_ARG, "unknown internet protocol conversion string `%s'",
+                      ip_proto_conv_str);
                 return E_ARG;
         }
 
@@ -1061,8 +1056,8 @@ static error_code_t set_output_duration_conv(struct output_params *op,
         } else if (strcmp(duration_conv_str, "str") == 0) {
                 op->duration_conv = OUTPUT_DURATION_CONV_STR;
         } else {
-                PRINT_ERROR(E_ARG, 0, "unknown duration conversion string `%s'",
-                                duration_conv_str);
+                ERROR(E_ARG, "unknown duration conversion string `%s'",
+                      duration_conv_str);
                 return E_ARG;
         }
 
@@ -1081,8 +1076,8 @@ static error_code_t set_progress_bar_type(progress_bar_type_t *type,
         } else if (strcmp(progress_bar_type_str, "json") == 0) {
                 *type = PROGRESS_BAR_JSON;
         } else {
-                PRINT_ERROR(E_ARG, 0, "unknown progress bar type `%s'",
-                                progress_bar_type_str);
+                ERROR(E_ARG, "unknown progress bar type `%s'",
+                      progress_bar_type_str);
                 return E_ARG;
         }
 
@@ -1220,16 +1215,16 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         const char *const conversion_err = str_to_int(verbosity_optarg,
                                                       (int *)&verbosity);
         if (conversion_err) {
-            PRINT_ERROR(E_ARG, 0, "invalid verbosity level `%s': %s",
-                        verbosity_optarg, conversion_err);
+            ERROR(E_ARG, "invalid verbosity level `%s': %s", verbosity_optarg,
+                  conversion_err);
             return E_ARG;
         }
         if (!IN_RANGE_INCL(verbosity, VERBOSITY_QUIET, VERBOSITY_DEBUG)) {
-            PRINT_ERROR(E_ARG, 0, "invalid verbosity level `%s': allowed range is [%d,%d]",
-                        verbosity_optarg, VERBOSITY_QUIET, VERBOSITY_DEBUG);
+            ERROR(E_ARG, "invalid verbosity level `%s': allowed range is [%d,%d]",
+                  verbosity_optarg, VERBOSITY_QUIET, VERBOSITY_DEBUG);
             return E_ARG;
         }
-        PRINT_DEBUG("args: setting verbosity level to debug");
+        DEBUG("args: setting verbosity level to debug");
     }
 
     // parse aggregation and sort option argument options
@@ -1239,21 +1234,21 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             return E_ARG;
         }
         if (sort_optarg) {
-            PRINT_DEBUG("args: using aggregation mode with sorting");
+            DEBUG("args: using aggregation mode with sorting");
             if (!parse_sort_spec(sort_optarg, &args->fields)) {
                 return E_ARG;
             }
         } else {
-            PRINT_DEBUG("args: using aggregation mode without sorting");
+            DEBUG("args: using aggregation mode without sorting");
         }
     } else if (sort_optarg) {  // sort mode
-        PRINT_DEBUG("args: using sorting mode");
+        DEBUG("args: using sorting mode");
         args->working_mode = MODE_SORT;
         if (!parse_sort_spec(sort_optarg, &args->fields)) {
             return E_ARG;
         }
     } else {  // listing mode
-        PRINT_DEBUG("args: using listing mode");
+        DEBUG("args: using listing mode");
         args->working_mode = MODE_LIST;
     }
 
@@ -1262,8 +1257,8 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         const char *const conversion_err = str_to_luint(limit_optarg,
                                                         &args->rec_limit);
         if (conversion_err) {
-            PRINT_ERROR(E_ARG, 0, "record limit `%s': %s", limit_optarg,
-                        conversion_err);
+            ERROR(E_ARG, "record limit `%s': %s", limit_optarg,
+                  conversion_err);
             return E_ARG;
         }
     } else {  // record limit not specified, disable record limit
@@ -1280,7 +1275,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
 
     // parse time point and time range argument options
     if (time_point_optarg && time_range_optarg) {
-        PRINT_ERROR(E_ARG, 0, "time point and time range are mutually exclusive");
+        ERROR(E_ARG, "time point and time range are mutually exclusive");
         return E_ARG;
     } else if (time_point_optarg) {
         ecode = set_time_point(args, time_point_optarg);
@@ -1300,7 +1295,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
      * separate them by the "File Separator" (0x1C) character.
      */
     if (optind == argc) {  // at least one path is mandatory
-        PRINT_ERROR(E_ARG, 0, "missing path");
+        ERROR(E_ARG, "missing path");
         return E_ARG;
     } else {
         args->paths = argv + optind;
@@ -1443,7 +1438,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
                 || !IN_RANGE_INCL(args->fields.sort_key.field->id,
                                   LNF_FLD_DOCTETS, LNF_FLD_AGGR_FLOWS))
         {
-            PRINT_INFO("disabling TPUT, one or more conditions were not met");
+            INFO("disabling TPUT, one or more conditions were not met");
             args->use_tput = false;
         }
     }

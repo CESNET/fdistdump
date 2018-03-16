@@ -54,8 +54,8 @@
 
 #include "arg_parse.h"          // for cmdline_args
 #include "common.h"             // for libnf_mem_free, libnf_mem_init_*, ...
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 #include "output.h"             // for print_mem, output_setup, ...
-#include "print.h"              // for PRINT_DEBUG, ERROR_IF, PRINT_WARNING
 
 
 /*
@@ -85,7 +85,7 @@ master_ctx_init(const uint64_t slave_threads_cnt)
     assert(slave_threads_cnt > 0);
 
     struct master_ctx *const m_ctx = calloc(1, sizeof (*m_ctx));
-    ERROR_IF(!m_ctx, E_MEM, "master context structure allocation failed");
+    ABORT_IF(!m_ctx, E_MEM, "master context structure allocation failed");
 
     m_ctx->slave_threads_cnt = slave_threads_cnt;
 
@@ -93,7 +93,7 @@ master_ctx_init(const uint64_t slave_threads_cnt)
     for (uint8_t i = 0; i < 2; ++i) {
         m_ctx->rec_buff[i] =
             malloc(XCHG_BUFF_SIZE * sizeof (*m_ctx->rec_buff[i]));
-        ERROR_IF(!m_ctx->rec_buff[i], E_MEM,
+        ABORT_IF(!m_ctx->rec_buff[i], E_MEM,
                  "master record buffer allocation failed");
     }
 
@@ -117,7 +117,7 @@ mem_write_raw_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
 {
     int lnf_ret = lnf_mem_write_raw((lnf_mem_t *)user, (char *)data, data_len);
     if (lnf_ret != LNF_OK) {
-        PRINT_ERROR(E_LNF, lnf_ret, "lnf_mem_write_raw()");
+        ERROR(E_LNF, "lnf_mem_write_raw()");
         return E_LNF;
     }
 
@@ -241,7 +241,7 @@ progress_bar_print(const struct progress_bar_ctx *const pb_ctx)
 static void
 progress_bar_thread(progress_bar_type_t type, char *dest)
 {
-    PRINT_DEBUG("launching master's progress bar thread");
+    DEBUG("launching master's progress bar thread");
 
     ////////////////////////////////////////////////////////////////////////////
     // initialization
@@ -255,7 +255,7 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
     // allocate memory to keep a context
     pb_ctx.files_cnt = calloc(pb_ctx.sources_cnt, sizeof (*pb_ctx.files_cnt));
     pb_ctx.files_cnt_goal = calloc(pb_ctx.sources_cnt, sizeof (*pb_ctx.files_cnt_goal));
-    ERROR_IF(!pb_ctx.files_cnt || !pb_ctx.files_cnt_goal, E_MEM,
+    ABORT_IF(!pb_ctx.files_cnt || !pb_ctx.files_cnt_goal, E_MEM,
              "progress bar memory allocation failed");
 
     if (!dest || strcmp(dest, "stderr") == 0) {
@@ -265,8 +265,8 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
     } else {  // destination is a file
         pb_ctx.out_stream = fopen(dest, "w");
         if (!pb_ctx.out_stream) {
-            PRINT_WARNING(E_ARG, 0, "invalid progress bar destination `%s\': "
-                          "%s", dest, strerror(errno));
+            WARNING(E_ARG, "invalid progress bar destination `%s\': %s", dest,
+                    strerror(errno));
             pb_ctx.type = PROGRESS_BAR_NONE;  // disable progress bar
         }
     }
@@ -322,7 +322,7 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
             && pb_ctx.out_stream != stderr
             && fclose(pb_ctx.out_stream) == EOF)
     {
-        PRINT_WARNING(E_INTERNAL, 0, "progress bar: %s", strerror(errno));
+        WARNING(E_INTERNAL, "progress bar: %s", strerror(errno));
     }
 }
 /**
@@ -350,13 +350,12 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
 
 
     // receiving loop
-    uint64_t rec_cntr = 0;  // processed records counter
-    uint64_t msg_cntr = 0;  // received messages counter
+    size_t rec_cntr = 0;  // processed records counter
+    size_t msg_cntr = 0;  // received messages counter
     bool limit_exceeded = false;
-    uint64_t active_sources = source_cnt;
+    size_t active_sources = source_cnt;
     struct timespec polling_interval = { 0u, 1000000ul }; // start with 1 ms
-    PRINT_DEBUG("recv_loop: receiving from %" PRIu64 " source(s)",
-                active_sources);
+    DEBUG("recv_loop: receiving from %zu source(s)", active_sources);
     while (active_sources) {
         // wait for a message from any source
         MPI_Status status;
@@ -371,14 +370,13 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
 
         if (msg_size == 0) {  // empty message is a terminator
             if (--active_sources) {
-                PRINT_DEBUG("recv_loop: received termination, %" PRIu64
-                            " source(s) remaining, continuing", active_sources);
+                DEBUG("recv_loop: received termination, "
+                      "%zu source(s) remaining, continuing", active_sources);
                 // start receiving next message into the same buffer
                 MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
                           MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
             } else {
-                PRINT_DEBUG("recv_loop: received termination, no sources "
-                            " remaining, breaking");
+                DEBUG("recv_loop: received termination, no sources remaining, breaking");
             }
             continue;
         }
@@ -408,7 +406,7 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
             rec_ptr += sizeof (rec_size);  // shift the pointer to the record
             const error_code_t ecode = recv_callback(rec_ptr, rec_size,
                                                      callback_data);
-            ERROR_IF(ecode != E_OK, ecode, "recv_callback() failed");
+            ABORT_IF(ecode != E_OK, ecode, "recv_callback() failed");
 
             rec_ptr += rec_size; // shift the pointer to the next record
             if (++rec_cntr == rec_limit) {
@@ -419,8 +417,8 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
     }
 
     assert(request == MPI_REQUEST_NULL);
-    PRINT_DEBUG("recv_loop: received %" PRIu64 " message(s) with tag %d "
-                "containing %" PRIu64 " records", msg_cntr, mpi_tag, rec_cntr);
+    DEBUG("recv_loop: received %zu message(s) with tag %d containing %zu records",
+          msg_cntr, mpi_tag, rec_cntr);
 }
 
 
@@ -470,7 +468,7 @@ tput_phase_1_find_bottom(lnf_mem_t *const lnf_mem)
     int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
     assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
     if (lnf_ret == LNF_EOF) {
-        PRINT_DEBUG("master TPUT phase 1: bottom = 0, position = 0");
+        DEBUG("master TPUT phase 1: bottom = 0, position = 0");
         return 0;  // memory is empty, return zero
     }
     lnf_mem_cursor_t *cursor_nth_or_last = NULL;
@@ -500,8 +498,8 @@ tput_phase_1_find_bottom(lnf_mem_t *const lnf_mem)
 
     lnf_rec_free(lnf_rec);
 
-    PRINT_DEBUG("master TPUT phase 1: bottom = %" PRIu64 ", position = %"
-                PRIu64, bottom, cursor_position);
+    DEBUG("master TPUT phase 1: bottom = %" PRIu64 ", position = %" PRIu64,
+          bottom, cursor_position);
     return bottom;
 }
 
@@ -531,7 +529,7 @@ tput_phase_1(struct master_ctx *const m_ctx, lnf_mem_t *const lnf_mem)
 
     const uint64_t bottom = tput_phase_1_find_bottom(lnf_mem);
 
-    PRINT_DEBUG("master TPUT phase 1: done");
+    DEBUG("master TPUT phase 1: done");
     return bottom;
 }
 
@@ -564,14 +562,13 @@ tput_phase_2(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem,
     // calculate threshold from the phase 1 bottom and broadcast it
     uint64_t threshold = ceil((double)phase_1_bottom / m_ctx->slave_threads_cnt);
     MPI_Bcast(&threshold, 1, MPI_UINT64_T, ROOT_PROC, mpi_comm_main);
-    PRINT_DEBUG("master TPUT phase 2: broadcasted threshold = %" PRIu64,
-                threshold);
+    DEBUG("master TPUT phase 2: broadcasted threshold = %" PRIu64, threshold);
 
     // receive all records satisfying the threshold
     recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT2,
               mem_write_raw_callback, *lnf_mem);
 
-    PRINT_DEBUG("master TPUT phase 2: done");
+    DEBUG("master TPUT phase 2: done");
 }
 
 /**
@@ -601,7 +598,7 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
     // allocate required memory
     const uint64_t rec_buff_size = rec_info[0] * rec_info[1];
     char *const rec_buff = malloc(rec_buff_size);
-    ERROR_IF(!rec_buff, E_MEM, "master TPUT phase 3 buffer allocation failed");
+    ABORT_IF(!rec_buff, E_MEM, "master TPUT phase 3 buffer allocation failed");
 
     // store all records into the buffer
     uint64_t rec_buff_off = 0;
@@ -623,8 +620,7 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
     // broadcast all records at once
     MPI_Bcast(rec_buff, rec_buff_size, MPI_BYTE, ROOT_PROC, mpi_comm_main);
     free(rec_buff);
-    PRINT_DEBUG("master TPUT phase 3: broadcasted %" PRIu64 " records",
-                rec_info[0]);
+    DEBUG("master TPUT phase 3: broadcasted %" PRIu64 " records", rec_info[0]);
 
     // clear the libnf memory
     libnf_mem_free(*lnf_mem);
@@ -633,7 +629,7 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
     // receive the filnal top N records from the slaves
     recv_loop(m_ctx, m_ctx->slave_threads_cnt, 0, TAG_TPUT3,
               mem_write_raw_callback, *lnf_mem);
-    PRINT_DEBUG("master TPUT phase 3: done");
+    DEBUG("master TPUT phase 3: done");
 }
 /**
  * @}
@@ -669,9 +665,9 @@ sort_main(struct master_ctx *const m_ctx)
               mem_write_raw_callback, lnf_mem);
 
     // sort record in the libnf memory (not needed)
-    PRINT_DEBUG("sorting records in master's libnf memory...");
+    DEBUG("sorting records in master's libnf memory...");
     libnf_mem_sort(lnf_mem);
-    PRINT_DEBUG("sorting records in master's libnf memory done");
+    DEBUG("sorting records in master's libnf memory done");
 
     // print all records in the libnf linked list memory
     print_mem(lnf_mem, args->rec_limit);
@@ -713,7 +709,7 @@ aggr_main(struct master_ctx *const m_ctx)
 static void
 master_main_thread(void)
 {
-    PRINT_DEBUG("launching master's main thread");
+    DEBUG("launching master's main thread");
 
     // get a sum of number of threads used on all slaves
     int slave_threads_cnt = 0;
@@ -724,7 +720,7 @@ master_main_thread(void)
     // initialize a master_ctx structure
     struct master_ctx *const m_ctx =
         master_ctx_init((uint64_t)slave_threads_cnt);
-    PRINT_DEBUG("using %d slave thread(s) in total", m_ctx->slave_threads_cnt);
+    DEBUG("using %d slave thread(s) in total", m_ctx->slave_threads_cnt);
 
     output_init(args->output_params, &args->fields);
 

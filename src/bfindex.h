@@ -1,16 +1,7 @@
-/** Declarations for file indexing using Bloom filter indexes for IP addresses.
- *
- * A Bloom filter is a space-efficient probabilistic data structure, conceived
- * by Burton Howard Bloom in 1970, that is used to test whether an element is a
- * member of a set. False positive matches are possible, but false negatives are
- * not -- in other words, a query returns either "possibly in set" or
- * "definitely not in set". [Wikipedia]
- *
- * In this case, the set is a set of source and destination IP addresses in all
- * records in the flow file and we want to know whether certain IP address is
- * contained in the file or not. Bloom filter is used only in conjunction with a
- * record filter containing one or more IP addresses.
-*/
+/**
+ * @brief Declarations for file indexing using Bloom filter indexes for IP
+ *        addresses.
+ */
 
 /*
  * Copyright (C) 2017 CESNET

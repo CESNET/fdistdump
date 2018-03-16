@@ -2,12 +2,12 @@
 bin_PROGRAMS=fdistdump
 fdistdump_SOURCES=src/arg_parse.c src/arg_parse.h \
 		  src/common.c src/common.h \
+		  src/errwarn.c src/errwarn.h \
 		  src/fields.c src/fields.h \
 		  src/main.c \
 		  src/master.c src/master.h \
 		  src/output.c src/output.h \
 		  src/path_array.c src/path_array.h \
-		  src/print.c src/print.h \
 		  src/slave.c src/slave.h
 if ENABLE_BFINDEX
 fdistdump_SOURCES+=src/bfindex.c src/bfindex.h

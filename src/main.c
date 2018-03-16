@@ -50,8 +50,8 @@
 
 #include "arg_parse.h"  // for arg_parse, cmdline_args
 #include "common.h"     // for ::E_MPI, mpi_create_communicators, ::E_OK
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 #include "master.h"     // for master_main
-#include "print.h"      // for ERROR_IF, PRINT_DEBUG
 #include "slave.h"      // for slave_main
 
 
@@ -77,8 +77,8 @@ main(int argc, char *argv[])
      */
     int thread_provided;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &thread_provided);
-    ERROR_IF(thread_provided != MPI_THREAD_MULTIPLE, E_MPI,
-            "an insufficient level of thread support, MPI_THREAD_MULTIPLE is required.");
+    ABORT_IF(thread_provided != MPI_THREAD_MULTIPLE, E_MPI,
+             "an insufficient level of thread support, MPI_THREAD_MULTIPLE is required.");
 
     // determine the calling processes rank and the total number of proecesses
     int world_rank;
@@ -87,19 +87,19 @@ main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     // check if there are at least two processes
-    ERROR_IF(world_size < 2, E_MPI, PACKAGE_NAME
-            " requires at least 2 copies of the program to run "
-            "(one for the master and the others for the slaves). "
-            "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
+    ABORT_IF(world_size < 2, E_MPI, PACKAGE_NAME
+             " requires at least 2 copies of the program to run "
+             "(one for the master and the others for the slaves). "
+             "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
 
     // parse command line arguments in all processes
     struct cmdline_args args = { 0 };
     error_code_t ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
-    ERROR_IF(ecode != E_OK, ecode, "parsing arguments failed");
+    ABORT_IF(ecode != E_OK, ecode, "parsing arguments failed");
 
     // duplicate MPI_COMM_WORLD and create mpi_comm_main and mpi_comm_progress
     mpi_comm_init();
-    PRINT_DEBUG("created MPI communicators mpi_comm_main and mpi_comm_progress");
+    DEBUG("created MPI communicators mpi_comm_main and mpi_comm_progress");
 
     // split master and slave code
     if (world_rank == ROOT_PROC) {
@@ -112,11 +112,11 @@ main(int argc, char *argv[])
     mpi_comm_free();
 
     if (ecode == E_OK || ecode == E_HELP) {
-        PRINT_DEBUG("terminating with success");
+        DEBUG("terminating with success");
         MPI_Finalize();
         return EXIT_SUCCESS;
     } else {
-        PRINT_DEBUG("terminating MPI execution environment due to an error");
+        DEBUG("terminating MPI execution environment due to an error");
         MPI_Abort(MPI_COMM_WORLD, ecode);
     }
 }

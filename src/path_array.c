@@ -38,27 +38,29 @@
  * if advised of the possibility of such damage.
  */
 
-#include "common.h"
 #include "path_array.h"
-#include "print.h"
+
+#include <assert.h>                // for assert
+#include <ctype.h>                 // for isdigit
+#include <errno.h>                 // for errno, ENAMETOOLONG
+#include <limits.h>                // for PATH_MAX
+#include <stdbool.h>               // for false, bool, true
+#include <stddef.h>                // for size_t, NULL
+#include <stdlib.h>                // for free, atoi, malloc, realloc
+#include <string.h>                // for strerror, strlen, strcat, strchr
+#include <time.h>                  // for strftime
+
+#include <dirent.h>                // for closedir, dirent, opendir, readdir
+#include <mpi.h>                   // for MPI_Comm_rank, MPI_COMM_WORLD
+#include <sys/stat.h>              // for stat, S_ISDIR
+#include <unistd.h>                // for gethostname
+
 #ifdef HAVE_LIBBFINDEX
 #include "bfindex.h"
 #endif  // HAVE_LIBBFINDEX
+#include "common.h"                // for ::E_OK, ::E_PATH, error_code_t
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 
-#include <stdlib.h>
-#include <errno.h>
-#include <stdio.h>
-#include <string.h>
-#include <stddef.h> //size_t
-#include <limits.h> //PATH_MAX
-#include <assert.h>
-#include <ctype.h> //isdigit()
-#include <unistd.h> //gethostname()
-
-#include <dirent.h>
-#include <sys/stat.h>
-
-#include <mpi.h>
 
 #define PATH_ARRAY_INIT_SIZE 50
 
@@ -80,7 +82,7 @@ static error_code_t add_file(struct path_array_ctx *pa_ctx, const char *name)
                 new_names = realloc(pa_ctx->names,
                                 pa_ctx->names_size * 2 * sizeof (*pa_ctx->names));
                 if (new_names == NULL) { //failure
-                        PRINT_ERROR(E_MEM, 0, "realloc()");
+                        ERROR(E_MEM, "realloc()");
                         return E_MEM;
                 } else { //success
                         pa_ctx->names = new_names;
@@ -91,7 +93,7 @@ static error_code_t add_file(struct path_array_ctx *pa_ctx, const char *name)
         /* Allocate space for the name and copy it there. */
         pa_ctx->names[pa_ctx->names_cnt] = strdup(name);
         if (pa_ctx->names[pa_ctx->names_cnt] == NULL) {
-                PRINT_ERROR(E_MEM, 0, "strdup()");
+                ERROR(E_MEM, "strdup()");
                 return E_MEM;
         } else {
                 pa_ctx->names_cnt++;
@@ -121,8 +123,7 @@ static error_code_t fill_from_time(struct path_array_ctx *pa_ctx,
                 if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
                                         &ctx) == 0) {
                         errno = ENAMETOOLONG;
-                        PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
-                                        path);
+                        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
                         continue;
                 }
 
@@ -132,8 +133,7 @@ static error_code_t fill_from_time(struct path_array_ctx *pa_ctx,
 
                 /* Check file existence. */
                 if (stat(path, &stat_buff) != 0) {
-                        PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
-                                        path);
+                        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
                 } else {
                         ecode = add_file(pa_ctx, path);
                         if (ecode != E_OK) {
@@ -157,8 +157,8 @@ static error_code_t fill_from_path(struct path_array_ctx *pa_ctx,
 
         /* Detect file type. */
         if (stat(path, &stat_buff) != 0) {
-                PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno), path);
-                return E_OK; //not a fatal error
+                WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+                return E_OK;  // not a fatal error
         }
 
         if (!S_ISDIR(stat_buff.st_mode)) {
@@ -168,8 +168,8 @@ static error_code_t fill_from_path(struct path_array_ctx *pa_ctx,
 
         dir = opendir(path);
         if (dir == NULL) {
-                PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno), path);
-                return E_OK; //not a fatal error
+                WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+                return E_OK;  // not a fatal error
         }
 
         /* Loop through all the files. */
@@ -190,9 +190,8 @@ static error_code_t fill_from_path(struct path_array_ctx *pa_ctx,
                 /* Too long filenames are ignored. */
                 if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
                         errno = ENAMETOOLONG;
-                        PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
-                                        path);
-                        continue; //skip this file
+                        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+                        continue;  // skip this file
                 }
 
                 /* Construct new path: append child to the parent. */
@@ -238,8 +237,7 @@ path_preprocessor(const char *format, char path[PATH_MAX])
     assert(format && path);
 
     if (strlen(format) >= PATH_MAX) {
-        PRINT_WARNING(E_PATH, 0, "conversion specifier too long, skipping `%s'",
-                      format);
+        WARNING(E_PATH, "conversion specifier too long, skipping `%s'", format);
         return false;
     }
 
@@ -253,8 +251,8 @@ path_preprocessor(const char *format, char path[PATH_MAX])
 
         while (isdigit(*last_path) && last_path++);  // skip all digits
         if (*last_path++ != ':') {  // check for the terminating colon
-            PRINT_WARNING(E_PATH, 0, "invalid conversion specifier, skipping `%s'",
-                          format);
+            WARNING(E_PATH, "invalid conversion specifier, skipping `%s'",
+                    format);
             return false;
         }
 
@@ -279,15 +277,14 @@ path_preprocessor(const char *format, char path[PATH_MAX])
             gethostname(path + strlen(path), PATH_MAX - strlen(path));
             if (errno != 0) {
                 errno = ENAMETOOLONG;
-                PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno),
-                              format);
+                WARNING(E_PATH, "%s `%s'", strerror(errno), format);
                 return false;
             }
             break;
 
         default:
-            PRINT_WARNING(E_PATH, 0, "unknown conversion specifier, skipping `%s'",
-                          format);
+            WARNING(E_PATH, "unknown conversion specifier, skipping `%s'",
+                    format);
             return false;
         }
 
@@ -296,7 +293,7 @@ path_preprocessor(const char *format, char path[PATH_MAX])
     }
 
     strcat(path, last_path);  // copy the rest of the format string
-    PRINT_DEBUG("path preprocessor: `%s' -> `%s'", format, path);
+    DEBUG("path preprocessor: `%s' -> `%s'", format, path);
 
     return true;
 }
@@ -312,7 +309,7 @@ path_array_gen(char *const paths[], size_t paths_cnt, const struct tm begin,
     struct path_array_ctx pa_ctx = { 0 };
     pa_ctx.names = malloc(PATH_ARRAY_INIT_SIZE * sizeof (*pa_ctx.names));
     if (!pa_ctx.names) {
-        PRINT_ERROR(E_MEM, 0, "malloc()");
+        ERROR(E_MEM, "malloc()");
         return NULL;
     } else {
         pa_ctx.names_size = PATH_ARRAY_INIT_SIZE;
@@ -328,7 +325,7 @@ path_array_gen(char *const paths[], size_t paths_cnt, const struct tm begin,
         // check for file existence and other errors
         struct stat stat_buff;
         if (stat(new_path, &stat_buff) != 0) {
-            PRINT_WARNING(E_PATH, errno, "%s `%s'", strerror(errno), new_path);
+            WARNING(E_PATH, "%s `%s'", strerror(errno), new_path);
             continue;
         }
 

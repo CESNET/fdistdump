@@ -48,8 +48,8 @@
 
 #include <libnf.h>
 
+#include "errwarn.h"  // for error/warning/info/debug messages, ...
 #include "common.h"   // for ::E_ARG, IN_RANGE_EXCL, IN_RANGE_INCL
-#include "print.h"    // for PRINT_ERROR, ERROR_IF
 
 
 /*
@@ -123,7 +123,7 @@ add_to_all(struct fields *const fields, const int id)
     // the array should not be full
     if (fields->all_cnt == ALL_FIELDS_MAX) {
         // the array is full
-        PRINT_ERROR(E_ARG, 0, "fields: number of allowed fields exceeded");
+        ERROR(E_ARG, "fields: number of allowed fields exceeded");
         return NULL;
     }
 
@@ -300,7 +300,7 @@ field_parse(const char str[], int *const id, int *const alignment,
 
     // test field string validity
     if (id_in == LNF_FLD_ZERO_ || id_in == LNF_ERR_OTHER) {
-        PRINT_ERROR(E_ARG, 0, "unknown libnf field `%s'", str);
+        ERROR(E_ARG, "unknown libnf field `%s'", str);
         return false;
     }
 
@@ -308,8 +308,8 @@ field_parse(const char str[], int *const id, int *const alignment,
     if (IN_RANGE_INCL(id_in, LNF_FLD_DPKTS_ALIAS, LNF_FLD_DSTADDR_ALIAS)
             || id_in == LNF_FLD_PAIR_ADDR_ALIAS)
     {
-        PRINT_ERROR(E_ARG, 0, "libnf field `%s' is an alias, use the original name",
-                    field_get_name(id_in));
+        ERROR(E_ARG, "libnf field `%s' is an alias, use the original name",
+              field_get_name(id_in));
         return false;
     }
 
@@ -318,13 +318,11 @@ field_parse(const char str[], int *const id, int *const alignment,
     if (field_get_type(id_in) == LNF_ADDR) {
         if (!IN_RANGE_INCL(alignment_tmp, IP_NETMASK_LEN_MIN,
                            IPV4_NETMASK_LEN_MAX)) {
-            PRINT_ERROR(E_ARG, 0, "invalid IPv4 netmask length: %d",
-                        alignment_tmp);
+            ERROR(E_ARG, "invalid IPv4 netmask length: %d", alignment_tmp);
             return false;
         } else if (!IN_RANGE_INCL(ipv6_alignment_tmp, IP_NETMASK_LEN_MIN,
                                   IPV6_NETMASK_LEN_MAX)) {
-            PRINT_ERROR(E_ARG, 0, "invalid IPv6 netmask length: %d",
-                        ipv6_alignment_tmp);
+            ERROR(E_ARG, "invalid IPv6 netmask length: %d", ipv6_alignment_tmp);
             return false;
         }
     }
@@ -357,12 +355,12 @@ fields_add_output_field(struct fields *const fields, const int id)
     assert(IN_RANGE_EXCL(id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
 
     if (fields->output_fields_cnt == OUTPUT_FIELDS_MAX) {
-        PRINT_ERROR(E_ARG, 0, "fields: number of allowed output fields exceeded");
+        ERROR(E_ARG, "fields: number of allowed output fields exceeded");
         return false;
     }
 
     if (get_from_all(fields, id)) {
-        PRINT_DEBUG("fields: `%s' is already present", field_get_name(id));
+        DEBUG("fields: `%s' is already present", field_get_name(id));
         return true;
     }
 
@@ -373,7 +371,7 @@ fields_add_output_field(struct fields *const fields, const int id)
 
     assert(new_field
            && fields->output_fields[fields->output_fields_cnt].field == NULL);
-    PRINT_DEBUG("fields: adding `%s' as an output field", field_get_name(id));
+    DEBUG("fields: adding `%s' as an output field", field_get_name(id));
 
     fields->output_fields[fields->output_fields_cnt].field = new_field;
     fields->output_fields[fields->output_fields_cnt].aggr_func =
@@ -417,12 +415,12 @@ fields_add_aggr_key(struct fields *const fields, const int id,
     //        IPV6_NETMASK_LEN_MAX));
 
     if (fields->aggr_keys_cnt == AGGR_KEYS_MAX) {
-        PRINT_ERROR(E_ARG, 0, "fields: number of allowed aggregation keys exceeded");
+        ERROR(E_ARG, "fields: number of allowed aggregation keys exceeded");
         return false;
     }
 
     if (get_from_all(fields, id)) {
-        PRINT_DEBUG("fields: `%s' is already present", field_get_name(id));
+        DEBUG("fields: `%s' is already present", field_get_name(id));
         return true;
     }
 
@@ -430,8 +428,8 @@ fields_add_aggr_key(struct fields *const fields, const int id,
     if (IN_RANGE_INCL(id, LNF_FLD_CALC_BPS, LNF_FLD_CALC_BPP)
             || id == LNF_FLD_BREC1)
     {
-        PRINT_ERROR(E_ARG, 0, "fields: `%s' cannot be set as an aggregation key",
-                    field_get_name(id));
+        ERROR(E_ARG, "fields: `%s' cannot be set as an aggregation key",
+              field_get_name(id));
         return false;
     }
 
@@ -441,7 +439,7 @@ fields_add_aggr_key(struct fields *const fields, const int id,
     }
 
     assert(new_field && fields->aggr_keys[fields->aggr_keys_cnt].field == NULL);
-    PRINT_DEBUG("fields: adding `%s' as an aggregation key", field_get_name(id));
+    DEBUG("fields: adding `%s' as an aggregation key", field_get_name(id));
 
     fields->aggr_keys[fields->aggr_keys_cnt].field = new_field;
     fields->aggr_keys[fields->aggr_keys_cnt].alignment = alignment;
@@ -479,8 +477,8 @@ fields_set_sort_key(struct fields *const fields, const int id,
     // direction
     const int default_direction = field_get_sort_dir(id);
     if (default_direction == LNF_SORT_NONE) {
-        PRINT_ERROR(E_ARG, 0, "fields: `%s' cannot be used as a sort key",
-                    field_get_name(id));
+        ERROR(E_ARG, "fields: `%s' cannot be used as a sort key",
+              field_get_name(id));
         return false;
     }
 
@@ -493,7 +491,7 @@ fields_set_sort_key(struct fields *const fields, const int id,
     }
 
     assert(new_field && fields->sort_key.field == NULL);
-    PRINT_DEBUG("fields: setting `%s' as a sort key", field_get_name(id));
+    DEBUG("fields: setting `%s' as a sort key", field_get_name(id));
 
     fields->sort_key.field = new_field;
     fields->sort_key.direction =
@@ -650,37 +648,37 @@ fields_print_debug(const struct fields *const fields)
 {
     assert(fields);
 
-    PRINT_DEBUG("fields: %zu aggregation key(s):", fields->aggr_keys_cnt);
+    DEBUG("fields: %zu aggregation key(s):", fields->aggr_keys_cnt);
     for (size_t i = 0; i < fields->aggr_keys_cnt; ++i) {
         const struct aggr_key ak = fields->aggr_keys[i];
-        PRINT_DEBUG("\tID = 0x%2.2x, name = %s, alignment = %d, IPv6 alignment = %d",
-                    ak.field->id, field_get_name(ak.field->id), ak.alignment,
-                    ak.ipv6_alignment);
+        DEBUG("\tID = 0x%2.2x, name = %s, alignment = %d, IPv6 alignment = %d",
+              ak.field->id, field_get_name(ak.field->id), ak.alignment,
+              ak.ipv6_alignment);
     }
 
     if (fields->sort_key.field) {
         const struct sort_key sk = fields->sort_key;
-        PRINT_DEBUG("fields: sort key:");
-        PRINT_DEBUG("\tID = 0x%2.2x, name = %s, direction = %s, aggregation function = %s",
-                    sk.field->id, field_get_name(sk.field->id),
-                    libnf_sort_dir_to_str(sk.direction),
-                    libnf_aggr_func_to_str(sk.aggr_func));
+        DEBUG("fields: sort key:");
+        DEBUG("\tID = 0x%2.2x, name = %s, direction = %s, aggregation function = %s",
+              sk.field->id, field_get_name(sk.field->id),
+              libnf_sort_dir_to_str(sk.direction),
+              libnf_aggr_func_to_str(sk.aggr_func));
     } else {
-        PRINT_DEBUG("fields: no sort key");
+        DEBUG("fields: no sort key");
     }
 
-    PRINT_DEBUG("fields: %zu output field(s):", fields->output_fields_cnt);
+    DEBUG("fields: %zu output field(s):", fields->output_fields_cnt);
     for (size_t i = 0; i < fields->output_fields_cnt; i++) {
         const struct output_field of = fields->output_fields[i];
-        PRINT_DEBUG("\tID = 0x%2.2x, name = %s, aggregation function = %s",
-                    of.field->id, field_get_name(of.field->id),
-                    libnf_aggr_func_to_str(of.aggr_func));
+        DEBUG("\tID = 0x%2.2x, name = %s, aggregation function = %s",
+              of.field->id, field_get_name(of.field->id),
+              libnf_aggr_func_to_str(of.aggr_func));
     }
 
-    PRINT_DEBUG("fields: %zu field(s) in total:", fields->all_cnt);
+    DEBUG("fields: %zu field(s) in total:", fields->all_cnt);
     for (size_t i = 0; i < fields->all_cnt; ++i) {
         const struct field f = fields->all[i];
-        PRINT_DEBUG("\tID = 0x%2.2x, name = %s, size = %zu", f.id,
-                    field_get_name(f.id), f.size);
+        DEBUG("\tID = 0x%2.2x, name = %s, size = %zu", f.id,
+              field_get_name(f.id), f.size);
     }
 }

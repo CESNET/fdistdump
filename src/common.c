@@ -39,15 +39,15 @@
 
 #include "common.h"
 
-#include <assert.h>  // for assert
-#include <stddef.h>  // for NULL, size_t
-#include <stdio.h>   // for snprintf
-#include <stdlib.h>  // for setenv, unsetenv, getenv
-#include <string.h>  // for strlen, strncpy
-#include <time.h>    // for nanosleep, timespec
+#include <assert.h>     // for assert
+#include <stddef.h>     // for NULL, size_t
+#include <stdio.h>      // for snprintf
+#include <stdlib.h>     // for setenv, unsetenv, getenv
+#include <string.h>     // for strlen, strncpy
+#include <time.h>       // for nanosleep, timespec
 
-#include "fields.h"  // for struct fields
-#include "print.h"   // for PRINT_ERROR
+#include "errwarn.h"    // for error/warning/info/debug messages, ...
+#include "fields.h"     // for struct fields
 
 
 #define TM_YEAR_BASE 1900
@@ -238,7 +238,7 @@ libnf_mem_init_ht(lnf_mem_t **const lnf_mem, const struct fields *const fields)
 
     // initialize the memory
     int lnf_ret = lnf_mem_init(lnf_mem);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_init()");
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_init()");
 
     // loop through all aggregation keys and add them
     const bool have_sort_key = (fields->sort_key.field != NULL);
@@ -257,7 +257,7 @@ libnf_mem_init_ht(lnf_mem_t **const lnf_mem, const struct fields *const fields)
         lnf_ret = lnf_mem_fadd(*lnf_mem, fields->aggr_keys[i].field->id, flags,
                                fields->aggr_keys[i].alignment,
                                fields->aggr_keys[i].ipv6_alignment);
-        ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd() aggregation key");
+        ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd() aggregation key");
     }
 
     // add sort key if there is one and it was not one of aggregation keys
@@ -274,15 +274,15 @@ libnf_mem_init_ht(lnf_mem_t **const lnf_mem, const struct fields *const fields)
         const int flags = fields->sort_key.direction | fields->sort_key.aggr_func;
         lnf_ret = lnf_mem_fadd(*lnf_mem, fields->sort_key.field->id,
                                flags, alignment, ipv6_alignment);
-        ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd() sort key");
+        ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd() sort key");
     }
 
 
     if (fields_can_use_fast_aggr(fields)) {
         // the output fields comply with the fast aggregation, use it
-        PRINT_INFO("using the libnf fast aggregation mode");
+        INFO("using the libnf fast aggregation mode");
         lnf_ret = lnf_mem_fastaggr(*lnf_mem, LNF_FAST_AGGR_BASIC);
-        ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fastaggr()");
+        ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fastaggr()");
     } else {
         // the output fields do not comply with the fast aggregation, add all
         // output fields
@@ -299,7 +299,7 @@ libnf_mem_init_ht(lnf_mem_t **const lnf_mem, const struct fields *const fields)
             lnf_ret = lnf_mem_fadd(*lnf_mem, fields->output_fields[i].field->id,
                     fields->output_fields[i].aggr_func, alignment,
                     ipv6_alignment);
-            ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd() output field");
+            ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd() output field");
         }
     }
 }
@@ -330,9 +330,9 @@ libnf_mem_init_list(lnf_mem_t **const lnf_mem,
     // initialize the memory and switch it to a linked list to disable
     // aggregation
     int lnf_ret = lnf_mem_init(lnf_mem);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_init()");
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_init()");
     lnf_ret = lnf_mem_setopt(*lnf_mem, LNF_OPT_LISTMODE, NULL, 0);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_setopt()");
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_setopt()");
 
     // add all fields
     for (size_t i = 0; i < fields->all_cnt; ++i) {
@@ -355,7 +355,7 @@ libnf_mem_init_list(lnf_mem_t **const lnf_mem,
 
         lnf_ret = lnf_mem_fadd(*lnf_mem, fields->all[i].id, flags, alignment,
                                ipv6_alignment);
-        ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd()");
+        ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_mem_fadd()");
     }
 }
 

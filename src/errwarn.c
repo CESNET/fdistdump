@@ -1,4 +1,5 @@
-/** Implementation of console message printing (debug, info, warning, error).
+/**
+ * @brief Error handling and error, warning, info, debug console messages.
  */
 
 /*
@@ -37,7 +38,7 @@
  * if advised of the possibility of such damage.
  */
 
-#include "print.h"
+#include "errwarn.h"
 
 #include <assert.h>  // for assert
 #include <stdarg.h>  // for va_arg, va_end, va_list, va_start
@@ -51,76 +52,76 @@
 #include "common.h"  // for MAX_STR_LEN, ::E_LNF, ::E_OK, error_code_t, ::E_ARG
 
 
-// default verbosity level is warning
-verbosity_t verbosity = VERBOSITY_WARNING;
+/*
+ * Global variables.
+ */
+verbosity_t verbosity = VERBOSITY_WARNING;  // default is warning
 
 
+/*
+ * Static functions.
+ */
 /**
- * \defgroup print_func Error/warning/info/debug printing functions.
- * @{
- */
-/** \brief Convert error_code_t error code to human-readable string.
+ * @brief Convert error_code_t ecode to a human-readable string.
  *
- * \param[in] e1 fdistdump error code.
- * \return Static string at most MAX_STR_LEN long.
+ * @param[in] ecode fdistdump error code.
+ *
+ * @return Static read-only string.
  */
-static char * error_code_to_str(error_code_t e1)
+static char *
+error_code_to_str(const error_code_t ecode)
 {
-        static char msg[MAX_STR_LEN];
-
-        switch (e1) {
-        case E_OK:
-                snprintf(msg, MAX_STR_LEN, "no error");
-                break;
-
-        case E_EOF:
-                snprintf(msg, MAX_STR_LEN, "end of file");
-                break;
-
-        case E_MEM:
-                snprintf(msg, MAX_STR_LEN, "out of memory");
-                break;
-
-        case E_MPI:
-                snprintf(msg, MAX_STR_LEN, "MPI");
-                break;
-
-        case E_LNF:
-                snprintf(msg, MAX_STR_LEN, "libnf");
-                break;
-
-        case E_INTERNAL:
-                snprintf(msg, MAX_STR_LEN, "internal");
-                break;
-
-        case E_ARG:
-                snprintf(msg, MAX_STR_LEN, "command line arguments");
-                break;
-
-        case E_PATH:
-                snprintf(msg, MAX_STR_LEN, "path");
-                break;
-
-        case E_BFINDEX:
-                snprintf(msg, MAX_STR_LEN, "bfindex");
-                break;
-
-        case E_HELP:
-                assert(!"illegal error code");
-        default:
-                assert(!"unknown error code");
-        };
-
-        return msg;
+    switch (ecode) {
+    case E_OK:
+        return "no error";
+    case E_EOF:
+        return "end of file";
+    case E_MEM:
+        return "out of memory";
+    case E_MPI:
+        return "MPI";
+    case E_LNF:
+        return "libnf";
+    case E_INTERNAL:
+        return "internal";
+    case E_ARG:
+        return "command line arguments";
+    case E_PATH:
+        return "path";
+    case E_BFINDEX:
+        return "bfindex";
+    case E_HELP:
+        assert(!"illegal error code");
+    default:
+        assert(!"unknown error code");
+    };
 }
 
 
+/*
+ * Public functions.
+ */
+/**
+ * @brief Print an Error/Warning/Info/Debug (EWID) message.
+ *
+ * First, write output to the string. Than, print that string to the output by a
+ * single call of fprintf(). This is to prevent MPI to damage messages by
+ * combining output from different ranks in random order.
+ *
+ * This function may be called directly, but its better to use macros from
+ * header file {ERROR,WARNING,INFO,DEBUG}.
+ *
+ * @param[in] ecode  fdistdump error code.
+ * @param[in] prefix Message prefix (e.g., Error, Warning, ...).
+ * @param[in] file   Name of the current input file (use the __FILE__ macro).
+ * @param[in] func   Name of the current function (use the. __func__ macro).
+ * @param[in] line   Current input line number (use the  __LINE__ macro).
+ * @param[in] ...    Additional arguments beginning with a format string.
+ */
 void
-print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
-          const char *func, const int line, ...)
+ewid_print(const error_code_t ecode, const char *const prefix,
+           const char *const file, const char *const func, const int line, ...)
 {
-    FILE *const stream = stderr;
-
     char str[MAX_STR_LEN];
     char *str_term = str;
     size_t remaining = MAX_STR_LEN;
@@ -128,16 +129,9 @@ print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
     // initialize with prefix for every verbosity level
     SNPRINTF_APPEND(str_term, remaining, "%s: ", prefix);
 
-    // append fdistdump error info
-    if (e1 != E_OK) {
-        SNPRINTF_APPEND(str_term, remaining, "%s: ", error_code_to_str(e1));
-
-        // append external error info (libnf)
-        if (e1 == E_LNF && e2 == LNF_ERR_OTHER_MSG) {
-            char lnf_error_str[LNF_MAX_STRING];
-            lnf_error(lnf_error_str, LNF_MAX_STRING);
-            SNPRINTF_APPEND(str_term, remaining, "%s: ", lnf_error_str);
-        }
+    // append fdistdump error code string
+    if (ecode != E_OK) {
+        SNPRINTF_APPEND(str_term, remaining, "%s: ", error_code_to_str(ecode));
     }
 
     // append user string based on the format (first in arg_list) and va_args
@@ -154,8 +148,8 @@ print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
     }
     va_end(arg_list);
 
-    // append location information
-    SNPRINTF_APPEND(str_term, remaining, "\t[location: %s:%s():%d]", file, func,
+    // append source code location information
+    SNPRINTF_APPEND(str_term, remaining, "\t[src: %s:%s():%d]", file, func,
                     line);
 
     // append MPI information
@@ -177,8 +171,5 @@ print_msg(error_code_t e1, int e2, const char *prefix, const char *file,
 
     // append a newline and print string from the beginning
     SNPRINTF_APPEND(str_term, remaining, "%s", "\n");
-    fputs(str, stream);
+    fputs(str, stderr);
 }
-/**
- * @}
- */ //print_func

@@ -1,4 +1,5 @@
-/** File indexing using Bloom filter indexes for IP addresses.
+/**
+ * @brief File indexing using Bloom filter indexes for IP addresses.
  *
  * A Bloom filter is a space-efficient probabilistic data structure, conceived
  * by Burton Howard Bloom in 1970, that is used to test whether an element is a
@@ -59,8 +60,8 @@
 
 #include <bf_index.h>           // for bfi_addr_is_stored, bfi_get_error_msg
 
-#include "print.h"              // for PRINT_DEBUG, PRINT_ERROR, PRINT_WARNING
 #include "common.h"             // for ::E_MEM, FLOW_FILE_NAME_PREFIX, STRLE...
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 
 
 #define MAX_IP_ADDRESES 20  /**< Maximum number of IP addrs. used in a filter
@@ -141,17 +142,17 @@ static struct bfindex_node *
 build_addr_node(const ff_node_t *ff_node)
 {
     assert(ff_node && ff_node->type == FF_TYPE_ADDR);
-    PRINT_DEBUG("bfindex: build: build_addr_node");
+    DEBUG("bfindex: build: build_addr_node");
 
     static size_t ip_cnt; /**< Count of IP addresses in the IP address tree */
 
     if (ff_node->oper != FF_OP_EQ) {
-        PRINT_DEBUG("bfindex: build: other operator than EQ is used");
+        DEBUG("bfindex: build: other operator than EQ is used");
         global_ecode = BFINDEX_E_NO_EQ;
         return NULL;
     }
     if (++ip_cnt > MAX_IP_ADDRESES) {
-        PRINT_DEBUG("bfindex: build: too many IP addresses");
+        DEBUG("bfindex: build: too many IP addresses");
         global_ecode = BFINDEX_E_LIMIT;
         return NULL;
     }
@@ -175,14 +176,14 @@ build_addr_node(const ff_node_t *ff_node)
     }
 
     if (using_mask) {
-        PRINT_DEBUG("bfindex: build: network mask is used");
+        DEBUG("bfindex: build: network mask is used");
         global_ecode = BFINDEX_E_MASK;
         return NULL;
     }
 
     struct bfindex_node *const node = malloc(sizeof (*node));
     if (!node) {
-        PRINT_ERROR(E_MEM, 0, "build: node allocation");
+        ERROR(E_MEM, "build: node allocation");
         global_ecode = BFINDEX_E_MEM;
         return NULL;
     }
@@ -211,13 +212,13 @@ prune_oper_subtree(struct bfindex_node *node)
     assert(node && node_type_is_oper(node->type));
 
     if (!node->left && !node->right) {  // both child nodes are empty
-            PRINT_DEBUG("bfindex: reduce: removing operator node without child nodes");
+            DEBUG("bfindex: reduce: removing operator node without child nodes");
             return NULL;
     } else if (!node->left) {   // the left is empty, the right is not
-            PRINT_DEBUG("bfindex: reduce: using right child node directly");
+            DEBUG("bfindex: reduce: using right child node directly");
             return node->right;
     } else if (!node->right) {  // the rigth is empty, the left is not
-            PRINT_DEBUG("bfindex: reduce: using left child node directly");
+            DEBUG("bfindex: reduce: using left child node directly");
         return node->left;
     } else if (node_type_is_addr(node->left->type)
             && node_type_is_addr(node->right->type)
@@ -225,7 +226,7 @@ prune_oper_subtree(struct bfindex_node *node)
             && (memcmp(&node->left->addr, &node->right->addr,
                 sizeof (node->left->addr)) == 0)) {
         // both child nodes are not empty and contains the same address
-        PRINT_DEBUG("bfindex: reduce: using left child node directly because left and right child nodes are the same");
+        DEBUG("bfindex: reduce: using left child node directly because left and right child nodes are the same");
         free(node->right);
         return node->left;
     }
@@ -245,7 +246,7 @@ static struct bfindex_node *
 build_oper_node(const ff_node_t *ff_node)
 {
     assert(ff_node && ff_node->type == FF_TYPE_UNSUPPORTED);
-    PRINT_DEBUG("bfindex: build: build_oper_node");
+    DEBUG("bfindex: build: build_oper_node");
 
     node_type_t node_type;
     switch (ff_node->oper) {
@@ -267,7 +268,7 @@ build_oper_node(const ff_node_t *ff_node)
     case FF_OP_ISNSET:
     case FF_OP_EXIST:
     case FF_OP_TERM_:
-        PRINT_DEBUG("bfindex: build: skipping other node");
+        DEBUG("bfindex: build: skipping other node");
         global_ecode = BFINDEX_E_OK;
         return NULL;
     default:
@@ -276,7 +277,7 @@ build_oper_node(const ff_node_t *ff_node)
 
     struct bfindex_node *const node = malloc(sizeof (*node));
     if (!node) {
-        PRINT_ERROR(E_MEM, 0, "build: node allocation");
+        ERROR(E_MEM, "build: node allocation");
         global_ecode = BFINDEX_E_MEM;
         return NULL;
     }
@@ -307,7 +308,7 @@ static struct bfindex_node *
 build_node(const ff_node_t *ff_node)
 {
     assert(ff_node);
-    PRINT_DEBUG("bfindex: build: build_node, type = %d", ff_node->type);
+    DEBUG("bfindex: build: build_node, type = %d", ff_node->type);
 
     switch (ff_node->type) {
     case FF_TYPE_ADDR:         // address node
@@ -333,7 +334,7 @@ build_node(const ff_node_t *ff_node)
     case FF_TYPE_TIMESTAMP:
     case FF_TYPE_TIMESTAMP_BIG:
     case FF_TYPE_TERM_:
-        PRINT_DEBUG("bfindex: build: skipping unknown node");
+        DEBUG("bfindex: build: skipping unknown node");
         global_ecode = BFINDEX_E_OK;
         return NULL;
     default:                   // filter node of some another type
@@ -420,10 +421,10 @@ bfindex_init(const ff_node_t *filter_root)
 
     struct bfindex_node *const bfindex_root = build_node(filter_root);
     if (!bfindex_root) {
-        PRINT_INFO("bfindex: init: file indexes cannot be used due to unsuitable filter");
+        INFO("bfindex: init: file indexes cannot be used due to unsuitable filter");
         return NULL;
     } else if (global_ecode != BFINDEX_E_OK) {
-        PRINT_WARNING(E_BFINDEX, 0, "init: file indexes will not be used due to error during operator/address tree initialization");
+        WARNING(E_BFINDEX, "init: file indexes will not be used due to error during operator/address tree initialization");
         bfindex_free(bfindex_root);
         return NULL;
     } else {
@@ -434,7 +435,7 @@ bfindex_init(const ff_node_t *filter_root)
 void
 bfindex_free(struct bfindex_node *bfindex_node)
 {
-    PRINT_DEBUG("bfindex: free: recursive node deallocation");
+    DEBUG("bfindex: free: recursive node deallocation");
 
     if (bfindex_node) {
         if (node_type_is_oper(bfindex_node->type)) {
@@ -484,7 +485,7 @@ bfindex_flow_to_index_path(const char *flow_file_path)
             + file_name_len  // (rest of the) original file name
             + 1);  // terminating null-byte
     if (!index_path) {
-        PRINT_ERROR(E_MEM, 0, "path string allocation");
+        ERROR(E_MEM, "path string allocation");
         return NULL;
     }
     strncpy(index_path, dir_name, dir_name_len);
@@ -504,7 +505,7 @@ bfindex_contains(const struct bfindex_node *bfindex_node,
     bfi_index_ptr_t index_ptr;
     bfi_ecode_t bfi_ecode = bfi_load_index(&index_ptr, index_file_path);
     if (bfi_ecode != BFI_E_OK) {
-        PRINT_WARNING(E_BFINDEX, 0, "contains: unable to load file `%s': %s",
+        WARNING(E_BFINDEX, "contains: unable to load file `%s': %s",
                       index_file_path, bfi_get_error_msg(bfi_ecode));
         return true;
     }

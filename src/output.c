@@ -62,8 +62,8 @@
 #include <sys/socket.h>         // for AF_INET, AF_INET6
 
 #include "common.h"             // for metadata_summ, processed_summ, ARRAY_...
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
 #include "fields.h"             // for struct fields, field_get_*, ...
-#include "print.h"              // for SNPRINTF_APPEND, PRINT_ERROR
 
 
 #define PRETTY_PRINT_SEP " "
@@ -554,7 +554,7 @@ libnf_addr_to_str(const lnf_ip_t *const addr)
         } else {  // IPv6
             ret = inet_ntop(AF_INET6, addr->data, global_str, INET6_ADDRSTRLEN);
         }
-        ERROR_IF(!ret, E_INTERNAL, "inet_ntop()");
+        ABORT_IF(!ret, E_INTERNAL, "inet_ntop()");
         break;
     }
     case OUTPUT_IP_ADDR_CONV_UNSET:
@@ -944,7 +944,7 @@ print_mem(lnf_mem_t *const mem, const uint64_t limit)
     // initialize libne records
     lnf_rec_t *rec;
     int lnf_ret = lnf_rec_init(&rec);
-    ERROR_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
 
     /*
      * Find out maximum data type size of present fields, length of headers
