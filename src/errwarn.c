@@ -43,9 +43,7 @@
 #include <assert.h>  // for assert
 #include <stdarg.h>  // for va_arg, va_end, va_list, va_start
 
-#ifdef _OPENMP
 #include <omp.h>
-#endif //_OPENMP
 #include <libnf.h>   // for lnf_error, LNF_MAX_STRING, LNF_ERR_OTHER_MSG
 #include <mpi.h>     // for MPI_Comm_rank, MPI_Comm_size, MPI_Get_processor_...
 
@@ -152,7 +150,7 @@ ewid_print(const error_code_t ecode, const char *const prefix,
     SNPRINTF_APPEND(str_term, remaining, "\t[src: %s:%s():%d]", file, func,
                     line);
 
-    // append MPI information
+    // append MPI rank / communicator size and processor name
     int mpi_world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_world_rank);
     int mpi_world_size;
@@ -164,10 +162,9 @@ ewid_print(const error_code_t ecode, const char *const prefix,
     SNPRINTF_APPEND(str_term, remaining, " [MPI: %d/%d %s]", mpi_world_rank + 1,
                    mpi_world_size, mpi_processor_name);
 
-#ifdef _OPENMP
+    // append OpenMP thread number / number of threads
     SNPRINTF_APPEND(str_term, remaining, " [OpenMP: %d/%d]",
                     omp_get_thread_num() + 1, omp_get_num_threads());
-#endif  // _OPENMP
 
     // append a newline and print string from the beginning
     SNPRINTF_APPEND(str_term, remaining, "%s", "\n");

@@ -186,6 +186,8 @@ echo "  LDLIBS  : $LDLIBS"
 # automake uses $LIBS instead of LDLIBS
 echo "  LIBS    : $LIBS"
 echo
+echo "  OpenMP  : $OPENMP_CFLAGS"
+echo
 echo "MPI environment:"
 echo "  MPI_COMPILER: $MPI_COMPILER"
 echo "  MPI_HOME    : $MPI_HOME"
@@ -197,7 +199,6 @@ echo -n "  libnf  : "; test "$enable_libnf" != "no" && echo "yes" || echo "no"
 echo -n "  bfindex: "; test "$enable_bfindex" != "no" && echo "yes" || echo "no"
 echo
 echo "Optional features:"
-echo -n "  OpenMP        : "; test "$enable_openmp" != "no" && echo "yes ($OPENMP_CFLAGS)" || echo "no"
 echo -n "  Basic tests   : "; test "$enable_basic_tests" = "yes" && echo "yes" || echo "no"
 echo -n "  Advanced tests: "; test "$enable_advanced_tests" = "yes" && echo "yes" || echo "no"
 true  # return success

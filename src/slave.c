@@ -50,9 +50,7 @@
 #include <ffilter.h>            // for ff_t
 #include <libnf.h>              // for lnf_info, LNF_OK, lnf_rec_fget, LNF_EOF
 #include <mpi.h>                // for MPI_Wait, MPI_Bcast, MPI_Isend, MPI_R...
-#ifdef _OPENMP
 #include <omp.h>
-#endif //_OPENMP
 
 #include "arg_parse.h"          // for cmdline_args
 #ifdef HAVE_LIBBFINDEX
@@ -1071,30 +1069,23 @@ slave_main(const struct cmdline_args *args_local)
     slave_ctx_init(&s_ctx);
 
     // generate paths to the specific flow files
-    uint64_t ff_paths_cnt = 0;
+    size_t ff_paths_cnt = 0;
     char **ff_paths = path_array_gen(args->paths, args->paths_cnt,
                                      args->time_begin, args->time_end,
-            &ff_paths_cnt);
+                                     &ff_paths_cnt);
     assert(ff_paths);
-    DEBUG("going to process %" PRIu64 " flow file(s)", ff_paths_cnt);
+    DEBUG("going to process %zu flow file(s)", ff_paths_cnt);
 
     // report number of files to be processed
     progress_report_init(ff_paths_cnt);
 
-    int num_threads = 1;  // one threads if OpenMP is not used
-#ifdef _OPENMP
-    {
-        // use at most files-count threads
-        int max_threads = omp_get_max_threads();
-        assert(max_threads > 0);
-        if (ff_paths_cnt < (uint64_t)max_threads) {
-            num_threads = ff_paths_cnt;
-            omp_set_num_threads(num_threads);
-        } else {
-            num_threads = max_threads;
-        }
+    // use at most files-count threads
+    int num_threads = omp_get_max_threads();  // retrieve nthreads-var
+    assert(num_threads > 0);
+    if (ff_paths_cnt < (size_t)num_threads) {
+        num_threads = ff_paths_cnt;
+        omp_set_num_threads(num_threads);  // modify the value of nthreads-var
     }
-#endif  //_OPENMP
     DEBUG("using %d thread(s)", num_threads);
     // send a number of used threads
     MPI_Reduce(&num_threads, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
