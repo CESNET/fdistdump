@@ -59,7 +59,8 @@ AX_APPEND_COMPILE_FLAGS([-Wformat=2 -Wno-format-y2k])
 AX_APPEND_COMPILE_FLAGS([-fstack-protector -fstack-protector-strong])
 
 # check for OpenMP
-AC_OPENMP  # sets OPENMP_CFLAGS to the C flags needed for supporting OpenMP
+# AX_OPENMP sets OPENMP_CFLAGS to the C flags needed for supporting OpenMP
+AX_OPENMP([], [AC_MSG_ERROR([the current compiler does not suppert OpenMP])])
 AX_APPEND_LINK_FLAGS([$OPENMP_CFLAGS])
 AX_APPEND_COMPILE_FLAGS([$OPENMP_CFLAGS])
 ################################################################################
