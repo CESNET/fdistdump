@@ -67,9 +67,9 @@
 #define TIME_DELIM " \t\n\v\f\r"  // whitespace
 #define FIELDS_DELIM ","          // libnf fields delimiter
 
-#define DEFAULT_LIST_FIELDS "first,packets,bytes,srcip,dstip,srcport,dstport,proto"
+#define DEFAULT_LIST_FIELDS "first,packets,bytes,srcip,dstip,srcport,dstport,proto,flags"
 #define DEFAULT_SORT_FIELDS DEFAULT_LIST_FIELDS
-#define DEFAULT_AGGR_FIELDS "duration,flows,packets,bytes,bps,pps,bpp"
+#define DEFAULT_AGGR_FIELDS "duration,flows,packets,bytes,flags,bps,pps,bpp"
 #define DEFAULT_STAT_SORT_KEY "flows"
 #define DEFAULT_STAT_REC_LIMIT "10"
 
