@@ -159,12 +159,12 @@ progress_bar_print(const struct progress_bar_ctx *const pb_ctx)
     assert(pb_ctx->files_cnt_sum <= pb_ctx->files_cnt_goal_sum);
 
     // calculate a percentage progress for each source
-    double source_percentage[pb_ctx->sources_cnt];
+    unsigned int source_percentage[pb_ctx->sources_cnt];
     for (uint64_t i = 0; i < pb_ctx->sources_cnt; ++i) {
         assert(pb_ctx->files_cnt[i] <= pb_ctx->files_cnt_goal[i]);
 
-        if (pb_ctx->files_cnt_goal[i] == 0) {
-            source_percentage[i] = 100.0;
+        if (pb_ctx->files_cnt_goal[i] == 0) {  // to prevent division by zero
+            source_percentage[i] = 100;
         } else {
             source_percentage[i] = (double)pb_ctx->files_cnt[i]
                 / pb_ctx->files_cnt_goal[i] * 100.0;
@@ -172,16 +172,16 @@ progress_bar_print(const struct progress_bar_ctx *const pb_ctx)
     }
 
     // calculate a total percentage progress
-    double total_percentage;
-    if (pb_ctx->files_cnt_goal_sum == 0) {
-        total_percentage = 100.0;
+    unsigned int total_percentage;
+    if (pb_ctx->files_cnt_goal_sum == 0) {  // to prevent division by zero
+        total_percentage = 100;
     } else {
         total_percentage =
             (double)pb_ctx->files_cnt_sum / pb_ctx->files_cnt_goal_sum * 100.0;
     }
 
     // diverge for each progress bar type
-#define PROGRESS_BAR_FMT "%" PRIu64 "/%" PRIu64 " (%.0f %%)"
+#define PROGRESS_BAR_FMT "%" PRIu64 "/%" PRIu64 " (%u %%)"
     switch (pb_ctx->type) {
     case PROGRESS_BAR_TOTAL:
         fprintf(pb_ctx->out_stream, "reading files: " PROGRESS_BAR_FMT,
@@ -202,9 +202,9 @@ progress_bar_print(const struct progress_bar_ctx *const pb_ctx)
         break;
 
     case PROGRESS_BAR_JSON:
-        fprintf(pb_ctx->out_stream, "{\"total\":%.0f", total_percentage);
+        fprintf(pb_ctx->out_stream, "{\"total\":%d", total_percentage);
         for (uint64_t i = 0; i < pb_ctx->sources_cnt; ++i) {
-            fprintf(pb_ctx->out_stream, ",\"slave%" PRIu64 "\":%.0f", i + 1,
+            fprintf(pb_ctx->out_stream, ",\"slave%" PRIu64 "\":%d", i + 1,
                     source_percentage[i]);
         }
         putc('}', pb_ctx->out_stream);
@@ -370,13 +370,13 @@ recv_loop(struct master_ctx *const m_ctx, const uint64_t source_cnt,
 
         if (msg_size == 0) {  // empty message is a terminator
             if (--active_sources) {
-                DEBUG("recv_loop: received termination, "
-                      "%zu source(s) remaining, continuing", active_sources);
+                DEBUG("recv_loop: received termination, %zu source(s) remaining",
+                      active_sources);
                 // start receiving next message into the same buffer
                 MPI_Irecv(m_ctx->rec_buff[buff_idx], XCHG_BUFF_SIZE, MPI_BYTE,
                           MPI_ANY_SOURCE, mpi_tag, mpi_comm_main, &request);
             } else {
-                DEBUG("recv_loop: received termination, no sources remaining, breaking");
+                DEBUG("recv_loop: received termination, no sources remaining");
             }
             continue;
         }
