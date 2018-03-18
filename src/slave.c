@@ -1084,9 +1084,12 @@ slave_main(const struct cmdline_args *args_local)
     assert(num_threads > 0);
     if (ff_paths_cnt < (size_t)num_threads) {
         num_threads = ff_paths_cnt;
+        DEBUG("using only %d thread(s) because of limited number of flow files",
+              num_threads);
         omp_set_num_threads(num_threads);  // modify the value of nthreads-var
+    } else {
+        DEBUG("using %d thread(s)", num_threads);
     }
-    DEBUG("using %d thread(s)", num_threads);
     // send a number of used threads
     MPI_Reduce(&num_threads, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
                mpi_comm_main);

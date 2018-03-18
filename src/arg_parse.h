@@ -1,4 +1,5 @@
-/** Argument parsing declarations.
+/**
+ * @brief Argument parsing and usage/help printing.
  */
 
 /*

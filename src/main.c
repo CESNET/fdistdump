@@ -95,6 +95,10 @@ main(int argc, char *argv[])
     // parse command line arguments in all processes
     struct cmdline_args args = { 0 };
     error_code_t ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
+    if (ecode == E_HELP) {
+        MPI_Finalize();
+        return EXIT_SUCCESS;
+    }
     ABORT_IF(ecode != E_OK, ecode, "parsing arguments failed");
 
     // duplicate MPI_COMM_WORLD and create mpi_comm_main and mpi_comm_progress

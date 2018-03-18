@@ -1,4 +1,5 @@
-/** Argument parsing and usage/help printing implementation.
+/**
+ * @brief Argument parsing and usage/help printing.
  */
 
 /*
@@ -37,7 +38,7 @@
  * if advised of the possibility of such damage.
  */
 
-#define _XOPEN_SOURCE  // strptime()
+#define _XOPEN_SOURCE           // strptime()
 
 #include "config.h"             // for PACKAGE_NAME, PACKAGE_STRING
 
@@ -52,6 +53,7 @@
 #include <string.h>             // for strcmp, strtok_r, strerror, strchr
 #include <time.h>               // for NULL, gmtime_r, mktime, localtime_r
 
+#include <omp.h>                // for omp_set_num_threads
 #include <getopt.h>             // for required_argument, no_argument, getop...
 #include <libnf.h>              // for lnf_fld_info, LNF_FLD_ZERO_, LNF_SORT...
 
@@ -77,74 +79,17 @@
 
 
 /* Global variables. */
-static const char *usage_string =
-"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [-a field[,...]] [-f filter]\n"
-"       [-l limit] [-o field[#direction]] [-s statistic] [-t time_spec]\n"
-"       [-T begin[#end]] [-v level] path ...";
-
-static const char *help_string =
-"MPI_options\n"
-"      See your MPI process manager documentation, e.g., mpiexec(1).\n"
-"General options\n"
-"     Mandatory arguments to long options are mandatory for short options too.\n"
-"\n"
-"     -a, --aggregation=field[,...]\n"
-"            Aggregated flow records together by any number of fields.\n"
-"     -f, --filter=filter\n"
-"            Process only filter matching records.\n"
-"     -l, --limit=limit\n"
-"            Limit the number of records to print.\n"
-"     -o, --order=field[#direction]\n"
-"            Set record sort order.\n"
-"     -s, --statistic=statistic\n"
-"            Shortcut for aggregation (-a), sort (-o) and record limit (-l).\n"
-"     -t, --time-point=time_spec\n"
-"            Process only single flow file, the one which includes given time.\n"
-"     -T, --time-range=begin[#end]\n"
-"            Process only flow files from begin to the end time range.\n"
-"     -v, --verbosity=level\n"
-"            Set verbosity level.\n"
-"\n"
-"Controlling output\n"
-"     --output-fields=field[,...]\n"
-"            Set the list of output fields.\n"
-"     --output-items= item_list\n"
-"            Set output items.\n"
-"     --output-format=format\n"
-"            Set output (print) format.\n"
-"     --output-ts-conv=timestamp_conversion\n"
-"            Set timestamp output conversion format.\n"
-"     --output-ts-localtime\n"
-"            Convert timestamps to local time.\n"
-"     --output-volume-conv=volume_conversion\n"
-"            Set volume output conversion format.\n"
-"     --output-tcpflags-conv=TCP_flags_conversion\n"
-"            Set TCP flags output conversion format.\n"
-"     --output-addr-conv=IP_address_conversion\n"
-"            Set IP address output conversion format.\n"
-"     --output-proto-conv=IP_protocol_conversion\n"
-"            Set IP protocol output conversion format.\n"
-"     --output-duration-conv=duration_conversion\n"
-"            Set duration conversion format.\n"
-"     --progress-bar-type=progress_bar_type\n"
-"            Set progress bar type.\n"
-"     --progress-bar-dest=progress_bar_destination\n"
-"            Set progress bar destination.\n"
-"\n"
-"Other options\n"
-"     --no-tput\n"
-"            Disable the TPUT algorithm for Top-N queries.\n"
-"     --no-bfindex\n"
-"            Disable Bloom filter indexes.\n"
-"\n"
-"Getting help\n"
-"     --help Print a help message and exit.\n"
-"     --version\n"
-"            Display version information and exit.\n";
+static const char *const USAGE_STRING =
+"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [options] path ...\n"
+"       mpiexec [global_MPI_options] \\\n"
+"               [local_MPI_options] " PACKAGE_NAME " [options] : \\\n"
+"               [local_MPI_options] " PACKAGE_NAME " [options] path1 ... : \\\n"
+"               [local_MPI_options] " PACKAGE_NAME " [options] path2 ... :  ...";
 
 enum {  // command line options, have to start above the ASCII table
     OPT_NO_TPUT = 256,  // disable the TPUT algorithm for Top-N queries
     OPT_NO_BFINDEX,  // disable Bloom filter indexes
+    OPT_NUM_THREADS,  // set the number of used threads
 
     OPT_OUTPUT_FIELDS,  // specification of listed fields
     OPT_OUTPUT_ITEMS,   // output items (records, processed records summary,
@@ -181,6 +126,7 @@ static const struct option long_opts[] = {
     // long options only
     {"no-tput", no_argument, NULL, OPT_NO_TPUT},
     {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
+    {"num-threads", required_argument, NULL, OPT_NUM_THREADS},
 
     {"output-fields", required_argument, NULL, OPT_OUTPUT_FIELDS},
     {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
@@ -1084,6 +1030,51 @@ static error_code_t set_progress_bar_type(progress_bar_type_t *type,
         return E_OK;
 }
 
+static error_code_t
+set_verbosity_level(const char *const verbosity_str)
+{
+    const char *const conversion_err = str_to_int(verbosity_str,
+                                                  (int *)&verbosity);
+    if (conversion_err) {
+        ERROR(E_ARG, "invalid verbosity level `%s': %s", verbosity_str,
+              conversion_err);
+        return E_ARG;
+    }
+    if (!IN_RANGE_INCL(verbosity, VERBOSITY_QUIET, VERBOSITY_DEBUG)) {
+        ERROR(E_ARG, "invalid verbosity level `%s': allowed range is [%d,%d]",
+              verbosity_str, VERBOSITY_QUIET, VERBOSITY_DEBUG);
+        return E_ARG;
+    }
+
+    if (verbosity == VERBOSITY_INFO) {
+        INFO("args: setting verbosity level to info");
+    } else if (verbosity == VERBOSITY_DEBUG) {
+        DEBUG("args: setting verbosity level to debug");
+    }
+
+    return E_OK;
+}
+
+static error_code_t
+set_num_threads(const char *const num_threads_str)
+{
+    int num_threads = 0;
+    const char *const conversion_err = str_to_int(num_threads_str, &num_threads);
+    if (conversion_err) {
+        ERROR(E_ARG, "invalid number of threads `%s': %s", num_threads_str,
+              conversion_err);
+        return E_ARG;
+    } else if (num_threads < 1) {
+        ERROR(E_ARG, "invalid number of threads `%s': has to be a positive number",
+              num_threads_str);
+        return E_ARG;
+    }
+
+    INFO("args: setting number of threads to %d", num_threads);
+    omp_set_num_threads(num_threads);
+    return E_OK;
+}
+
 error_code_t
 arg_parse(struct cmdline_args *args, int argc, char *const argv[],
           bool root_proc)
@@ -1106,7 +1097,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     char *sort_optarg = NULL;
     char *time_point_optarg = NULL;
     char *time_range_optarg = NULL;
-    char *verbosity_optarg = NULL;
     char *output_fields_optarg = NULL;
     // loop through all the command-line arguments
     while (true) {
@@ -1138,7 +1128,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             time_range_optarg = optarg;
             break;
         case 'v':  // or "--verbosity"
-            verbosity_optarg = optarg;
+            ecode = set_verbosity_level(optarg);
             break;
 
         case OPT_NO_TPUT:  // disable the TPUT algorithm for Top-N queries
@@ -1146,6 +1136,9 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             break;
         case OPT_NO_BFINDEX:    // disable Bloom filter indexes
             args->use_bfindex = false;
+            break;
+        case OPT_NUM_THREADS:  // set the number of used threads
+            ecode = set_num_threads(optarg);
             break;
 
         // output-affecting options
@@ -1189,8 +1182,9 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
 
         case OPT_HELP:  // help
             if (root_proc) {
-                printf("%s\n\n", usage_string);
-                printf("%s", help_string);
+                printf("%s\n\n", USAGE_STRING);
+                printf("For the complete documentation see man 1 " PACKAGE_NAME
+                       ".\n");
             }
             return E_HELP;
 
@@ -1210,23 +1204,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     }  // while (true) loop through all command-line arguments
 
     ////////////////////////////////////////////////////////////////////////////
-    // parse and set verbosity level (early to affect also argument parsing)
-    if (verbosity_optarg) {
-        const char *const conversion_err = str_to_int(verbosity_optarg,
-                                                      (int *)&verbosity);
-        if (conversion_err) {
-            ERROR(E_ARG, "invalid verbosity level `%s': %s", verbosity_optarg,
-                  conversion_err);
-            return E_ARG;
-        }
-        if (!IN_RANGE_INCL(verbosity, VERBOSITY_QUIET, VERBOSITY_DEBUG)) {
-            ERROR(E_ARG, "invalid verbosity level `%s': allowed range is [%d,%d]",
-                  verbosity_optarg, VERBOSITY_QUIET, VERBOSITY_DEBUG);
-            return E_ARG;
-        }
-        DEBUG("args: setting verbosity level to debug");
-    }
-
     // parse aggregation and sort option argument options
     if (aggr_optarg) {  // aggregation mode with optional sorting
         args->working_mode = MODE_AGGR;
