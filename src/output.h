@@ -52,71 +52,71 @@
  * Data types declarations.
  */
 typedef enum {
-        OUTPUT_ITEM_UNSET,
-        OUTPUT_ITEM_YES,
-        OUTPUT_ITEM_NO,
+    OUTPUT_ITEM_UNSET,
+    OUTPUT_ITEM_YES,
+    OUTPUT_ITEM_NO,
 } output_item_t;
 
 typedef enum {
-        OUTPUT_FORMAT_UNSET,
-        OUTPUT_FORMAT_PRETTY,
-        OUTPUT_FORMAT_CSV,
+    OUTPUT_FORMAT_UNSET,
+    OUTPUT_FORMAT_PRETTY,
+    OUTPUT_FORMAT_CSV,
 } output_format_t;
 
 typedef enum {
-        OUTPUT_TS_CONV_UNSET,
-        OUTPUT_TS_CONV_NONE,
-        OUTPUT_TS_CONV_STR,
+    OUTPUT_TS_CONV_UNSET,
+    OUTPUT_TS_CONV_NONE,
+    OUTPUT_TS_CONV_STR,
 } output_ts_conv_t;
 
 typedef enum {
-        OUTPUT_VOLUME_CONV_UNSET,
-        OUTPUT_VOLUME_CONV_NONE,
-        OUTPUT_VOLUME_CONV_METRIC_PREFIX,
-        OUTPUT_VOLUME_CONV_BINARY_PREFIX,
+    OUTPUT_VOLUME_CONV_UNSET,
+    OUTPUT_VOLUME_CONV_NONE,
+    OUTPUT_VOLUME_CONV_METRIC_PREFIX,
+    OUTPUT_VOLUME_CONV_BINARY_PREFIX,
 } output_stat_conv_t;
 
 typedef enum {
-        OUTPUT_TCP_FLAGS_CONV_UNSET,
-        OUTPUT_TCP_FLAGS_CONV_NONE,
-        OUTPUT_TCP_FLAGS_CONV_STR,
+    OUTPUT_TCP_FLAGS_CONV_UNSET,
+    OUTPUT_TCP_FLAGS_CONV_NONE,
+    OUTPUT_TCP_FLAGS_CONV_STR,
 } output_tcp_flags_conv_t;
 
 typedef enum {
-        OUTPUT_IP_ADDR_CONV_UNSET,
-        OUTPUT_IP_ADDR_CONV_NONE,
-        OUTPUT_IP_ADDR_CONV_STR,
+    OUTPUT_IP_ADDR_CONV_UNSET,
+    OUTPUT_IP_ADDR_CONV_NONE,
+    OUTPUT_IP_ADDR_CONV_STR,
 } output_ip_addr_conv_t;
 
 typedef enum {
-        OUTPUT_IP_PROTO_CONV_UNSET,
-        OUTPUT_IP_PROTO_CONV_NONE,
-        OUTPUT_IP_PROTO_CONV_STR,
+    OUTPUT_IP_PROTO_CONV_UNSET,
+    OUTPUT_IP_PROTO_CONV_NONE,
+    OUTPUT_IP_PROTO_CONV_STR,
 } output_ip_proto_conv_t;
 
 typedef enum {
-        OUTPUT_DURATION_CONV_UNSET,
-        OUTPUT_DURATION_CONV_NONE,
-        OUTPUT_DURATION_CONV_STR,
+    OUTPUT_DURATION_CONV_UNSET,
+    OUTPUT_DURATION_CONV_NONE,
+    OUTPUT_DURATION_CONV_STR,
 } output_duration_conv_t;
 
 
 struct output_params {
-        output_item_t print_records;
-        output_item_t print_processed_summ;
-        output_item_t print_metadata_summ;
+    output_item_t print_records;
+    output_item_t print_processed_summ;
+    output_item_t print_metadata_summ;
 
-        output_format_t format;
+    output_format_t format;
 
-        output_ts_conv_t ts_conv;
-        char *ts_conv_str;
-        bool ts_localtime; //output timestamp in localtime instead of UTC
+    output_ts_conv_t ts_conv;
+    char *ts_conv_str;
+    bool ts_localtime; //output timestamp in localtime instead of UTC
 
-        output_stat_conv_t volume_conv;
-        output_tcp_flags_conv_t tcp_flags_conv;
-        output_ip_addr_conv_t ip_addr_conv;
-        output_ip_proto_conv_t ip_proto_conv;
-        output_duration_conv_t duration_conv;
+    output_stat_conv_t volume_conv;
+    output_tcp_flags_conv_t tcp_flags_conv;
+    output_ip_addr_conv_t ip_addr_conv;
+    output_ip_proto_conv_t ip_proto_conv;
+    output_duration_conv_t duration_conv;
 };
 
 
@@ -125,12 +125,14 @@ struct output_params {
  */
 void
 output_init(struct output_params op, const struct fields *const fields);
+void
+output_free(void);
 
 void
 print_rec(const uint8_t *const data);
 
 void
-print_mem(lnf_mem_t *const mem, const uint64_t limit);
+print_mem(lnf_mem_t *const lnf_mem, const uint64_t limit);
 
 void
 print_processed_summ(const struct processed_summ *const s,

@@ -742,6 +742,7 @@ master_main_thread(void)
         assert(!"unknown working mode");
     }
 
+    output_free();
     master_ctx_free(m_ctx);
 }
 

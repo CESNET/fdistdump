@@ -77,10 +77,26 @@
 #endif
 
 
+/*
+ * Data types declarations.
+ */
+typedef const char *(*field_to_str_t)(const void *const);
+
+
+/*
+ * Global variables.
+ */
+struct {
+    field_to_str_t *field_to_str_cb;
+    size_t *field_offset;
+    size_t *column_width;
+
+    bool first_item;  // first item will not print '\n' before
+} o_ctx;
+
 static char global_str[MAX_STR_LEN];
 static struct output_params output_params; //output parameters
-const struct fields *fields;
-static bool first_item = true; //first item will not print '\n'
+static const struct fields *fields;
 
 static const char *ip_proto_str_table[] = {
     [0] = "HOPOPT",
@@ -268,12 +284,14 @@ static const char tcp_flags_table[] = {
 };
 
 
-typedef const char *(*field_to_str_t)(const void *const);
-
+// forward declarations
 static const char *
 field_to_str(const int field, const void *const data);
 
 
+/*
+ * Private functions.
+ */
 /**
  * @brief Convert a timestamp in uint64_t to string.
  *
@@ -781,23 +799,20 @@ field_to_str_func_table[] = {
 };
 
 /**
- * @brief Call appropriate "to_str()" function for the given libnf field.
+ * @brief Retrun pointer to appropriate "to_str()" function for the given libnf
+ *        field.
  *
  * First, check if there is a specialized function for the given field. If not,
  * use the general (fallback) function for the data type of the field.
  *
  * @param field_id Libnf field ID.
- * @param data Pointer to the data to print.
  *
- * @return Static read-only string with text representation of the given data.
+ * @return Pointer to the field_to_str_t function.
  */
-static const char *
-field_to_str(const int field_id, const void *const data)
+static field_to_str_t
+get_field_to_str_callback(const int field_id)
 {
     const int type = field_get_type(field_id);
-    if (type == -1) {
-        return NULL;
-    }
 
     field_to_str_t to_str_func = field_to_str_func_table[field_id];
     if (!to_str_func) {
@@ -838,7 +853,24 @@ field_to_str(const int field_id, const void *const data)
         }
     }
 
-    return to_str_func(data);
+    return to_str_func;
+}
+
+/**
+ * @brief Convert the libnf field data to string.
+ *
+ * Contains just a call to the function returned by get_field_to_str_callback().
+ *
+ * @param field_id Libnf field ID.
+ * @param data Pointer to the data to print.
+ *
+ * @return Static read-only string with text representation of the given data.
+ */
+static const char *
+field_to_str(const int field_id, const void *const data)
+{
+
+    return get_field_to_str_callback(field_id)(data);
 }
 
 /**
@@ -850,8 +882,8 @@ field_to_str(const int field_id, const void *const data)
  * @param last
  */
 static void
-print_field(const char *const string, const uint64_t string_width,
-            const uint64_t space_width, const bool last)
+print_field(const char *const string, const size_t string_width,
+            const size_t space_width, const bool last)
 {
     if (last) {  // last field in record, no trailing spacing or CSV separator
         puts(string);  // puts() appends a newline
@@ -875,7 +907,134 @@ print_field(const char *const string, const uint64_t string_width,
     }
 }
 
+/**
+ * @brief TODO
+ *
+ * @param data
+ */
+static void
+print_headers(const uint8_t *const data)
+{
+    for (size_t i = 0; i < fields->all_cnt; ++i) {
+        const bool last_column = (i == (fields->all_cnt - 1));
+        const char *const header_str = field_get_name(fields->all[i].id);
+        const size_t header_str_len = strlen(header_str);
+        const char *const first_field_str =
+            o_ctx.field_to_str_cb[i](data + o_ctx.field_offset[i]);
+        const size_t first_field_str_len = strlen(first_field_str);
 
+        o_ctx.column_width[i] = MAX(header_str_len, first_field_str_len);
+        o_ctx.column_width[i] += COL_WIDTH_RESERVE;
+
+        print_field(header_str, o_ctx.column_width[i],
+                    PRETTY_PRINT_COL_WIDTH - COL_WIDTH_RESERVE, last_column);
+    }
+}
+
+/**
+ * @brief TODO
+ *
+ * @param lnf_mem
+ * @param rec_limit
+ * @param field_max_size
+ */
+static void
+calc_column_widths(lnf_mem_t *const lnf_mem, const size_t rec_limit,
+                   const size_t field_max_size)
+{
+    // initialize a libnf record
+    lnf_rec_t *lnf_rec;
+    int lnf_ret = lnf_rec_init(&lnf_rec);
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+
+    // initialize the cursor to point to the first record in the memory
+    lnf_mem_cursor_t *cursor;
+    lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+
+    // loop through all records
+    uint64_t rec_cntr = 0;  // aka lines counter
+    char buff[field_max_size];
+    bool lnf_notset_reported = false;
+    while (cursor && rec_limit > rec_cntr++) {
+        lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
+        assert(lnf_ret == LNF_OK);
+
+        // loop through all fields in the record
+        for (size_t i = 0; i < fields->all_cnt; ++i) {
+            lnf_ret = lnf_rec_fget(lnf_rec, fields->all[i].id, buff);
+            assert(lnf_ret == LNF_OK || lnf_ret == LNF_ERR_NOTSET);
+            if (!lnf_notset_reported && lnf_ret == LNF_ERR_NOTSET) {
+                lnf_notset_reported = true;
+                WARNING(E_LNF,
+                        "lnf_rec_fget() reports that field `%s' is not present",
+                        field_get_name(fields->all[i].id));
+            }
+
+            const char *const field_str =
+                o_ctx.field_to_str_cb[i](buff);
+            const size_t field_str_len = strlen(field_str);
+            MAX_ASSIGN(o_ctx.column_width[i], field_str_len);
+        }
+
+        lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
+        assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+    }
+
+    lnf_rec_free(lnf_rec);
+}
+
+/**
+ * @brief TODO
+ *
+ * @param lnf_mem
+ * @param rec_limit
+ * @param field_max_size
+ */
+static void
+print_records(lnf_mem_t *const lnf_mem, const size_t rec_limit,
+              const size_t field_max_size)
+{
+    // initialize a libnf record
+    lnf_rec_t *lnf_rec;
+    int lnf_ret = lnf_rec_init(&lnf_rec);
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+
+    // initialize the cursor to point to the first record in the memory
+    lnf_mem_cursor_t *cursor;
+    lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+
+    // loop through all records
+    uint64_t rec_cntr = 0;  // aka lines counter
+    char buff[field_max_size];
+    while (cursor && rec_limit > rec_cntr++) {
+        lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
+        assert(lnf_ret == LNF_OK);
+
+        // loop through all fields in the record
+        for (size_t i = 0; i < fields->all_cnt; ++i) {
+            lnf_ret = lnf_rec_fget(lnf_rec, fields->all[i].id, buff);
+            assert(lnf_ret == LNF_OK || lnf_ret == LNF_ERR_NOTSET);
+
+            const char *const field_str =
+                o_ctx.field_to_str_cb[i](buff);
+            const bool last_column = (i == (fields->all_cnt - 1));
+            print_field(field_str, o_ctx.column_width[i],
+                        PRETTY_PRINT_COL_WIDTH, last_column);
+        }
+
+        lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
+        assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+    }
+
+    lnf_rec_free(lnf_rec);
+}
+
+
+/*
+ * Public functions.
+ */
 /**
  * @brief TODO
  *
@@ -885,142 +1044,121 @@ print_field(const char *const string, const uint64_t string_width,
 void
 output_init(struct output_params op, const struct fields *const fields_param)
 {
-        output_params = op;
-        fields = fields_param;
+    assert(op.format != OUTPUT_FORMAT_UNSET && fields_param);
+
+    output_params = op;
+    fields = fields_param;
+
+    o_ctx.field_to_str_cb = malloc(fields->all_cnt *
+                                   sizeof (*o_ctx.field_to_str_cb));
+    o_ctx.field_offset = malloc(fields->all_cnt *
+                                   sizeof (*o_ctx.field_offset));
+    o_ctx.column_width = malloc(fields->all_cnt *
+                                   sizeof (*o_ctx.column_width));
+    ABORT_IF(!o_ctx.field_to_str_cb || !o_ctx.field_offset
+             || !o_ctx.column_width, E_MEM,
+             "output context memory allocation failed");
+
+    size_t off = 0;
+    for (size_t i = 0; i < fields->all_cnt; ++i) {
+        o_ctx.field_to_str_cb[i] = get_field_to_str_callback(fields->all[i].id);
+        o_ctx.field_offset[i] = off;
+        off += fields->all[i].size;
+    }
+
+    o_ctx.first_item = true;
 }
 
+/**
+ * @brief TODO
+ */
+void
+output_free(void)
+{
+    free(o_ctx.field_to_str_cb);
+    free(o_ctx.field_offset);
+    free(o_ctx.column_width);
+}
+
+/**
+ * @brief TODO
+ *
+ * @param data
+ */
 void
 print_rec(const uint8_t *const data)
 {
-    static uint64_t col_width[LNF_FLD_TERM_];
-    static bool first_rec = true;
-
     if (output_params.print_records != OUTPUT_ITEM_YES) {
         return;
     }
 
+    static bool first_rec = true;
     if (first_rec) {
         first_rec = false;
-        first_item = first_item ? false : (putchar('\n'), false);
-
-        // TODO: add width table for certain fields (IP, ...)
-        uint64_t off = 0;
-        for (size_t i = 0; i < fields->all_cnt; ++i) {
-            const char *const header_str = field_get_name(fields->all[i].id);
-            const uint64_t header_str_len = strlen(header_str);
-            const uint64_t field_str_len =
-                strlen(field_to_str(fields->all[i].id, data + off));
-
-            col_width[i] = MAX(header_str_len, field_str_len);
-            col_width[i] += COL_WIDTH_RESERVE;
-            off += fields->all[i].size;
-
-            print_field(header_str, col_width[i],
-                        PRETTY_PRINT_COL_WIDTH - COL_WIDTH_RESERVE,
-                        i == (fields->all_cnt - 1));
-        }
-
+        o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
+        print_headers(data);
     }
 
     // loop through the fields in the record
-    uint64_t off = 0;
+    // TODO: add width table for certain fields (IP, ...)
     for (size_t i = 0; i < fields->all_cnt; ++i) {
-        print_field(field_to_str(fields->all[i].id, data + off), col_width[i],
+        const bool last_column = (i == (fields->all_cnt - 1));
+
+        print_field(o_ctx.field_to_str_cb[i](data + o_ctx.field_offset[i]),
+                    o_ctx.column_width[i],
                     PRETTY_PRINT_COL_WIDTH - COL_WIDTH_RESERVE,
-                    i == (fields->all_cnt - 1));
-        off += fields->all[i].size;
+                    last_column);
     }
 }
 
+/**
+ * @brief TODO
+ *
+ * @param lnf_mem
+ * @param rec_limit
+ */
 void
-print_mem(lnf_mem_t *const mem, const uint64_t limit)
+print_mem(lnf_mem_t *const lnf_mem, uint64_t rec_limit)
 {
     if (output_params.print_records != OUTPUT_ITEM_YES) {
         return;
     }
 
-    first_item = first_item ? false : (putchar('\n'), false);
+    if (rec_limit == 0) {
+        rec_limit = UINT64_MAX;
+    }
 
-    // initialize libne records
-    lnf_rec_t *rec;
-    int lnf_ret = lnf_rec_init(&rec);
-    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+    o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
 
-    /*
-     * Find out maximum data type size of present fields, length of headers
-     * and last present field ID.
-     */
-    uint64_t fld_max_size = 0; //maximum data size length in bytes
-    uint64_t data_max_strlen[LNF_FLD_TERM_] = {0}; //maximum data string len
+    // find out maximum size of the fields and length of the headers
+    size_t field_max_size = 0;  // maximum size in bytes
     for (size_t i = 0; i < fields->all_cnt; ++i) {
-        uint64_t header_str_len = strlen(field_get_name(fields->all[i].id));
+        const char *const header_str = field_get_name(fields->all[i].id);
+        const size_t header_str_len = strlen(header_str);
 
-        MAX_ASSIGN(fld_max_size, fields->all[i].size);
-        MAX_ASSIGN(data_max_strlen[fields->all[i].id], header_str_len);
+        MAX_ASSIGN(field_max_size, fields->all[i].size);
+        MAX_ASSIGN(o_ctx.column_width[i], header_str_len);
     }
 
-    /* Find out max data length, converted to string. */
-    lnf_mem_cursor_t *cursor; //current record (line) cursor
-    lnf_mem_first_c(mem, &cursor);
-    uint64_t rec_cntr = 0; //aka lines counter
-    while (cursor != NULL) { //row loop
-        char buff[fld_max_size];
+    // loop through all records and calculate with of all columns
+    calc_column_widths(lnf_mem, rec_limit, field_max_size);
 
-        lnf_mem_read_c(mem, cursor, rec);
-
-        for (uint64_t i = 0; i < fields->all_cnt; ++i) { //column loop
-            uint64_t data_str_len;
-
-            //XXX: lnf_rec_fget() may return LNF_ERR_UNKFLD even if
-            //field is present (e.g. if duration is zero).
-            lnf_rec_fget(rec, fields->all[i].id, buff);
-            data_str_len = strlen(field_to_str(fields->all[i].id, buff));
-            MAX_ASSIGN(data_max_strlen[fields->all[i].id], data_str_len);
-        }
-
-        if (++rec_cntr == limit) {
-            break;
-        }
-
-        lnf_mem_next_c(mem, &cursor);
-    }
-    rec_cntr = 0;
-
-
-    /* Actual printing: header. */
-    for (uint64_t i = 0; i < fields->all_cnt; ++i) { //column loop
+    // loop through all columns and print the headers
+    for (size_t i = 0; i < fields->all_cnt; ++i) {
+        const bool last_column = (i == (fields->all_cnt - 1));
         print_field(field_get_name(fields->all[i].id),
-                data_max_strlen[fields->all[i].id],
-                PRETTY_PRINT_COL_WIDTH, i == (fields->all_cnt - 1));
+                    o_ctx.column_width[i], PRETTY_PRINT_COL_WIDTH, last_column);
     }
 
-    /* Actual printing: field data converted to string. */
-    lnf_mem_first_c(mem, &cursor);
-    while (cursor != NULL) { //row loop
-        char buff[fld_max_size];
-
-        lnf_mem_read_c(mem, cursor, rec);
-
-        for (uint64_t i = 0; i < fields->all_cnt; ++i) { //column loop
-            //XXX: see above lnf_rec_fget()
-            lnf_rec_fget(rec, fields->all[i].id, buff);
-
-            print_field(field_to_str(fields->all[i].id, buff),
-                    data_max_strlen[fields->all[i].id],
-                    PRETTY_PRINT_COL_WIDTH,
-                    i == (fields->all_cnt - 1));
-        }
-
-        if (++rec_cntr == limit) {
-            break;
-        }
-
-        lnf_mem_next_c(mem, &cursor);
-    }
-
-    lnf_rec_free(rec);
+    print_records(lnf_mem, rec_limit, field_max_size);
 }
 
+/**
+ * @brief TODO
+ *
+ * @param s
+ * @param duration
+ */
 void
 print_processed_summ(const struct processed_summ *const s,
                      const double duration)
@@ -1031,7 +1169,7 @@ print_processed_summ(const struct processed_summ *const s,
         return;
     }
 
-    first_item = first_item ? false : (putchar('\n'), false);
+    o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
 
     switch (output_params.format) {
     case OUTPUT_FORMAT_PRETTY:
@@ -1063,6 +1201,11 @@ print_processed_summ(const struct processed_summ *const s,
     }
 }
 
+/**
+ * @brief TODO
+ *
+ * @param s
+ */
 void
 print_metadata_summ(const struct metadata_summ *const s)
 {
@@ -1070,7 +1213,7 @@ print_metadata_summ(const struct metadata_summ *const s)
         return;
     }
 
-    first_item = first_item ? false : (putchar('\n'), false);
+    o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
 
     switch (output_params.format) {
     case OUTPUT_FORMAT_PRETTY:
