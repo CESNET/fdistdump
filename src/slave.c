@@ -1080,18 +1080,16 @@ slave_main(const struct cmdline_args *args_local)
     progress_report_init(ff_paths_cnt);
 
     // use at most files-count threads
-    int num_threads = omp_get_max_threads();  // retrieve nthreads-var
-    assert(num_threads > 0);
-    if (ff_paths_cnt < (size_t)num_threads) {
-        num_threads = ff_paths_cnt;
-        DEBUG("using only %d thread(s) because of limited number of flow files",
-              num_threads);
-        omp_set_num_threads(num_threads);  // modify the value of nthreads-var
-    } else {
-        DEBUG("using %d thread(s)", num_threads);
+    const int num_threads_max = omp_get_max_threads();  // retrieve nthreads-var
+    assert(num_threads_max > 0);
+    if (ff_paths_cnt < (size_t)num_threads_max) {
+        omp_set_num_threads((int)ff_paths_cnt);
     }
+    const int num_threads_used = omp_get_max_threads();  // retrieve nthreads-var
+    DEBUG("using %d thread(s) out of %d available", num_threads_used,
+          num_threads_max);
     // send a number of used threads
-    MPI_Reduce(&num_threads, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
+    MPI_Reduce(&num_threads_used, NULL, 1, MPI_INT, MPI_SUM, ROOT_PROC,
                mpi_comm_main);
 
     #pragma omp parallel
