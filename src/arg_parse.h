@@ -49,6 +49,9 @@
 #include "output.h"    // for struct output_params
 
 
+/*
+ * Data types declarations.
+ */
 struct cmdline_args {
     working_mode_t working_mode;  // working mode (records, aggregation, topN)
 
@@ -71,17 +74,8 @@ struct cmdline_args {
 };
 
 
-/**
- * @brief  Parse command line arguments and fill parameters structure.
- *
- * @param[out] args Structure with parsed command line argument and other
- *                  program settings.
- * @param argc Command line argument vector size.
- * @param argv Command line argument vector.
- * @param root_proc True if process is root, false otherwise.
- *
- * @return E_OK on success, E_HELP if help or usage strings were printed, E_ARG
- *         otherwise.
+/*
+ * Public function prototypes.
  */
 error_code_t
 arg_parse(struct cmdline_args *args, int argc, char *const argv[],

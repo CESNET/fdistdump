@@ -211,22 +211,24 @@ Time based options (\fB-t\fR and \fB-T\fR) are useful only if paths to your flow
 Flow file usually contains flow records received during some time window, e.g., 5 minute period.
 If \fIpath\fR to your flow files carry information about the beginning of this period, you can use these options to easily create queries, where only flow files from certain time will be processed.
 
-Currently, following directory hierarchy is required:
-.IR profile_name / YYYY / MM / DD / hh /nfcapd. YYYYMMDDhhmm .
-For example for profile \fBlive\fR and flows received at 2015-21-10 from 7:25 to 7:30, path will be
-.BR live/2015/10/21/10/nfcapd.20151020725 .
-Therefore time based options affects only directory \fIpath\fRs.
+The following directory hierarchy is required:
+.IR profile_name / YYYY / MM / DD / hh /lnf. YYYYMMDDhhmm .
+For example for profile \fBlive\fR and flows received at 2015-21-10 from 7:25 to 7:30, path will be \fBlive/2015/10/21/10/lnf.20151020725\fR.
+Therefore, time based options affects only directory \fIpath\fRs.
 
 \fItime_spec\fR string should contain one or more white-space separated time specifiers.
-Time specifier is a representation of a date, time, special value or UTC flag.
-Supported date formats are ISO (YYYY-MM-DD), European (DD.MM.YYYY) and American (MM/DD/YYYY), time format is only one (hh:mm) and also Unix time (number of seconds that have elapsed since 00:00:00 UTC) is supported.
-Special value is either the name of the day of the week or the month name, both according to the current locale, in abbreviated form or the full name.
-The UTC flag is either \fBU\fR or \fBUTC\fR string. If the UTC flag is present, all the time specifiers are assumed to be in UTC instead of local time.
+Time specifier is a representation of a date or a time.
+Supported date formats are ISO (YYYY-MM-DD), European (DD.MM.YYYY), and American (MM/DD/YYYY).
+Supported time formats are hh:mm and Unix time (number of seconds that have elapsed since 00:00:00 UTC).
+Certain special values are also supported: the name of the day of the week or the month name, both according to the current locale, in abbreviated form or the full name.
 
 If no date is given, today is assumed if the given hour is lesser than the current hour and yesterday is assumed if it is more.
 If no time is given, midnight is assumed.
 If only the weekday is given, this week is assumed if the given day is less or equal to the current day and last week if it is more.
 If only the month is given, the current year is assumed if the given month is less or equal to the current month and last year if it is more and no year is given.
+
+All the time specifiers should be entered in local time (see \fB--time-zone\fR).
+They are internally converted to UTC, because the directory hierarchy names are in UTC.
 
 .TP
 .BR -T , \ --time-range=\fIbegin\fR[#\fIend\fR]

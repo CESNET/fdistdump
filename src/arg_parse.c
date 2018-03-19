@@ -64,7 +64,7 @@
 
 
 #define STAT_DELIM '#'            // stat_spec#sort_spec
-#define TIME_RANGE_DELIM "#"      // begin#end
+#define TIME_RANGE_DELIM '#'      // begin#end
 #define SORT_DELIM '#'            // field#direction
 #define TIME_DELIM " \t\n\v\f\r"  // whitespace
 #define FIELDS_DELIM ","          // libnf fields delimiter
@@ -76,14 +76,9 @@
 #define DEFAULT_STAT_REC_LIMIT "10"
 
 
-/* Global variables. */
-static const char *const USAGE_STRING =
-"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [options] path ...\n"
-"       mpiexec [global_MPI_options] \\\n"
-"               [local_MPI_options] " PACKAGE_NAME " [options] : \\\n"
-"               [local_MPI_options] " PACKAGE_NAME " [options] path1 ... : \\\n"
-"               [local_MPI_options] " PACKAGE_NAME " [options] path2 ... :  ...";
-
+/*
+ * Data types declarations.
+ */
 enum {  // command line options, have to start above the ASCII table
     OPT_NO_TPUT = 256,  // disable the TPUT algorithm for Top-N queries
     OPT_NO_BFINDEX,     // disable Bloom filter indexes
@@ -108,6 +103,17 @@ enum {  // command line options, have to start above the ASCII table
     OPT_HELP,  // print help
     OPT_VERSION,  // print version
 };
+
+
+/*
+ * Global variables.
+ */
+static const char *const USAGE_STRING =
+"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [options] path ...\n"
+"       mpiexec [global_MPI_options] \\\n"
+"               [local_MPI_options] " PACKAGE_NAME " [options] : \\\n"
+"               [local_MPI_options] " PACKAGE_NAME " [options] path1 ... : \\\n"
+"               [local_MPI_options] " PACKAGE_NAME " [options] path2 ... :  ...";
 
 // variables for getopt_long() setup
 static const char *const short_opts = "a:f:l:o:s:t:T:v:";
@@ -162,15 +168,10 @@ static const char *const date_formats[] = {
     "%s",  // the number of seconds since the Epoch, 1970-01-01 00:00:00 UTC
 };
 
-static const char *const utc_strings[] = {
-    "u",
-    "ut",
-    "utc",
-    "U",
-    "UT",
-    "UTC",
-};
 
+/*
+ * Private functions.
+ */
 /**
  * @defgroup str_to_int_group Family of functions converting string to integers
  *                            of various length and signedness.
@@ -389,13 +390,15 @@ str_to_uint(const char *const string, unsigned int *res)
 
 
 /**
- * @brief Convert string into tm structure.
+ * @defgroup time_string_parsing
+ * @{ */
+/**
+ * @brief Parse string-represented date and time into struct tm.
  *
  * Function tries to parse time string and fills tm with appropriate values on
  * success. String is split into tokens according to TIME_DELIM delimiters. Each
- * token is either converted (from left to right) into date, if it corresponds
- * to one of date_formats[], or UTC flag is set, if token matches one of
- * utc_strings[]. If nor date nor UTF flag is detected, E_ARG is returned.
+ * token is converted (from left to right) into date if it corresponds to one of
+ * date_formats[].
  *
  * If NO DATE is given, today is assumed if the given hour is lesser than the
  * current hour and yesterday is assumed if it is more. If NO TIME is given,
@@ -410,118 +413,214 @@ str_to_uint(const char *const string, unsigned int *res)
  * E_ARG is returned.
  *
  * @param[in] time_str Time string, usually gathered from command line.
- * @param[out] utc Set if one of utc_strings[] is found.
  * @param[out] tm Time structure filled with parsed-out time and date.
- * @return Error code. E_OK or E_ARG.
+ *
+ * @return E_OK on success, E_ARG on failure.
  */
-static error_code_t str_to_tm(char *time_str, bool *utc, struct tm *tm)
+static error_code_t
+str_to_tm(char *time_str, struct tm *tm)
 {
-        char *ret;
-        char *token;
-        char *saveptr = NULL;
-        struct tm garbage; //strptime() failure would ruin tm values
-        struct tm now_tm;
-        const time_t now = time(NULL);
+    assert(time_str && time_str[0] != '\n' && tm);
 
-        localtime_r(&now, &now_tm);
+    // fill the tm struct with after-strptime-identifiable values
+    tm->tm_sec = tm->tm_min = tm->tm_hour = INT_MIN;
+    tm->tm_wday = tm->tm_mday = tm->tm_yday = INT_MIN;
+    tm->tm_mon = tm->tm_year = INT_MIN;
+    tm->tm_isdst = -1;
 
-        tm->tm_sec = tm->tm_min = tm->tm_hour = INT_MIN;
-        tm->tm_wday = tm->tm_mday = tm->tm_yday = INT_MIN;
-        tm->tm_mon = tm->tm_year = INT_MIN;
-        tm->tm_isdst = -1;
-
-        /* Separate time and date in time string. */
-        token = strtok_r(time_str, TIME_DELIM, &saveptr); //first token
-        while (token != NULL) {
-                /* Try to parse date. */
-                for (uint64_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
-                        ret = strptime(token, date_formats[i], &garbage);
-                        if (ret != NULL && *ret == '\0') {
-                                /* Conversion succeeded, fill real struct tm. */
-                                strptime(token, date_formats[i], tm);
-                                goto next_token;
-                        }
-                }
-
-                /* Check for UTC flag. */
-                for (uint64_t i = 0; i < ARRAY_SIZE(utc_strings); ++i) {
-                        if (strcmp(token, utc_strings[i]) == 0) {
-                                *utc = true;
-                                goto next_token;
-                        }
-                }
-
-                ERROR(E_ARG, "invalid time specifier `%s'", token);
-                return E_ARG; //conversion failure
-next_token:
-                token = strtok_r(NULL, TIME_DELIM, &saveptr); //next token
+    // tokenize the string into time and date
+    char *saveptr = NULL;
+    for (char *token = strtok_r(time_str, TIME_DELIM, &saveptr);
+            token != NULL;
+            token = strtok_r(NULL, TIME_DELIM, &saveptr))
+    {
+        // try to parse the token
+        for (size_t i = 0; i < ARRAY_SIZE(date_formats); ++i) {
+            struct tm attempt;  // strptime() failure would ruin tm values
+            const char *ret = strptime(token, date_formats[i], &attempt);
+            if (ret && *ret == '\0') {
+                // conversion succeeded, fill the output struct tm
+                ret = strptime(token, date_formats[i], tm);
+                assert(ret && *ret == '\0');
+                goto next_token;
+            }
         }
 
+        ERROR(E_ARG, "invalid time specifier `%s'", token);
+        return E_ARG;  // conversion failure
+next_token: ;
+    }
 
-        /* Only the weekday is given. */
-        if (tm->tm_wday >= 0 && tm->tm_wday <= 6 && tm->tm_year == INT_MIN &&
-                        tm->tm_mon == INT_MIN && tm->tm_mday == INT_MIN) {
-                tm->tm_year = now_tm.tm_year;
-                tm->tm_mon = now_tm.tm_mon;
-                tm->tm_mday = now_tm.tm_mday -
-                        (now_tm.tm_wday - tm->tm_wday + 7) % 7;
-        }
+    // fill the elements which were left untouched by strptime()
+    struct tm now_tm;
+    const time_t now = time(NULL);  // number of seconds since the Epoch UTC
+    ABORT_IF(now == (time_t)-1, E_INTERNAL, "time(): %s", strerror(errno));
+    void *const ret = localtime_r(&now, &now_tm);
+    ABORT_IF(!ret, E_INTERNAL, "localtime_r(): %s", strerror(errno));
 
-        /* Only the month is given. */
-        if (tm->tm_mon >= 0 && tm->tm_mon <= 11 && tm->tm_mday == INT_MIN) {
-                if (tm->tm_year == INT_MIN) {
-                        if (tm->tm_mon - now_tm.tm_mon > 0) { //last year
-                                tm->tm_year = now_tm.tm_year - 1;
-                        } else { //this year
-                                tm->tm_year = now_tm.tm_year;
-                        }
-                }
+    // only weekday is given
+    if (tm->tm_wday >= 0 && tm->tm_wday <= 6 && tm->tm_year == INT_MIN
+            && tm->tm_mon == INT_MIN && tm->tm_mday == INT_MIN)
+    {
+        tm->tm_year = now_tm.tm_year;
+        tm->tm_mon = now_tm.tm_mon;
+        tm->tm_mday = now_tm.tm_mday - (now_tm.tm_wday - tm->tm_wday + 7) % 7;
+    }
 
-                tm->tm_mday = 1;
-        }
-
-        /* No time is given. */
-        if (tm->tm_hour == INT_MIN) {
-                tm->tm_hour = 0;
-        }
-        if (tm->tm_min == INT_MIN) {
-                tm->tm_min = 0;
-        }
-        if (tm->tm_sec == INT_MIN) {
-                tm->tm_sec = 0;
-        }
-
-        /* No date is given. */
-        if (tm->tm_hour >= 0 && tm->tm_hour <= 23 && tm->tm_mon == INT_MIN &&
-                        tm->tm_mday == INT_MIN && tm->tm_wday == INT_MIN)
-        {
-                tm->tm_mon = now_tm.tm_mon;
-                if (tm->tm_hour - now_tm.tm_hour > 0) { //yesterday
-                        tm->tm_mday = now_tm.tm_mday - 1;
-                } else { //today
-                        tm->tm_mday = now_tm.tm_mday;
-                }
-        }
-
-        /* Fill in the gaps. */
+    // only month is given
+    if (tm->tm_mon >= 0 && tm->tm_mon <= 11 && tm->tm_mday == INT_MIN) {
         if (tm->tm_year == INT_MIN) {
+            if (tm->tm_mon - now_tm.tm_mon > 0) {  // last year
+                tm->tm_year = now_tm.tm_year - 1;
+            } else {                               // this year
                 tm->tm_year = now_tm.tm_year;
+            }
         }
-        if (tm->tm_mon == INT_MIN) {
-                tm->tm_mon = now_tm.tm_mon;
-        }
+        tm->tm_mday = 1;
+    }
 
-        mktime_utc(tm); //normalization
-        return E_OK;
+    // noo time is given (only date)
+    if (tm->tm_hour == INT_MIN) {
+        tm->tm_hour = 0;
+    }
+    if (tm->tm_min == INT_MIN) {
+        tm->tm_min = 0;
+    }
+    if (tm->tm_sec == INT_MIN) {
+        tm->tm_sec = 0;
+    }
+
+    // no date is given (only time)
+    if (tm->tm_hour >= 0 && tm->tm_hour <= 23 && tm->tm_mon == INT_MIN
+            && tm->tm_mday == INT_MIN && tm->tm_wday == INT_MIN)
+    {
+        tm->tm_mon = now_tm.tm_mon;
+        if (tm->tm_hour - now_tm.tm_hour > 0) {  // yesterday
+            tm->tm_mday = now_tm.tm_mday - 1;
+        } else {                                 // today
+            tm->tm_mday = now_tm.tm_mday;
+        }
+    }
+
+    // fill the "gaps"
+    if (tm->tm_year == INT_MIN) {
+        tm->tm_year = now_tm.tm_year;
+    }
+    if (tm->tm_mon == INT_MIN) {
+        tm->tm_mon = now_tm.tm_mon;
+    }
+
+    mktime_utc(tm);  // normalization
+    return E_OK;
 }
 
-
-/** \brief Parse and store time range string.
+/**
+ * @brief Convert broken-down local time to UTC.
  *
- * Function tries to parse time range string, fills time_begin and
- * time_end with appropriate values on success. Beginning and ending dates
- * (and times) are  separated with TIME_RANGE_DELIM, if ending date is not
- * specified, current time is used.
+ * This is done by:
+ *   - calling mktime(), which converts a broken-down time structure, expressed
+ *   as local time, to calendar time (negative value of tm_isdst means that
+ *   mktime() should use timezone information to determine whether DST is in
+ *   effect at the specified time),
+ *   - calling gmtime(), which converts the calendar time to broken-down time
+ *   representation, expressed in Coordinated Universal Time (UTC).
+ *
+ * @param[in] local Broken-down representation of the local time.
+ * @param[out] utc Ponter to the output broken-down representation of the local
+ *                 converted to UTC.
+ */
+static void
+tm_local_to_utc(struct tm local, struct tm *const utc)
+{
+    assert(utc);
+
+    local.tm_isdst = -1;  // auto-detection
+    const time_t calendar_local = mktime(&local);
+    ABORT_IF(calendar_local == (time_t)-1, E_INTERNAL, "mktime(): %s",
+             strerror(errno));
+    void *const ret = gmtime_r(&calendar_local, utc);
+    ABORT_IF(!ret, E_INTERNAL, "gmtime_r(): %s", strerror(errno));
+}
+
+/**
+ * @brief Parse time point specification string and save the results.
+ *
+ * Function tries to parse time point string, fills time_begin and time_end with
+ * appropriate values on success. Beggining time is aligned to the beginning of
+ * the rotation interval, ending time is set to the beginning of the next
+ * rotation interval. Therefor exacly one flow file will be processed.
+ *
+ * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
+ * Beginning time is aligned to the beginning of the rotation interval, ending
+ * time is aligned to the ending of the rotation interval:
+ *
+ * 0     5    10    15    20   -------->   0     5    10    15    20
+ * |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
+ *          ^                                    ^     ^
+ *        begin                                begin  end
+ *
+ * If range string is successfully parsed, E_OK is returned. On error, content
+ * of time_begin and time_end is undefined and E_ARG is returned.
+ *
+ * @param[in,out] args Structure with parsed command line options.
+ * @param[in] range_str Time string, usually gathered from the command line.
+ *
+ * @return E_OK on success, E_ARG on failure.
+ */
+static error_code_t
+set_time_point(struct cmdline_args *const args, char *const time_str)
+{
+    assert(args && time_str && time_str[0] != '\0');
+
+    // parse the local time string into the broken-down local time
+    struct tm broken_down_local;
+    const error_code_t ecode = str_to_tm(time_str, &broken_down_local);
+    if (ecode != E_OK) {
+        return E_ARG;
+    }
+
+    // convert to UTC
+    tm_local_to_utc(broken_down_local, &args->time_begin);
+
+    /*
+     * Align the time to the beginning of the rotation interval. Then copy the
+     * aligned time to the ending time and align it to create interval of
+     * FLOW_FILE_ROTATION_INTERVAL length.
+     */
+    while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL) {
+        args->time_begin.tm_sec--;  // go one second back
+    }
+    memcpy(&args->time_end, &args->time_begin, sizeof (args->time_end));
+    args->time_end.tm_sec++;
+    while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL) {
+        args->time_end.tm_sec++;  // go one second forward
+    }
+
+    // check time range sanity
+    assert(tm_diff(args->time_end, args->time_begin) 
+           == FLOW_FILE_ROTATION_INTERVAL);
+
+    if (verbosity >= VERBOSITY_DEBUG) {
+        char begin_local[256];
+        char begin_utc[256];
+        char end_utc[256];
+        strftime(begin_local, sizeof(begin_local), "%c", &broken_down_local);
+        strftime(begin_utc, sizeof(begin_utc), "%c", &args->time_begin);
+        strftime(end_utc, sizeof(end_utc), "%c", &args->time_end);
+        DEBUG("args: set_time_point: `%s' (from `%s' to `%s' aligned UTC)",
+              begin_local, begin_utc, end_utc);
+    }
+
+    return E_OK;
+}
+
+/**
+ * @brief Parse time range specification string and save the results.
+ *
+ * Function tries to parse time range string, fills time_begin and time_end with
+ * appropriate values on success. Beginning and ending dates (and times) are
+ * separated with TIME_RANGE_DELIM, if ending date is not specified, current
+ * time is used.
  *
  * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
  * Beginning time is aligned to the beginning of the rotation interval, ending
@@ -536,163 +635,79 @@ next_token:
  * content of time_begin and time_end is undefined and E_ARG is
  * returned.
  *
- * \param[in,out] args Structure with parsed command line parameters and other
- *                   program settings.
- * \param[in] range_str Time range string, usually gathered from command line.
- * \return Error code. E_OK or E_ARG.
+ * @param[in,out] args Structure with parsed command line options.
+ * @param[in] range_str Time range string, usually gathered from command line.
+ *
+ * @return E_OK on success, E_ARG on failure.
  */
-static error_code_t set_time_range(struct cmdline_args *args, char *range_str)
+static error_code_t
+set_time_range(struct cmdline_args *const args, char *const range_str)
 {
-        error_code_t ecode = E_OK;
-        char *begin_str;
-        char *end_str;
-        char *trailing_str;
-        char *saveptr = NULL;
-        bool begin_utc = false;
-        bool end_utc = false;
+    assert(args && range_str && range_str[0] != '\0');
 
-        assert(args != NULL && range_str != NULL);
+    // split time range string into beginning and ending
+    char *const begin_str = range_str;
+    char *end_str = NULL;
+    char *const delim_pos = strchr(begin_str, TIME_RANGE_DELIM);  // find the first #
+    if (delim_pos) {  // delimiter found, have both begin and end
+        *delim_pos = '\0';  // to terminate begin_str
+        end_str = delim_pos + 1;
+    } // else delimiter not found, have only begin
 
-        /* Split time range string. */
-        // TODO: change to strchr()
-        begin_str = strtok_r(range_str, TIME_RANGE_DELIM, &saveptr);
-        if (begin_str == NULL) {
-                ERROR(E_ARG, "invalid time range string `%s'\n", range_str);
-                return E_ARG;
-        }
-        end_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr); //NULL is valid
-        trailing_str = strtok_r(NULL, TIME_RANGE_DELIM, &saveptr);
-        if (trailing_str != NULL) {
-                ERROR(E_ARG, "time range trailing string `%s'\n", trailing_str);
-                return E_ARG;
-        }
+    // parse the local time string into the broken-down local time
+    struct tm begin_broken_down_local;
+    error_code_t ecode = str_to_tm(begin_str, &begin_broken_down_local);
+    if (ecode != E_OK) {
+        return E_ARG;
+    }
 
-        /* Convert time strings to tm structure. */
-        ecode = str_to_tm(begin_str, &begin_utc, &args->time_begin);
+    struct tm end_broken_down_local;
+    if (end_str) {
+        ecode = str_to_tm(end_str, &end_broken_down_local);
         if (ecode != E_OK) {
-                return E_ARG;
+            return E_ARG;
         }
-        if (end_str == NULL) { //NULL means until now
-                const time_t now = time(NULL);
-                localtime_r(&now, &args->time_end);
-        } else {
-                ecode = str_to_tm(end_str, &end_utc, &args->time_end);
-                if (ecode != E_OK) {
-                        return E_ARG;
-                }
-        }
+    } else {  // no end time means the end is now
+        const time_t now = time(NULL);  // number of seconds since the Epoch UTC
+        ABORT_IF(now == (time_t)-1, E_INTERNAL, "time(): %s", strerror(errno));
+        void *const ret = localtime_r(&now, &end_broken_down_local);
+        ABORT_IF(!ret, E_INTERNAL, "localtime_r(): %s", strerror(errno));
+    }
 
-        if (!begin_utc) {
-                time_t tmp;
+    // convert to UTC
+    tm_local_to_utc(begin_broken_down_local, &args->time_begin);
+    tm_local_to_utc(end_broken_down_local, &args->time_end);
 
-                //input time is localtime, let mktime() decide about DST
-                args->time_begin.tm_isdst = -1;
-                tmp = mktime(&args->time_begin);
-                gmtime_r(&tmp, &args->time_begin);
-        }
-        if (!end_utc) {
-                time_t tmp;
-
-                //input time is localtime, let mktime() decide about DST
-                args->time_end.tm_isdst = -1;
-                tmp = mktime(&args->time_end);
-                gmtime_r(&tmp, &args->time_end);
-        }
-
-        /* Align beginning time to the beginning of the rotation interval. */
-        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
-                args->time_begin.tm_sec--;
-        }
-        /* Align ending time to the ending of the rotation interval. */
-        while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
-                args->time_end.tm_sec++;
-        }
-
-        /* Check time range sanity. */
-        if (tm_diff(args->time_end, args->time_begin) <= 0) {
-                char begin[255], end[255];
-
-                strftime(begin, sizeof(begin), "%c", &args->time_begin);
-                strftime(end, sizeof(end), "%c", &args->time_end);
-
-                ERROR(E_ARG, "zero or negative time range duration");
-                ERROR(E_ARG, "time range (after the alignment): %s - %s", begin,
-                      end);
-
-                return E_ARG;
-        }
-
-        return E_OK;
-}
-
-
-/** \brief Parse and store time point string.
- *
- * Function tries to parse time point string, fills time_begin and time_end
- * with appropriate values on success. Beggining time is aligned to the
- * beginning of the rotation interval, ending time is set to the beginning of
- * the next rotation interval. Therefor exacly one flow file will be processed.
- *
- * Alignment of the boundaries to the FLOW_FILE_ROTATION_INTERVAL is perfomed.
- * Beginning time is aligned to the beginning of the rotation interval, ending
- * time is aligned to the ending of the rotation interval:
- *
- * 0     5    10    15    20   -------->   0     5    10    15    20
- * |_____|_____|_____|_____|   alignment   |_____|_____|_____|_____|
- *          ^                                    ^     ^
- *        begin                                begin  end
- *
- * If range string is successfully parsed, E_OK is returned. On error,
- * content of time_begin and time_end is undefined and E_ARG is
- * returned.
- *
- * \param[in,out] args Structure with parsed command line parameters and other
- *                   program settings.
- * \param[in] range_str Time string, usually gathered from the command line.
- * \return Error code. E_OK or E_ARG.
- */
-static error_code_t set_time_point(struct cmdline_args *args, char *time_str)
-{
-        error_code_t ecode = E_OK;
-        bool utc = false;
-
-        assert(args != NULL && time_str != NULL);
-
-        /* Convert time string to the tm structure. */
-        ecode = str_to_tm(time_str, &utc, &args->time_begin);
-        if (ecode != E_OK) {
-                return E_ARG;
-        }
-
-        if (!utc) {
-                time_t tmp;
-
-                //input time is localtime, let mktime() decide about DST
-                args->time_begin.tm_isdst = -1;
-                tmp = mktime(&args->time_begin);
-                gmtime_r(&tmp, &args->time_begin);
-        }
-
-        /* Align time to the beginning of the rotation interval. */
-        while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
-                args->time_begin.tm_sec--;
-        }
-
-        /*
-         * Copy the aligned time to the ending time and increment ending and
-         * align it to create interval of FLOW_FILE_ROTATION_INTERVAL length.
-         */
-        memcpy(&args->time_end, &args->time_begin, sizeof (args->time_end));
+    // align beginning to the beginning of the rotation interval
+    while (mktime_utc(&args->time_begin) % FLOW_FILE_ROTATION_INTERVAL){
+        args->time_begin.tm_sec--;
+    }
+    // align ending to the ending of the rotation interval
+    while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
         args->time_end.tm_sec++;
-        while (mktime_utc(&args->time_end) % FLOW_FILE_ROTATION_INTERVAL){
-                args->time_end.tm_sec++;
-        }
+    }
 
-        /* Check time range sanity. */
-        assert(tm_diff(args->time_end, args->time_begin) > 0);
+    if (verbosity >= VERBOSITY_DEBUG) {
+        char begin_local[256];
+        char begin_utc[256];
+        char end_local[256];
+        char end_utc[256];
+        strftime(begin_local, sizeof(begin_local), "%c", &begin_broken_down_local);
+        strftime(begin_utc, sizeof(begin_utc), "%c", &args->time_begin);
+        strftime(end_local, sizeof(end_local), "%c", &end_broken_down_local);
+        strftime(end_utc, sizeof(end_utc), "%c", &args->time_end);
+        DEBUG("args: set_time_range: from `%s' to `%s' (from `%s' to `%s' aligned UTC)",
+              begin_local, begin_utc, end_local, end_utc);
+    }
 
-        return E_OK;
+    // check time range sanity
+    if (tm_diff(args->time_end, args->time_begin) <= 0) {
+        ERROR(E_ARG, "zero or negative time range duration");
+        return E_ARG;
+    }
+    return E_OK;
 }
+/**  @} */  // time_string_parsing group
 
 
 /**
@@ -768,7 +783,7 @@ parse_sort_spec(char *const sort_spec, struct fields *const fields)
     DEBUG("args: parsing sort spec `%s'", sort_spec);
 
     int direction = LNF_SORT_NONE;
-    char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find first #
+    char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find the first #
     if (delim_pos) {  // delimiter found, direction should follow
         *delim_pos = '\0';  // to distinguish between the field and direction
         char *const direction_str = delim_pos + 1;
@@ -1113,6 +1128,9 @@ set_time_zone(const char *const time_zone_optarg)
     tzset();  // apply changes in TZ
 }
 
+/*
+ * Public functions.
+ */
 error_code_t
 arg_parse(struct cmdline_args *args, int argc, char *const argv[],
           bool root_proc)
