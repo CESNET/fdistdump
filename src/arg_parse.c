@@ -75,8 +75,6 @@
 #define DEFAULT_STAT_SORT_KEY "flows"
 #define DEFAULT_STAT_REC_LIMIT "10"
 
-#define DEFAULT_PRETTY_TS_CONV "%F %T"
-
 
 /* Global variables. */
 static const char *const USAGE_STRING =
@@ -88,15 +86,16 @@ static const char *const USAGE_STRING =
 
 enum {  // command line options, have to start above the ASCII table
     OPT_NO_TPUT = 256,  // disable the TPUT algorithm for Top-N queries
-    OPT_NO_BFINDEX,  // disable Bloom filter indexes
-    OPT_NUM_THREADS,  // set the number of used threads
+    OPT_NO_BFINDEX,     // disable Bloom filter indexes
+    OPT_NUM_THREADS,    // set the number of used threads
+    OPT_TIME_ZONE,      // set a time zone for all time-related functionality
 
     OPT_OUTPUT_FIELDS,  // specification of listed fields
     OPT_OUTPUT_ITEMS,   // output items (records, processed records summary,
                         // metadata summary)
     OPT_OUTPUT_FORMAT,          // output (print) format
+
     OPT_OUTPUT_TS_CONV,         // output timestamp conversion
-    OPT_OUTPUT_TS_LOCALTIME,    // output timestamp in localtime
     OPT_OUTPUT_VOLUME_CONV,     // output volumetric field conversion
     OPT_OUTPUT_TCP_FLAGS_CONV,  // output TCP flags conversion
     OPT_OUTPUT_IP_ADDR_CONV,    // output IP address conversion
@@ -127,12 +126,12 @@ static const struct option long_opts[] = {
     {"no-tput", no_argument, NULL, OPT_NO_TPUT},
     {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
     {"num-threads", required_argument, NULL, OPT_NUM_THREADS},
+    {"time-zone", required_argument, NULL, OPT_TIME_ZONE},
 
     {"output-fields", required_argument, NULL, OPT_OUTPUT_FIELDS},
     {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
     {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
     {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
-    {"output-ts-localtime", no_argument, NULL, OPT_OUTPUT_TS_LOCALTIME},
     {"output-volume-conv", required_argument, NULL, OPT_OUTPUT_VOLUME_CONV},
     {"output-tcpflags-conv", required_argument, NULL, OPT_OUTPUT_TCP_FLAGS_CONV},
     {"output-addr-conv", required_argument, NULL, OPT_OUTPUT_IP_ADDR_CONV},
@@ -920,9 +919,8 @@ static error_code_t set_output_ts_conv(struct output_params *op,
 {
         if (strcmp(ts_conv_str, "none") == 0) {
                 op->ts_conv= OUTPUT_TS_CONV_NONE;
-        } else {
-                op->ts_conv= OUTPUT_TS_CONV_STR;
-                op->ts_conv_str = ts_conv_str;
+        } else if (strcmp(ts_conv_str, "pretty") == 0) {
+                op->ts_conv= OUTPUT_TS_CONV_PRETTY;
         }
 
         return E_OK;
@@ -1075,6 +1073,46 @@ set_num_threads(const char *const num_threads_str)
     return E_OK;
 }
 
+/**
+ * @brief Set time zone to initialize time conversion information for all
+ *        time-related functionality.
+ *
+ * If time_zone_optarg is NULL, the UTC is used. If it contains "system", the
+ * system time zone is used. Otherwise, user-specified time zone is used.
+ *
+ * From tzset(3):
+ *   - If the TZ variable does not appear in the environment, the system
+ *   timezone is used.
+ *   - If the TZ variable does appear in the environment, but its value is
+ *   empty, or its value cannot be interpreted using any of the formats
+ *   specified below, then Coordinated Universal Time (UTC) is used.
+ *   - Otherwise, the value of TZ is used.
+ *
+ * @param time_zone_optarg NULL, "system", or valid POSIX format of the TZ
+ *                         environment variable.
+ */
+static void
+set_time_zone(const char *const time_zone_optarg)
+{
+    if (time_zone_optarg) {
+        if (strcmp(time_zone_optarg, "system") == 0) {
+            DEBUG("args: using the system time zone");
+            int ret = unsetenv("TZ");
+            ABORT_IF(ret, E_INTERNAL, "unsetenv(): %s", strerror(errno));
+        } else {
+            DEBUG("args: using the user-specified time zone `%s'",
+                  time_zone_optarg);
+            int ret = setenv("TZ", time_zone_optarg, 1);
+            ABORT_IF(ret, E_INTERNAL, "setenv(): %s", strerror(errno));
+        }
+    } else {
+        DEBUG("args: using UTC time zone");
+        int ret = setenv("TZ", "", 1);
+        ABORT_IF(ret, E_INTERNAL, "setenv(): %s", strerror(errno));
+    }
+    tzset();  // apply changes in TZ
+}
+
 error_code_t
 arg_parse(struct cmdline_args *args, int argc, char *const argv[],
           bool root_proc)
@@ -1098,6 +1136,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     char *time_point_optarg = NULL;
     char *time_range_optarg = NULL;
     char *output_fields_optarg = NULL;
+    char *time_zone_optarg = NULL;
     // loop through all the command-line arguments
     while (true) {
         const int opt = getopt_long(argc, argv, short_opts, long_opts, NULL);
@@ -1131,14 +1170,17 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             ecode = set_verbosity_level(optarg);
             break;
 
-        case OPT_NO_TPUT:  // disable the TPUT algorithm for Top-N queries
+        case OPT_NO_TPUT:
             args->use_tput = false;
             break;
-        case OPT_NO_BFINDEX:    // disable Bloom filter indexes
+        case OPT_NO_BFINDEX:
             args->use_bfindex = false;
             break;
-        case OPT_NUM_THREADS:  // set the number of used threads
+        case OPT_NUM_THREADS:
             ecode = set_num_threads(optarg);
+            break;
+        case OPT_TIME_ZONE:
+            time_zone_optarg = optarg;
             break;
 
         // output-affecting options
@@ -1153,9 +1195,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             break;
         case OPT_OUTPUT_TS_CONV:
             ecode = set_output_ts_conv(&args->output_params, optarg);
-            break;
-        case OPT_OUTPUT_TS_LOCALTIME:
-            args->output_params.ts_localtime = true;
             break;
         case OPT_OUTPUT_VOLUME_CONV:
             ecode = set_output_volume_conv(&args->output_params, optarg);
@@ -1204,6 +1243,8 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     }  // while (true) loop through all command-line arguments
 
     ////////////////////////////////////////////////////////////////////////////
+    set_time_zone(time_zone_optarg);
+
     // parse aggregation and sort option argument options
     if (aggr_optarg) {  // aggregation mode with optional sorting
         args->working_mode = MODE_AGGR;
@@ -1342,8 +1383,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         }
 
         if (args->output_params.ts_conv == OUTPUT_TS_CONV_UNSET) {
-            args->output_params.ts_conv = OUTPUT_TS_CONV_STR;
-            args->output_params.ts_conv_str = DEFAULT_PRETTY_TS_CONV;
+            args->output_params.ts_conv = OUTPUT_TS_CONV_PRETTY;
         }
         if (args->output_params.volume_conv == OUTPUT_VOLUME_CONV_UNSET) {
             args->output_params.volume_conv = OUTPUT_VOLUME_CONV_METRIC_PREFIX;

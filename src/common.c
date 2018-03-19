@@ -40,6 +40,7 @@
 #include "common.h"
 
 #include <assert.h>     // for assert
+#include <errno.h>      // for errno
 #include <stddef.h>     // for NULL, size_t
 #include <stdio.h>      // for snprintf
 #include <stdlib.h>     // for setenv, unsetenv, getenv
@@ -107,27 +108,32 @@ mktime_utc(struct tm *tm)
 
     // save current time zone environment variable
     const char *const tz = getenv("TZ");
-    char orig_tz[128];
+    char orig_tz[256];
     if (tz) {
         assert(strlen(tz) < sizeof (orig_tz));
         strncpy(orig_tz, tz, sizeof (orig_tz) - 1);
         orig_tz[sizeof (orig_tz) - 1] = '\0';
     }
 
-    // set time zone to UTC and call mktime
-    setenv("TZ", "", 1);
-    tzset();
-    const time_t ret = mktime(tm); //actual normalization within UTC time zone
+    // set time zone to UTC
+    int ret = setenv("TZ", "", 1);
+    ABORT_IF(ret, E_INTERNAL, "setenv(): %s", strerror(errno));
+    tzset();  // apply changes in TZ
+
+    // do the normalization within the UTC time zone
+    const time_t calendar_time = mktime(tm);
 
     // restore time zone to the original value
     if (tz) {
-        assert(setenv("TZ", orig_tz, 1) == 0);
+        ret = setenv("TZ", orig_tz, 1);
+        ABORT_IF(ret, E_INTERNAL, "setenv(): %s", strerror(errno));
     } else {
-        assert(unsetenv("TZ") == 0);
+        ret = unsetenv("TZ");
+        ABORT_IF(ret, E_INTERNAL, "unsetenv(): %s", strerror(errno));
     }
-    tzset();
+    tzset();  // apply changes in TZ
 
-    return ret;
+    return calendar_time;
 }
 /**
  * @}

@@ -66,7 +66,7 @@ typedef enum {
 typedef enum {
     OUTPUT_TS_CONV_UNSET,
     OUTPUT_TS_CONV_NONE,
-    OUTPUT_TS_CONV_STR,
+    OUTPUT_TS_CONV_PRETTY,
 } output_ts_conv_t;
 
 typedef enum {
@@ -102,16 +102,16 @@ typedef enum {
 
 
 struct output_params {
+    // items
     output_item_t print_records;
     output_item_t print_processed_summ;
     output_item_t print_metadata_summ;
 
+    // format
     output_format_t format;
 
+    // conversions
     output_ts_conv_t ts_conv;
-    char *ts_conv_str;
-    bool ts_localtime; //output timestamp in localtime instead of UTC
-
     output_stat_conv_t volume_conv;
     output_tcp_flags_conv_t tcp_flags_conv;
     output_ip_addr_conv_t ip_addr_conv;
@@ -125,6 +125,7 @@ struct output_params {
  */
 void
 output_init(struct output_params op, const struct fields *const fields);
+
 void
 output_free(void);
 

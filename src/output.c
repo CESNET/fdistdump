@@ -41,10 +41,11 @@
 #include "output.h"
 
 #include <assert.h>             // for assert
+#include <errno.h>              // for errno
 #include <inttypes.h>           // for fixed-width integer types
 #include <stdio.h>              // for printf, snprintf, putchar, puts
 #include <string.h>             // for strlen
-#include <time.h>               // for strftime, gmtime, localtime
+#include <time.h>               // for strftime, localtime_r
 
 /*
  * Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED can
@@ -67,10 +68,12 @@
 
 
 #define PRETTY_PRINT_SEP " "
-#define PRETTY_PRINT_COL_WIDTH 5
+#define PRETTY_PRINT_PADDING_WIDTH 5
 #define COL_WIDTH_RESERVE 4
 #define CSV_SEP ','
 #define TCP_FLAG_UNSET_CHAR '.'
+#define NAN_STR "NaN"
+#define ABSENT_STR "absent"
 
 #if MAX_STR_LEN < INET6_ADDRSTRLEN
 #error "MAX_STR_LEN < INET6_ADDRSTRLEN"
@@ -295,36 +298,45 @@ field_to_str(const int field, const void *const data);
 /**
  * @brief Convert a timestamp in uint64_t to string.
  *
- * Timestamp is composed of Unix time (number of seconds that have elapsed since
- * 1.1.1970 UTC) and additional milliseconds elapsed since the last full second.
+ * The timestamp is number of milliseconds that have elapsed since 1.1.1970 UTC.
+ * In other words, it is composed of Unix time (number of seconds that have
+ * elapsed since 1.1.1970 UTC) and additional milliseconds elapsed since the
+ * last full second.
+ *
+ * Pretty conversion uses "%F %T" format:
+ *   %F     Equivalent to %Y-%m-%d (the ISO 8601 date format).
+ *   %T     The time in 24-hour notation (%H:%M:%S).
  *
  * @param[in] ts Unix time extended to a milliseconds precision.
  *
- * @return Textual representation of the timestamp (in static memory).
+ * @return Static read-only textual representation of the timestamp.
  */
 static const char *
 timestamp_to_str(const uint64_t *ts)
 {
+    assert(ts);
+
     switch (output_params.ts_conv) {
     case OUTPUT_TS_CONV_NONE:
         snprintf(global_str, sizeof (global_str), "%" PRIu64, *ts);
         break;
-    case OUTPUT_TS_CONV_STR: {
-        assert(output_params.ts_conv_str);
-        struct tm *(*const timeconv)(const time_t *) =
-            output_params.ts_localtime ? localtime : gmtime;
-        const time_t sec = *ts / 1000;
-#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+    case OUTPUT_TS_CONV_PRETTY: {
+        const time_t calendar_seconds = *ts / 1000;         // only seconds
+        const unsigned calendar_milliseconds = *ts % 1000;  // only milliseconds
+
+        // time is expressed relative to the user's specified timezone (tzset(3)
+        // was called before)
+        struct tm broken_down_time;
+        void *const ret = localtime_r(&calendar_seconds, &broken_down_time);
+        ABORT_IF(!ret, E_INTERNAL, "localtime_r(): %s", strerror(errno));
+
+        // convert date and time to string
         const uint64_t written = strftime(global_str, sizeof (global_str),
-                                        output_params.ts_conv_str,
-                                        timeconv(&sec));
-#pragma GCC diagnostic warning "-Wformat-nonliteral"
-        if (written == 0) {
-            return "too long";
-        }
-        const uint64_t msec = *ts % 1000;
-        snprintf(global_str + written, sizeof (global_str) - written,
-                 ".%.3" PRIu64, msec);
+                                          "%F %T", &broken_down_time);
+        assert(written > 0);
+        // convert milliseconds to string
+        snprintf(global_str + written, sizeof (global_str) - written, ".%.3d",
+                 calendar_milliseconds);
         break;
     }
     case OUTPUT_TS_CONV_UNSET:
@@ -520,15 +532,15 @@ duration_to_str(const uint64_t *const duration)
     case OUTPUT_DURATION_CONV_STR:
     {
         uint64_t dur_conv = *duration;
-        const uint64_t msec = dur_conv % 1000;
+        const unsigned msec = dur_conv % 1000;
         dur_conv /= 1000;
-        const uint64_t sec = dur_conv % 60;
+        const unsigned sec = dur_conv % 60;
         dur_conv /= 60;
-        uint64_t min = dur_conv % 60;
+        const unsigned min = dur_conv % 60;
         dur_conv /= 60;
 
         snprintf(global_str, sizeof (global_str), "%2.2" PRIu64
-                 ":%2.2zu:%2.2zu.%3.3zu", dur_conv, min, sec, msec);
+                 ":%2.2u:%2.2u.%3.3u", dur_conv, min, sec, msec);
         break;
     }
 
@@ -873,8 +885,41 @@ field_to_str(const int field_id, const void *const data)
     return get_field_to_str_callback(field_id)(data);
 }
 
+static void
+print_name(const int field_id, const size_t padding_width, const bool last)
+{
+    const char *const field_name = field_get_name(field_id);
+
+    if (last) {  // last field in record, no trailing spacing or CSV separator
+        puts(field_name);  // puts() appends a newline
+        return;
+    }
+
+    switch (output_params.format) {
+    case OUTPUT_FORMAT_PRETTY:
+        printf("%-*s", (int)padding_width, field_name);
+        break;
+
+    case OUTPUT_FORMAT_CSV:
+        printf("%s%c" , field_name, CSV_SEP);
+        break;
+
+    case OUTPUT_FORMAT_UNSET:
+        assert(!"illegal output format");
+    default:
+        assert(!"unknown output format");
+    }
+}
+
 /**
  * @brief TODO
+ *
+ * Field string is left aligned. If it has fewer characters than the string
+ * width, it will be padded with spaces on the right. The last field is printed
+ * without any alignment or padding.
+ *
+ * | string_width | space_width |
+ * |192.168.1.1~~~|~~~~~~~~~~~~~|
  *
  * @param string
  * @param string_width
@@ -913,7 +958,7 @@ print_field(const char *const string, const size_t string_width,
  * @param data
  */
 static void
-print_headers(const uint8_t *const data)
+print_rec_names(const uint8_t *const data)
 {
     for (size_t i = 0; i < fields->all_cnt; ++i) {
         const bool last_column = (i == (fields->all_cnt - 1));
@@ -926,8 +971,25 @@ print_headers(const uint8_t *const data)
         o_ctx.column_width[i] = MAX(header_str_len, first_field_str_len);
         o_ctx.column_width[i] += COL_WIDTH_RESERVE;
 
-        print_field(header_str, o_ctx.column_width[i],
-                    PRETTY_PRINT_COL_WIDTH - COL_WIDTH_RESERVE, last_column);
+        print_name(fields->all[i].id, o_ctx.column_width[i]
+                   + PRETTY_PRINT_PADDING_WIDTH - COL_WIDTH_RESERVE,
+                   last_column);
+    }
+}
+
+static const char *
+get_field_str(const size_t idx, lnf_rec_t *const lnf_rec, char *const buff)
+{
+    const int lnf_ret = lnf_rec_fget(lnf_rec, fields->all[idx].id, buff);
+    switch (lnf_ret) {
+    case LNF_OK:
+        return o_ctx.field_to_str_cb[idx](buff);
+    case LNF_ERR_NAN:
+        return NAN_STR;
+    case LNF_ERR_NOTSET:
+        return ABSENT_STR;
+    default:
+        assert(!"invalid return code from lnf_rec_fget()");
     }
 }
 
@@ -955,25 +1017,13 @@ calc_column_widths(lnf_mem_t *const lnf_mem, const size_t rec_limit,
     // loop through all records
     uint64_t rec_cntr = 0;  // aka lines counter
     char buff[field_max_size];
-    bool lnf_notset_reported = false;
     while (cursor && rec_limit > rec_cntr++) {
         lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
         assert(lnf_ret == LNF_OK);
 
         // loop through all fields in the record
         for (size_t i = 0; i < fields->all_cnt; ++i) {
-            lnf_ret = lnf_rec_fget(lnf_rec, fields->all[i].id, buff);
-            assert(lnf_ret == LNF_OK || lnf_ret == LNF_ERR_NOTSET);
-            if (!lnf_notset_reported && lnf_ret == LNF_ERR_NOTSET) {
-                lnf_notset_reported = true;
-                WARNING(E_LNF,
-                        "lnf_rec_fget() reports that field `%s' is not present",
-                        field_get_name(fields->all[i].id));
-            }
-
-            const char *const field_str =
-                o_ctx.field_to_str_cb[i](buff);
-            const size_t field_str_len = strlen(field_str);
+            const size_t field_str_len = strlen(get_field_str(i, lnf_rec, buff));
             MAX_ASSIGN(o_ctx.column_width[i], field_str_len);
         }
 
@@ -1014,14 +1064,11 @@ print_records(lnf_mem_t *const lnf_mem, const size_t rec_limit,
 
         // loop through all fields in the record
         for (size_t i = 0; i < fields->all_cnt; ++i) {
-            lnf_ret = lnf_rec_fget(lnf_rec, fields->all[i].id, buff);
-            assert(lnf_ret == LNF_OK || lnf_ret == LNF_ERR_NOTSET);
-
-            const char *const field_str =
-                o_ctx.field_to_str_cb[i](buff);
+            const char *const field_str = get_field_str(i, lnf_rec, buff);
             const bool last_column = (i == (fields->all_cnt - 1));
+
             print_field(field_str, o_ctx.column_width[i],
-                        PRETTY_PRINT_COL_WIDTH, last_column);
+                        PRETTY_PRINT_PADDING_WIDTH, last_column);
         }
 
         lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
@@ -1096,7 +1143,7 @@ print_rec(const uint8_t *const data)
     if (first_rec) {
         first_rec = false;
         o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
-        print_headers(data);
+        print_rec_names(data);
     }
 
     // loop through the fields in the record
@@ -1106,7 +1153,7 @@ print_rec(const uint8_t *const data)
 
         print_field(o_ctx.field_to_str_cb[i](data + o_ctx.field_offset[i]),
                     o_ctx.column_width[i],
-                    PRETTY_PRINT_COL_WIDTH - COL_WIDTH_RESERVE,
+                    PRETTY_PRINT_PADDING_WIDTH - COL_WIDTH_RESERVE,
                     last_column);
     }
 }
@@ -1146,8 +1193,9 @@ print_mem(lnf_mem_t *const lnf_mem, uint64_t rec_limit)
     // loop through all columns and print the headers
     for (size_t i = 0; i < fields->all_cnt; ++i) {
         const bool last_column = (i == (fields->all_cnt - 1));
-        print_field(field_get_name(fields->all[i].id),
-                    o_ctx.column_width[i], PRETTY_PRINT_COL_WIDTH, last_column);
+        print_name(fields->all[i].id,
+                   o_ctx.column_width[i] + PRETTY_PRINT_PADDING_WIDTH,
+                   last_column);
     }
 
     print_records(lnf_mem, rec_limit, field_max_size);

@@ -127,13 +127,13 @@ Mandatory arguments to long options are mandatory for short options too.
 
 .\" Path option subsection ---------------------
 .SS Path
-Each given \fIpath\fR argument is either a filename or a directory.
+Each given \fIpath\fR argument is either a file name or a directory.
 In SPMD mode, all \fIpath\fRs will be processed by all slave processes and therefore should be accessible from every node where the slave process is invoked.
 Otherwise, a warning message will be printed to the stderr by the affected process and the inaccessible \fIpath\fR will be ignored.
-If \fIpath\fR is a filename, it will be processed directly.
+If \fIpath\fR is a file name, it will be processed directly.
 If it is a directory, all files in that directory will be processed and all subdirectories will be recursively processed in the same way.
 
-The \fIpath\fR is a character string composed of zero or more directives: ordinary characters (not %), which are copied unchanged to the output path, and conversion specifications, each of which results in some additinal action.
+The \fIpath\fR is a character string composed of zero or more directives: ordinary characters (not %), which are copied unchanged to the output path, and conversion specifications, each of which results in some additional action.
 Each conversion specification is introduced by the character % followed by a conversion specifier character.
 If path begins with "%DIGITS:", then \fIpath\fR is targeted only for one specific slave, the one where DIGITS are equal to the MPI rank of that slave.
 
@@ -149,7 +149,7 @@ This may be used to read different files by each slave from a shared storage.
 .BR -a , \ --aggregation=\fIfield\fR[,...]
 Aggregate flow records together by any number of \fIfield\fRs.
 Option argument is comma separated list of \fIfield\fRs, at least one \fIfield\fR is mandatory.
-For more informations about valid \fIfield\fR strings see the \fBFIELDS\fR section.
+For more information about valid \fIfield\fR strings see the \fBFIELDS\fR section.
 
 .TP
 .BR -f , \ --filter=\fIfilter
@@ -183,7 +183,7 @@ On the other hand, without aggregation, this may vastly reduce the number of pro
 Set record sort order.
 Sort key is specified by \fIfield\fR.
 Sort \fIdirection\fR is either \fBasc\fR or \fBdesc\fR string, which are abbreviations for ascending and descending direction, respectively.
-For more informations about valid \fIfield\fR strings see the \fBFIELDS\fR section.
+For more information about valid \fIfield\fR strings see the \fBFIELDS\fR section.
 
 .TP
 .BR -s , \ --statistic=\fIstatistic
@@ -205,8 +205,7 @@ option.
 
 .TP
 .BR -t , \ --time-point=\fItime_spec
-Process only a single flow file on each slave, the one which includes given
-.IR time_spec .
+Process only a single flow file on each slave, the one which includes given \fItime_spec\fR.
 
 Time based options (\fB-t\fR and \fB-T\fR) are useful only if paths to your flow files contain some information about stored flows timestamps.
 Flow file usually contains flow records received during some time window, e.g., 5 minute period.
@@ -236,7 +235,7 @@ Both \fIbegin\fR and \fIend\fR are \fItime_spec\fR strings.
 If \fIend\fR is not provided, current time is assumed as range end.
 All other aspects that was mentioned for the time point option (\fB-t\fR) apply also for this option.
 
-If given \fIbegin\fR and \fIend\fR times are not aligned to the flow file rotation intervals (which is usually 5 minutes), alignment is automaticly perfomed.
+If given \fIbegin\fR and \fIend\fR times are not aligned to the flow file rotation intervals (which is usually 5 minutes), alignment is automatically performed.
 Beginning time is aligned to the beginning of the rotation interval, ending time is aligned to the ending of the rotation interval:
 
 .nf
@@ -281,52 +280,30 @@ Output items are \fBrecords\fR (\fBr\fR), \fBprocessed-records-summary\fR (\fBp\
 At the beginning of each flow file, there is a header containing sums of the \fBflows\fR, \fBpackets\fR and \fBbytes\fR fields of all the records in that file.
 Those sums are further divided according to the transport protocols TCP, UDP, ICMP.
 \fBmetadata-summary\fR output item will read and print those metadata counters.
-Using \fBmetadata-summary\fR as a single output item is very fast and efficent.
+Using \fBmetadata-summary\fR as a single output item is very fast and efficient.
 
 Default value of \fIitem_list\fR for pretty output is \fBrecords,processed-records-summary\fR, for CSV it contains only \fBrecords\fR.
 
 .TP
 .BI --output-format= format
 Set output (print) format.
-.I format
-is either
-.BR pretty \ or \ csv .
-.B pretty
-will create nice, human readable output, with fields formatted into columns.
+\fIformat\fR is either \fBpretty\fR or \fBcsv\fR.
+\fBpretty\fR will create nice human readable output with fields formatted into columns.
 It is the default option.
-Data conversions are all set to the most human readable form (timestamps converted into broken-down time strings, TCP flags converted into string, ...). On the other hand, 
-.B csv
-will create machine readable output suitable for post-processing.
-It is a standard comma separated values format, where all data conversions are set to the most machine readable form (timestamps printed as integers, TCP flags printed as a integers, ...).
+Data conversions are all set to the most human readable form (timestamps converted into broken-down time strings, TCP flags converted into string, ...).
+\fBcsv\fR will create machine readable output suitable for post-processing.
+It is a standard comma separated values format with all data conversions set to the most machine readable form (timestamps printed as integers, TCP flags printed as a integers, ...).
 
 .TP
 .BI --output-ts-conv= timestamp_conversion
 Set timestamp output conversion format.
-.I timestamp_conversion
-is either
-.B none
-or custom format string.
-
-With
-.B none
-conversion, raw timestamp integer is printed.
-Timestamp is composed from Unix time (number of seconds that have elapsed since 1.1.1970 UTC) enhanced with milliseconds (seconds are multiplied by 1000 and milliseconds are added).
+\fItimestamp_conversion\fR is either \fBnone\fR or \fBpretty\fR.
+With \fBnone\fR conversion, raw timestamp integer is printed.
+The timestamp is a number of milliseconds that have elapsed since 1.1.1970 UTC.
+In other words, it is composed of Unix time (number of seconds that have elapsed since 1.1.1970 UTC) and additional milliseconds elapsed since the last full second.
 For example 1445405280123 means 21.10.2015 7:28, 123 ms.
 
-Custom format string is simply passed as format string to the
-.BR strftime ()
-function.
-Default string for pretty print is
-.RB ' "%F %T" '.
-Dot and milliseconds are always appended.
-
-.TP
-.BI --output-ts-localtime
-Convert timestamps to local time.
-Timestamps stored in flow records are in UTC.
-This option will convert them to the user's specified timezone (by
-.BR localtime ()
-function) before output conversion is performed.
+With \fBpretty\fR conversion, "YYYY-MM-DD hh:mm:ss.ms" format expressed relative to the user's specified time zone is used.
 
 .TP
 .BI --output-volume-conv= volume_conversion
@@ -415,8 +392,10 @@ Using
 .BR none ,
 raw integer is printed. Using
 .BR str ,
-duration is converted into HH:MM:SS.MS string.
+duration is converted into hh:mm:ss.ms string.
 
+.\" Progress bar options subsection ---------------------
+.SS Progress Bar Options
 .TP
 .BI --progress-bar-type= progress_bar_type
 Set progress bar type.
@@ -431,7 +410,7 @@ This may be inaccurate if records are unevenly spread among files.
 .BI --progress-bar-dest= progress_bar_destination
 Set progress bar destination.
 There are two special values: stdout and stderr (which is also default).
-Every other value will be treated as a filename and \fBfdistdump\fR will continually rewrite this file with the current progress.
+Every other value will be treated as a file name and \fBfdistdump\fR will continually rewrite this file with the current progress.
 
 .\" Other options subsection ---------------------
 .SS Other Options
@@ -444,7 +423,7 @@ It should not affect the results in any way, but it should reduce amount of data
 It supports both descending and ascending order directions.
 \fBfdistdump\fR's implementation uses a modified TPUT algorithm presented in "Efficient Top-K Query Calculation in Distributed Networks" by Pei Cao and Zhe Wang.
 
-However, there are three conditions that have to be satisfied, otherwise it will be automaticly disabled:
+However, there are three conditions that have to be satisfied, otherwise it will be automatically disabled:
 
 1. aggregation is enabled (\fB-a\fR),
 
@@ -466,9 +445,9 @@ In this case, the set is a set of source and destination IP addresses in all rec
 Bloom filter is only used in conjunction with a record filter containing one or more IP addresses.
 
 If enabled, together witch each flow file also index file is read.
-If the flow file name has the standard prefix "lnf.", the index file name is constructed by subtituting this prefix with "bfi.".
+If the flow file name has the standard prefix "lnf.", the index file name is constructed by substituting this prefix with "bfi.".
 Otherwise, the index file name is constructed by prefixing the flow file name with "bfi.".
-This feature uses the followinh Bloom filter index library: https://github.com/CESNET/bloom-filter-index.
+This feature uses the following Bloom filter index library: https://github.com/CESNET/bloom-filter-index.
 
 .TP
 .BI --num-threads \ number
@@ -477,6 +456,15 @@ The value of this options argument shall be a positive integer.
 If not defined, the value of the OMP_NUM_THREADS environment variable is used.
 If OMP_NUM_THREADS is undefined, the number of used threads is OpenMP implementation defined, but usually all available cores are used.
 Master always uses two threads.
+
+.TP
+.BI --time-zone \ time_zone_format
+Set time zone to initialize time conversion information for all time-related functionality.
+Time zone affects both time based options (\fB-t\fR and \fB-T\fR) and the \fBpretty\fR timestamp output conversion format.
+
+If the \fI--time-zone\fR option does appear, its option argument is empty or cannot be interpreted using any of the formats specified in \fItzset\fR (3), then Coordinated Universal Time (UTC) is used.
+If \fItime_zone_format\fR has a special value \fBsystem\fR, the master's system time zone is used.
+Otherwise, user-specified time zone is used.
 
 .\" Getting help subsection ---------------------
 .SS Getting Help
@@ -497,7 +485,7 @@ Moreover, only IP addresses and timestamps are currently affected.
 Alignment in conjunction with IP addresses works as a netmask.
 In conjunction with timestamps (e.g., \fBfirst\fR or \fBlast\fR), the greater the alignment value is, the less precise the timestamp is.
 If slashes are not part of the string, no alignment is used.
-If slashes are part of the string but alignment is not, the behaviour is undefined.
+If slashes are part of the string but alignment is not, the behavior is undefined.
 
 Set of supported \fBfield\fRs depends on the installed version of \fBlibnf\fR library.
 To discover currently supported fields, \fBlibnf\fR comes with \fBlibnf-info\fR executable, which prints out list of currently supported fields and their meaning.
@@ -518,9 +506,7 @@ processes return 0 on success, 1 on error.
 
 
 .\" ENVIRONMENT section --------------------------------------------------------
-.SH ENVIRONMENT
-TZ environment variable is set to empty string for a short amount of time for internal reasons.
-It is restored to its original value afterwards.
+.\".SH ENVIRONMENT
 
 
 .\" FILES section --------------------------------------------------------------
@@ -815,4 +801,5 @@ Read only each file's metadata, sum it up and print in the CSV format.
 .BR mpirun (1),
 .BR nfdump (1),
 .BR mpi (3)
-.BR strftime (3)
+.BR tzset (3)
+.BR tzselect (3)
