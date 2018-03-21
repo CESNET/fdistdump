@@ -45,7 +45,11 @@
 
 #include <libnf.h>              // for lnf_mem_t
 
-#include "common.h"             // for error_code_t
+
+// forward declarations
+struct fields;
+struct metadata_summ;
+struct processed_summ;
 
 
 /*

@@ -39,16 +39,17 @@
 
 #include "common.h"
 
-#include <assert.h>     // for assert
-#include <errno.h>      // for errno
-#include <stddef.h>     // for NULL, size_t
-#include <stdio.h>      // for snprintf
-#include <stdlib.h>     // for setenv, unsetenv, getenv
-#include <string.h>     // for strlen, strncpy
-#include <time.h>       // for nanosleep, timespec
+#include <assert.h>             // for assert
+#include <errno.h>              // for errno
+#include <stddef.h>             // for NULL, size_t
+#include <stdlib.h>             // for setenv, unsetenv, getenv
+#include <string.h>             // for strlen, strncpy
+#include <time.h>               // for nanosleep, timespec
 
-#include "errwarn.h"    // for error/warning/info/debug messages, ...
-#include "fields.h"     // for struct fields
+#include <mpi.h>                // for MPI_Comm
+
+#include "errwarn.h"            // for error/warning/info/debug messages, ...
+#include "fields.h"             // for struct fields
 
 
 #define TM_YEAR_BASE 1900

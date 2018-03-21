@@ -42,11 +42,13 @@
 
 #include <assert.h>             // for assert
 #include <errno.h>              // for errno
-#include <float.h>              // for DBL_MAX
 #include <inttypes.h>           // for fixed-width integer types
 #include <stdio.h>              // for printf, snprintf, putchar, puts
+#include <stdlib.h>             // for free, malloc
 #include <string.h>             // for strlen
 #include <time.h>               // for strftime, localtime_r
+
+
 
 /*
  * Define System V source as a workaround for the "IN6_IS_ADDR_UNSPECIFIED can

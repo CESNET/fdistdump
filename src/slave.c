@@ -58,6 +58,7 @@
 #endif  // HAVE_LIBBFINDEX
 #include "common.h"             // for metadata_summ, ROOT_PROC, mpi_comm_main
 #include "errwarn.h"            // for error/warning/info/debug messages, ...
+#include "fields.h"         // for fields, sort_key, field
 #include "path_array.h"         // for path_array_free
 
 

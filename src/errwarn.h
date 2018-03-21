@@ -40,9 +40,6 @@
 
 #pragma once
 
-#include <stdbool.h>  // for false
-#include <stdio.h>    // for snprintf, size_t
-
 #include <mpi.h>      // for MPI_COMM_WORLD
 
 #include "common.h"   // for error_code_t
