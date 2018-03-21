@@ -297,6 +297,17 @@ Data conversions are all set to the most human readable form (timestamps convert
 It is a standard comma separated values format with all data conversions set to the most machine readable form (timestamps printed as integers, TCP flags printed as a integers, ...).
 
 .TP
+.BI --output-rich-header
+The first line of the output (the header) contains field names.
+With this option enabled, field names will be enriched with additional info such as if it is an aggreagtion key, what aggregation function it uses, or its sorting direction.
+
+.TP
+.BI --output-no-ellipsize
+Do not ellipsize fields when they do not fit in available columns.
+By default, if the field does not fit into its reserved space, it is truncated and the ellipsis symbol is printed as an indication.
+This option affects only pretty output, CSV never ellipsize.
+
+.TP
 .BI --output-ts-conv= timestamp_conversion
 Set timestamp output conversion format.
 \fItimestamp_conversion\fR is either \fBnone\fR or \fBpretty\fR.
@@ -417,6 +428,23 @@ Every other value will be treated as a file name and \fBfdistdump\fR will contin
 .\" Other options subsection ---------------------
 .SS Other Options
 .TP
+.BI --num-threads \ number
+Specifies the number of threads to use in slave's parallel regions.
+The value of this options argument shall be a positive integer.
+If not defined, the value of the OMP_NUM_THREADS environment variable is used.
+If OMP_NUM_THREADS is undefined, the number of used threads is OpenMP implementation defined, but usually all available cores are used.
+Master always uses two threads.
+
+.TP
+.BI --time-zone \ time_zone_format
+Set time zone to initialize time conversion information for all time-related functionality.
+Time zone affects both time based options (\fB-t\fR and \fB-T\fR) and the \fBpretty\fR timestamp output conversion format.
+
+If the \fI--time-zone\fR option does appear, its option argument is empty or cannot be interpreted using any of the formats specified in \fItzset\fR (3), then Coordinated Universal Time (UTC) is used.
+If \fItime_zone_format\fR has a special value \fBsystem\fR, the master's system time zone is used.
+Otherwise, user-specified time zone is used.
+
+.TP
 .B --no-tput
 Disable the TPUT algorithm for Top-N queries.
 
@@ -450,23 +478,6 @@ If enabled, together witch each flow file also index file is read.
 If the flow file name has the standard prefix "lnf.", the index file name is constructed by substituting this prefix with "bfi.".
 Otherwise, the index file name is constructed by prefixing the flow file name with "bfi.".
 This feature uses the following Bloom filter index library: https://github.com/CESNET/bloom-filter-index.
-
-.TP
-.BI --num-threads \ number
-Specifies the number of threads to use in slave's parallel regions.
-The value of this options argument shall be a positive integer.
-If not defined, the value of the OMP_NUM_THREADS environment variable is used.
-If OMP_NUM_THREADS is undefined, the number of used threads is OpenMP implementation defined, but usually all available cores are used.
-Master always uses two threads.
-
-.TP
-.BI --time-zone \ time_zone_format
-Set time zone to initialize time conversion information for all time-related functionality.
-Time zone affects both time based options (\fB-t\fR and \fB-T\fR) and the \fBpretty\fR timestamp output conversion format.
-
-If the \fI--time-zone\fR option does appear, its option argument is empty or cannot be interpreted using any of the formats specified in \fItzset\fR (3), then Coordinated Universal Time (UTC) is used.
-If \fItime_zone_format\fR has a special value \fBsystem\fR, the master's system time zone is used.
-Otherwise, user-specified time zone is used.
 
 .\" Getting help subsection ---------------------
 .SS Getting Help

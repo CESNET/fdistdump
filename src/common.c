@@ -253,7 +253,7 @@ libnf_mem_init_ht(lnf_mem_t **const lnf_mem, const struct fields *const fields)
         int flags = LNF_AGGR_KEY;
 
         if (have_sort_key
-                && fields->sort_key.field->id == fields->aggr_keys[i].field->id)
+                && fields->sort_key.field == fields->aggr_keys[i].field)
         {
             // sort key is one of aggregation keys, merge the flags
             sort_key_is_one_of_aggregation_keys = true;
@@ -473,9 +473,9 @@ libnf_sort_dir_to_str(const int sort_dir)
 {
     switch (sort_dir) {
     case LNF_SORT_ASC:
-        return "ascending";
+        return "asc";
     case LNF_SORT_DESC:
-        return "descending";
+        return "desc";
     default:
         assert(!"unknown sort direction");
     }

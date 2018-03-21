@@ -55,7 +55,7 @@
 #include "arg_parse.h"          // for cmdline_args
 #include "common.h"             // for libnf_mem_free, libnf_mem_init_*, ...
 #include "errwarn.h"            // for error/warning/info/debug messages, ...
-#include "output.h"             // for print_mem, output_setup, ...
+#include "output.h"             // for print_batch, output_setup, ...
 
 
 /*
@@ -125,12 +125,12 @@ mem_write_raw_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
 }
 
 static error_code_t
-print_rec_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
+print_stream_next_callback(uint8_t *data, xchg_rec_size_t data_len, void *user)
 {
         (void)data_len;  // unused
         (void)user;  // unused
 
-        print_rec(data);
+        print_stream_next(data);
         return E_OK;
 }
 
@@ -644,8 +644,9 @@ list_main(struct master_ctx *const m_ctx)
 {
     assert(m_ctx);
 
+    print_stream_names();
     recv_loop(m_ctx, m_ctx->slave_threads_cnt, args->rec_limit, TAG_LIST,
-              print_rec_callback, NULL);
+              print_stream_next_callback, NULL);
 }
 
 /**
@@ -670,7 +671,7 @@ sort_main(struct master_ctx *const m_ctx)
     DEBUG("sorting records in master's libnf memory done");
 
     // print all records in the libnf linked list memory
-    print_mem(lnf_mem, args->rec_limit);
+    print_batch(lnf_mem, args->rec_limit);
     libnf_mem_free(lnf_mem);
 }
 
@@ -698,7 +699,7 @@ aggr_main(struct master_ctx *const m_ctx)
     }
 
     // print all records the lnf hash table memory
-    print_mem(lnf_mem, args->rec_limit);
+    print_batch(lnf_mem, args->rec_limit);
 
     libnf_mem_free(lnf_mem);
 }

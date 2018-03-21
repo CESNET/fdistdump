@@ -79,16 +79,16 @@
 /*
  * Data types declarations.
  */
-enum {  // command line options, have to start above the ASCII table
-    OPT_NO_TPUT = 256,  // disable the TPUT algorithm for Top-N queries
-    OPT_NO_BFINDEX,     // disable Bloom filter indexes
-    OPT_NUM_THREADS,    // set the number of used threads
-    OPT_TIME_ZONE,      // set a time zone for all time-related functionality
+enum {  // command line options
+    _OPT_FIRST = 256,  // have to start above the ASCII table
 
     OPT_OUTPUT_FIELDS,  // specification of listed fields
     OPT_OUTPUT_ITEMS,   // output items (records, processed records summary,
                         // metadata summary)
     OPT_OUTPUT_FORMAT,          // output (print) format
+    OPT_OUTPUT_RICH_HEADER,     // field names enriched with aggr. functions etc.
+    OPT_OUTPUT_NO_ELLIPSIZE,    // do not ellipsize fields when they do not fit
+                                // in available columns
 
     OPT_OUTPUT_TS_CONV,         // output timestamp conversion
     OPT_OUTPUT_VOLUME_CONV,     // output volumetric field conversion
@@ -99,6 +99,11 @@ enum {  // command line options, have to start above the ASCII table
 
     OPT_PROGRESS_BAR_TYPE,  // type of the progress bar
     OPT_PROGRESS_BAR_DEST,  // destination of the progress bar
+
+    OPT_NUM_THREADS,    // set the number of used threads
+    OPT_TIME_ZONE,      // set a time zone for all time-related functionality
+    OPT_NO_TPUT,        // disable the TPUT algorithm for Top-N queries
+    OPT_NO_BFINDEX,     // disable Bloom filter indexes
 
     OPT_HELP,  // print help
     OPT_VERSION,  // print version
@@ -129,14 +134,13 @@ static const struct option long_opts[] = {
     {"verbosity", required_argument, NULL, 'v'},
 
     // long options only
-    {"no-tput", no_argument, NULL, OPT_NO_TPUT},
-    {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
-    {"num-threads", required_argument, NULL, OPT_NUM_THREADS},
-    {"time-zone", required_argument, NULL, OPT_TIME_ZONE},
-
+    // output
     {"output-fields", required_argument, NULL, OPT_OUTPUT_FIELDS},
     {"output-items", required_argument, NULL, OPT_OUTPUT_ITEMS},
     {"output-format", required_argument, NULL, OPT_OUTPUT_FORMAT},
+    {"output-rich-header", no_argument, NULL, OPT_OUTPUT_RICH_HEADER},
+    {"output-no-ellipsize", no_argument, NULL, OPT_OUTPUT_NO_ELLIPSIZE},
+
     {"output-ts-conv", required_argument, NULL, OPT_OUTPUT_TS_CONV},
     {"output-volume-conv", required_argument, NULL, OPT_OUTPUT_VOLUME_CONV},
     {"output-tcpflags-conv", required_argument, NULL, OPT_OUTPUT_TCP_FLAGS_CONV},
@@ -144,9 +148,17 @@ static const struct option long_opts[] = {
     {"output-proto-conv", required_argument, NULL, OPT_OUTPUT_IP_PROTO_CONV},
     {"output-duration-conv", required_argument, NULL, OPT_OUTPUT_DURATION_CONV},
 
+    // progress bar
     {"progress-bar-type", required_argument, NULL, OPT_PROGRESS_BAR_TYPE},
     {"progress-bar-dest", required_argument, NULL, OPT_PROGRESS_BAR_DEST},
 
+    // other
+    {"num-threads", required_argument, NULL, OPT_NUM_THREADS},
+    {"time-zone", required_argument, NULL, OPT_TIME_ZONE},
+    {"no-tput", no_argument, NULL, OPT_NO_TPUT},
+    {"no-bfindex", no_argument, NULL, OPT_NO_BFINDEX},
+
+    // getting help
     {"help", no_argument, NULL, OPT_HELP},
     {"version", no_argument, NULL, OPT_VERSION},
 
@@ -728,10 +740,11 @@ static bool
 parse_fields(char *const fields_spec, struct fields *const fields,
              const bool are_aggr_keys)
 {
-    assert(fields_spec && fields_spec[0] != '\0' && fields);
+    assert(fields_spec && fields);
 
     DEBUG("args: parsing fields spec `%s'", fields_spec);
 
+    size_t fields_found = 0;
     char *saveptr = NULL;
     for (char *token = strtok_r(fields_spec, FIELDS_DELIM, &saveptr);
             token != NULL;
@@ -755,6 +768,12 @@ parse_fields(char *const fields_spec, struct fields *const fields,
         if (!success) {
             return false;
         }
+        fields_found++;
+    }
+
+    if (are_aggr_keys && fields_found == 0) {
+        ERROR(E_ARG, "aggregation enabled, but no aggregation key specified");
+        return false;
     }
 
     return true;
@@ -778,7 +797,7 @@ parse_fields(char *const fields_spec, struct fields *const fields,
 static bool
 parse_sort_spec(char *const sort_spec, struct fields *const fields)
 {
-    assert(sort_spec && sort_spec[0] != '\0' && fields);
+    assert(sort_spec && fields);
 
     DEBUG("args: parsing sort spec `%s'", sort_spec);
 
@@ -830,8 +849,7 @@ static void
 parse_stat_spec(char *stat_optarg, char *aggr_optarg[], char *sort_optarg[],
                 char *limit_optarg[])
 {
-    assert(stat_optarg && stat_optarg[0] != '\0' && aggr_optarg && sort_optarg
-           && limit_optarg);
+    assert(stat_optarg && aggr_optarg && sort_optarg && limit_optarg);
 
     DEBUG("args: stat spec: parsing `%s'", stat_optarg);
     *aggr_optarg = stat_optarg;
@@ -1142,6 +1160,9 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
     args->use_bfindex = true;
     args->rec_limit = SIZE_MAX;  // SIZE_MAX means record limit is unset
 
+    args->output_params.ellipsize = true;  // ellipsize long fields
+    args->output_params.rich_header = false;  // header with aggr. func. etc.
+
     // revent all non-root processes from printing getopt_long() errors
     if (!root_proc) {
         opterr = 0;
@@ -1188,19 +1209,6 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             ecode = set_verbosity_level(optarg);
             break;
 
-        case OPT_NO_TPUT:
-            args->use_tput = false;
-            break;
-        case OPT_NO_BFINDEX:
-            args->use_bfindex = false;
-            break;
-        case OPT_NUM_THREADS:
-            ecode = set_num_threads(optarg);
-            break;
-        case OPT_TIME_ZONE:
-            time_zone_optarg = optarg;
-            break;
-
         // output-affecting options
         case OPT_OUTPUT_FIELDS:
             output_fields_optarg = optarg;
@@ -1211,6 +1219,13 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         case OPT_OUTPUT_FORMAT:
             ecode = set_output_format(&args->output_params, optarg);
             break;
+        case OPT_OUTPUT_RICH_HEADER:
+            args->output_params.rich_header = true;
+            break;
+        case OPT_OUTPUT_NO_ELLIPSIZE:
+            args->output_params.ellipsize = false;
+            break;
+
         case OPT_OUTPUT_TS_CONV:
             ecode = set_output_ts_conv(&args->output_params, optarg);
             break;
@@ -1230,6 +1245,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             ecode = set_output_duration_conv(&args->output_params, optarg);
             break;
 
+        // progress bar
         case OPT_PROGRESS_BAR_TYPE:
             ecode = set_progress_bar_type(&args->progress_bar_type, optarg);
             break;
@@ -1237,19 +1253,34 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             args->progress_bar_dest = optarg;
             break;
 
-        case OPT_HELP:  // help
+        // other
+        case OPT_NUM_THREADS:
+            ecode = set_num_threads(optarg);
+            break;
+        case OPT_TIME_ZONE:
+            time_zone_optarg = optarg;
+            break;
+        case OPT_NO_TPUT:
+            args->use_tput = false;
+            break;
+        case OPT_NO_BFINDEX:
+            args->use_bfindex = false;
+            break;
+
+        // getting help
+        case OPT_HELP:
             if (root_proc) {
                 printf("%s\n\n", USAGE_STRING);
                 printf("For the complete documentation see man 1 " PACKAGE_NAME
                        ".\n");
             }
             return E_HELP;
-
         case OPT_VERSION:  // version
             if (root_proc) {
                 printf("%s\n", PACKAGE_STRING);
             }
             return E_HELP;
+
 
         default:  // '?' or '0'
             return E_ARG;

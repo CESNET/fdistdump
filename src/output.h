@@ -109,6 +109,8 @@ struct output_params {
 
     // format
     output_format_t format;
+    bool ellipsize;
+    bool rich_header;
 
     // conversions
     output_ts_conv_t ts_conv;
@@ -130,10 +132,13 @@ void
 output_free(void);
 
 void
-print_rec(const uint8_t *const data);
+print_stream_names();
 
 void
-print_mem(lnf_mem_t *const lnf_mem, const uint64_t limit);
+print_stream_next(const uint8_t *const data);
+
+void
+print_batch(lnf_mem_t *const lnf_mem, const uint64_t limit);
 
 void
 print_processed_summ(const struct processed_summ *const s,

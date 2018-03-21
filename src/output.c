@@ -42,6 +42,7 @@
 
 #include <assert.h>             // for assert
 #include <errno.h>              // for errno
+#include <float.h>              // for DBL_MAX
 #include <inttypes.h>           // for fixed-width integer types
 #include <stdio.h>              // for printf, snprintf, putchar, puts
 #include <string.h>             // for strlen
@@ -67,13 +68,23 @@
 #include "fields.h"             // for struct fields, field_get_*, ...
 
 
-#define PRETTY_PRINT_SEP " "
-#define PRETTY_PRINT_PADDING_WIDTH 5
-#define COL_WIDTH_RESERVE 4
 #define CSV_SEP ','
 #define TCP_FLAG_UNSET_CHAR '.'
 #define NAN_STR "NaN"
 #define ABSENT_STR "absent"
+
+#define METRIC_PREFIX_THRESHOLD 1000.0
+#define BINARY_PREFIX_THRESHOLD 1024.0
+
+#define UINT8_T_FORMAT  "%" PRIu8
+#define UINT16_T_FORMAT "%" PRIu16
+#define UINT32_T_FORMAT "%" PRIu32
+#define UINT64_T_FORMAT "%" PRIu64
+#define DOUBLE_FORMAT   "%.1f"
+#define DOUBLE_PRINT_MAX 9999999999.0  // DBL_MAX is too big
+
+#define PROTECTIVE_PADDING 4  // has to be >= 0
+#define ELLIPSIS "..."  // do not use unicode, more pain than gain
 
 #if MAX_STR_LEN < INET6_ADDRSTRLEN
 #error "MAX_STR_LEN < INET6_ADDRSTRLEN"
@@ -83,6 +94,10 @@
 /*
  * Data types declarations.
  */
+typedef enum {
+    ALIGNMENT_LEFT,
+    ALIGNMENT_RIGHT,
+} alignment_t;
 typedef const char *(*field_to_str_t)(const void *const);
 
 
@@ -92,7 +107,11 @@ typedef const char *(*field_to_str_t)(const void *const);
 struct {
     field_to_str_t *field_to_str_cb;
     size_t *field_offset;
+
     size_t *column_width;
+    alignment_t *columnt_alignment;
+
+    size_t max_field_size;
 
     bool first_item;  // first item will not print '\n' before
 } o_ctx;
@@ -252,7 +271,7 @@ static const char *ip_proto_str_table[] = {
 };
 
 static const char *const decimal_unit_table[] = {
-    "",   // no unit
+    " ",  // no unit
     "k",  // kilo
     "M",  // mega
     "G",  // giga
@@ -264,7 +283,7 @@ static const char *const decimal_unit_table[] = {
 };
 
 static const char *const binary_unit_table[] = {
-    "",    // no unit
+    "  ",  // no unit
     "Ki",  // kibi
     "Mi",  // mebi
     "Gi",  // gibi
@@ -318,7 +337,7 @@ timestamp_to_str(const uint64_t *ts)
 
     switch (output_params.ts_conv) {
     case OUTPUT_TS_CONV_NONE:
-        snprintf(global_str, sizeof (global_str), "%" PRIu64, *ts);
+        snprintf(global_str, sizeof (global_str), UINT64_T_FORMAT, *ts);
         break;
     case OUTPUT_TS_CONV_PRETTY: {
         const time_t calendar_seconds = *ts / 1000;         // only seconds
@@ -347,6 +366,20 @@ timestamp_to_str(const uint64_t *ts)
 
     return global_str;
 }
+static size_t
+timestamp_to_str_strlen(void)
+{
+    switch (output_params.ts_conv) {
+    case OUTPUT_TS_CONV_NONE:
+        return snprintf(NULL, 0, UINT64_T_FORMAT, UINT64_MAX);
+    case OUTPUT_TS_CONV_PRETTY:
+        return STRLEN_STATIC("YYYY-MM-DD HH:mm:ss.mls");
+    case OUTPUT_TS_CONV_UNSET:
+        assert(!"illegal timestamp conversion");
+    default:
+        assert(!"unknown timestamp conversion");
+    }
+}
 
 /**
  * @brief TODO
@@ -359,94 +392,120 @@ static const char *
 double_volume_to_str(const double *const volume)
 {
     double volume_conv = *volume;
-    const char *const *unit_table;
     uint64_t unit_table_idx = 0;
 
     switch (output_params.volume_conv) {
     case OUTPUT_VOLUME_CONV_NONE:
-        break;
+        snprintf(global_str, sizeof (global_str), DOUBLE_FORMAT, volume_conv);
+        return global_str;
 
     case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
-        unit_table = decimal_unit_table;
-        while (volume_conv > 1000.0
+        while (volume_conv > METRIC_PREFIX_THRESHOLD
                && unit_table_idx + 1 < ARRAY_SIZE(decimal_unit_table))
         {
             unit_table_idx++;
-            volume_conv /= 1000.0;
+            volume_conv /= METRIC_PREFIX_THRESHOLD;
         }
-        break;
+        snprintf(global_str, sizeof (global_str), DOUBLE_FORMAT " %s",
+                 volume_conv, decimal_unit_table[unit_table_idx]);
+        return global_str;
 
     case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
-        unit_table = binary_unit_table;
-        while (volume_conv > 1024.0
+        while (volume_conv > BINARY_PREFIX_THRESHOLD
                && unit_table_idx + 1 < ARRAY_SIZE(binary_unit_table))
         {
             unit_table_idx++;
-            volume_conv /= 1024.0;
+            volume_conv /= BINARY_PREFIX_THRESHOLD;
         }
-        break;
+        snprintf(global_str, sizeof (global_str), DOUBLE_FORMAT " %s",
+                 volume_conv, binary_unit_table[unit_table_idx]);
+        return global_str;
 
     case OUTPUT_VOLUME_CONV_UNSET:
         assert(!"illegal volume conversion");
     default:
         assert(!"unknown volume conversion");
     }
+}
+static size_t
+double_volume_to_str_strlen(void)
+{
+    switch (output_params.volume_conv) {
+    case OUTPUT_VOLUME_CONV_NONE:
+        return snprintf(NULL, 0, DOUBLE_FORMAT, DOUBLE_PRINT_MAX);
+    case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
+        return snprintf(NULL, 0, DOUBLE_FORMAT " %s",
+                        METRIC_PREFIX_THRESHOLD - 0.1, decimal_unit_table[0]);
+    case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
+        return snprintf(NULL, 0, DOUBLE_FORMAT " %s",
+                        BINARY_PREFIX_THRESHOLD - 0.1, binary_unit_table[0]);
 
-    if (unit_table_idx == 0) {  // small number or no conversion
-        snprintf(global_str, sizeof (global_str), "%.1f", volume_conv);
-    } else {  // converted unit plus unit string from unit table
-        snprintf(global_str, sizeof (global_str), "%.1f %s", volume_conv,
-                 unit_table[unit_table_idx]);
+    case OUTPUT_VOLUME_CONV_UNSET:
+        assert(!"illegal volume conversion");
+    default:
+        assert(!"unknown volume conversion");
     }
-
-    return global_str;
 }
 
 static const char *
 volume_to_str(const uint64_t *const volume)
 {
     double volume_conv = *volume;
-    const char *const *unit_table;
     uint64_t unit_table_idx = 0;
 
     switch (output_params.volume_conv) {
     case OUTPUT_VOLUME_CONV_NONE:
-        break;
+        snprintf(global_str, sizeof (global_str), UINT64_T_FORMAT, *volume);
+        return global_str;
 
     case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
-        unit_table = decimal_unit_table;
-        while (volume_conv > 1000.0
+        while (volume_conv > METRIC_PREFIX_THRESHOLD
                && unit_table_idx + 1 < ARRAY_SIZE(decimal_unit_table))
         {
             unit_table_idx++;
-            volume_conv /= 1000.0;
+            volume_conv /= METRIC_PREFIX_THRESHOLD;
         }
-        break;
+        snprintf(global_str, sizeof (global_str), DOUBLE_FORMAT " %s",
+                 volume_conv, decimal_unit_table[unit_table_idx]);
+        return global_str;
 
     case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
-        unit_table = binary_unit_table;
-        while (volume_conv > 1024.0
+        while (volume_conv > BINARY_PREFIX_THRESHOLD
                && unit_table_idx + 1 < ARRAY_SIZE(binary_unit_table))
         {
             unit_table_idx++;
-            volume_conv /= 1024.0;
+            volume_conv /= BINARY_PREFIX_THRESHOLD;
         }
-        break;
+        snprintf(global_str, sizeof (global_str), DOUBLE_FORMAT " %s",
+                 volume_conv, binary_unit_table[unit_table_idx]);
+        return global_str;
 
     case OUTPUT_VOLUME_CONV_UNSET:
         assert(!"illegal volume conversion");
     default:
         assert(!"unknown volume conversion");
     }
+}
+static size_t
+volume_to_str_strlen(void)
+{
+    switch (output_params.volume_conv) {
+    case OUTPUT_VOLUME_CONV_NONE:
+        return snprintf(NULL, 0, UINT64_T_FORMAT, UINT64_MAX);
 
-    if (unit_table_idx == 0) {  // small number or no conversion
-        snprintf(global_str, sizeof (global_str), "%" PRIu64, *volume);
-    } else {  // converted unit plus unit string from unit table
-        snprintf(global_str, sizeof (global_str), "%.1f %s", volume_conv,
-                 unit_table[unit_table_idx]);
+    case OUTPUT_VOLUME_CONV_METRIC_PREFIX:
+        return snprintf(NULL, 0, DOUBLE_FORMAT " %s",
+                        METRIC_PREFIX_THRESHOLD - 0.1, decimal_unit_table[0]);
+
+    case OUTPUT_VOLUME_CONV_BINARY_PREFIX:
+        return snprintf(NULL, 0, DOUBLE_FORMAT " %s",
+                        BINARY_PREFIX_THRESHOLD - 0.1, binary_unit_table[0]);
+
+    case OUTPUT_VOLUME_CONV_UNSET:
+        assert(!"illegal volume conversion");
+    default:
+        assert(!"unknown volume conversion");
     }
-
-    return global_str;
 }
 
 /**
@@ -483,6 +542,20 @@ tcp_flags_to_str(const uint8_t *const flags)
 
     return global_str;
 }
+static size_t
+tcp_flags_to_str_strlen(void)
+{
+    switch (output_params.tcp_flags_conv) {
+    case OUTPUT_TCP_FLAGS_CONV_NONE:
+        return snprintf(NULL, 0, UINT8_T_FORMAT, UINT8_MAX);
+    case OUTPUT_TCP_FLAGS_CONV_STR:
+        return ARRAY_SIZE(tcp_flags_table);
+    case OUTPUT_TCP_FLAGS_CONV_UNSET:
+        assert(!"illegal IP protocol conversion");
+    default:
+        assert(!"unknown IP protocol conversion");
+    }
+}
 
 /**
  * @brief TODO
@@ -512,18 +585,31 @@ ip_proto_to_str(const uint8_t *const proto)
         assert(!"unknown ip protocol conversion");
     }
 }
+static size_t
+ip_proto_to_str_strlen(void)
+{
+    switch (output_params.ip_proto_conv) {
+    case OUTPUT_IP_PROTO_CONV_NONE:
+        return snprintf(NULL, 0, UINT8_T_FORMAT, UINT8_MAX);
+    case OUTPUT_IP_PROTO_CONV_STR:
+        return 9;  // for no good reason
+    case OUTPUT_IP_PROTO_CONV_UNSET:
+        assert(!"illegal ip protocol conversion");
+    default:
+        assert(!"unknown ip protocol conversion");
+    }
+}
 
 /**
  * @brief TODO
  *
  * @param duration
  *
- * @return 
+ * @return
  */
 static const char *
 duration_to_str(const uint64_t *const duration)
 {
-
     switch (output_params.duration_conv) {
     case OUTPUT_DURATION_CONV_NONE:
         snprintf(global_str, sizeof (global_str), "%" PRIu64, *duration);
@@ -552,6 +638,20 @@ duration_to_str(const uint64_t *const duration)
 
     return global_str;
 }
+static size_t
+duration_to_str_strlen(void)
+{
+    switch (output_params.duration_conv) {
+    case OUTPUT_DURATION_CONV_NONE:
+        return snprintf(NULL, 0, UINT64_T_FORMAT, UINT64_MAX);
+    case OUTPUT_DURATION_CONV_STR:
+        return STRLEN_STATIC("00:00:00.000");
+    case OUTPUT_DURATION_CONV_UNSET:
+        assert(!"illegal duration conversion");
+    default:
+        assert(!"unknown duration conversion");
+    }
+}
 
 /**
  * @brief Convert libnf IP address to a string.
@@ -570,8 +670,8 @@ libnf_addr_to_str(const lnf_ip_t *const addr)
 {
     switch (output_params.ip_addr_conv) {
     case OUTPUT_IP_ADDR_CONV_NONE:
-        snprintf(global_str, sizeof (global_str),
-                 "%" PRIu32 ":%" PRIu32 ":%" PRIu32 ":%" PRIu32,
+        snprintf(global_str, sizeof (global_str), UINT32_T_FORMAT ":"
+                 UINT32_T_FORMAT ":" UINT32_T_FORMAT ":" UINT32_T_FORMAT,
                  ntohl(addr->data[0]), ntohl(addr->data[1]),
                  ntohl(addr->data[2]), ntohl(addr->data[3]));
         break;
@@ -595,6 +695,22 @@ libnf_addr_to_str(const lnf_ip_t *const addr)
 
     return global_str;
 }
+static size_t
+libnf_addr_to_str_strlen(void)
+{
+    switch (output_params.ip_addr_conv) {
+    case OUTPUT_IP_ADDR_CONV_NONE:
+        return snprintf(NULL, 0, UINT32_T_FORMAT ":" UINT32_T_FORMAT ":"
+                        UINT32_T_FORMAT ":" UINT32_T_FORMAT, UINT32_MAX,
+                        UINT32_MAX, UINT32_MAX, UINT32_MAX);
+    case OUTPUT_IP_ADDR_CONV_STR:
+        return STRLEN_STATIC("255.255.255.255");  // IPv6 will be ellipsized
+    case OUTPUT_IP_ADDR_CONV_UNSET:
+        assert(!"illegal IP address conversion");
+    default:
+        assert(!"unknown IP address conversion");
+    }
+}
 
 /**
  * @brief Convert libnf MAC address to a string.
@@ -604,12 +720,17 @@ libnf_addr_to_str(const lnf_ip_t *const addr)
  * @return Static read-only string MAC address representation.
  */
 static const char *
-mylnf_mac_to_str(const lnf_mac_t *const mac)
+libnf_mac_to_str(const lnf_mac_t *const mac)
 {
     snprintf(global_str, 18, "%02x:%02x:%02x:%02x:%02x:%02x", mac->data[0],
              mac->data[1], mac->data[2], mac->data[3], mac->data[4],
              mac->data[5]);
     return global_str;
+}
+static size_t
+libnf_mac_to_str_strlen(void)
+{
+    return STRLEN_STATIC("00:00:00:00:00:00");
 }
 
 /**
@@ -617,13 +738,18 @@ mylnf_mac_to_str(const lnf_mac_t *const mac)
  *
  * @param u8
  *
- * @return 
+ * @return
  */
 static const char *
 uint8_t_to_str(const uint8_t *const u8)
 {
-    snprintf(global_str, sizeof (global_str), "%" PRIu8, *u8);
+    snprintf(global_str, sizeof (global_str), UINT8_T_FORMAT, *u8);
     return global_str;
+}
+static size_t
+uint8_t_to_str_strlen(void)
+{
+    return snprintf(NULL, 0, UINT8_T_FORMAT, UINT8_MAX);
 }
 
 /**
@@ -631,13 +757,18 @@ uint8_t_to_str(const uint8_t *const u8)
  *
  * @param u16
  *
- * @return 
+ * @return
  */
 static const char *
 uint16_t_to_str(const uint16_t *const u16)
 {
-    snprintf(global_str, sizeof (global_str), "%" PRIu16, *u16);
+    snprintf(global_str, sizeof (global_str), UINT16_T_FORMAT, *u16);
     return global_str;
+}
+static size_t
+uint16_t_to_str_strlen(void)
+{
+    return snprintf(NULL, 0, UINT16_T_FORMAT, UINT16_MAX);
 }
 
 /**
@@ -645,13 +776,18 @@ uint16_t_to_str(const uint16_t *const u16)
  *
  * @param u32
  *
- * @return 
+ * @return
  */
 static const char *
 uint32_t_to_str(const uint32_t *const u32)
 {
-    snprintf(global_str, sizeof (global_str), "%" PRIu32, *u32);
+    snprintf(global_str, sizeof (global_str), UINT32_T_FORMAT, *u32);
     return global_str;
+}
+static size_t
+uint32_t_to_str_strlen(void)
+{
+    return snprintf(NULL, 0, UINT32_T_FORMAT, UINT32_MAX);
 }
 
 /**
@@ -659,13 +795,18 @@ uint32_t_to_str(const uint32_t *const u32)
  *
  * @param u64
  *
- * @return 
+ * @return
  */
 static const char *
 uint64_t_to_str(const uint64_t *const u64)
 {
-    snprintf(global_str, sizeof (global_str), "%" PRIu64, *u64);
+    snprintf(global_str, sizeof (global_str), UINT64_T_FORMAT, *u64);
     return global_str;
+}
+static size_t
+uint64_t_to_str_strlen(void)
+{
+    return snprintf(NULL, 0, UINT64_T_FORMAT, UINT64_MAX);
 }
 
 /**
@@ -673,13 +814,18 @@ uint64_t_to_str(const uint64_t *const u64)
  *
  * @param d
  *
- * @return 
+ * @return
  */
 static const char *
 double_to_str(const double *const d)
 {
-    snprintf(global_str, sizeof (global_str), "%.1f", *d);
+    snprintf(global_str, sizeof (global_str), DOUBLE_FORMAT, *d);
     return global_str;
+}
+static size_t
+double_to_str_strlen(void)
+{
+    return snprintf(NULL, 0, DOUBLE_FORMAT, DOUBLE_PRINT_MAX);
 }
 
 /**
@@ -687,13 +833,18 @@ double_to_str(const double *const d)
  *
  * @param str
  *
- * @return 
+ * @return
  */
 static const char *
 string_to_str(const char *const str)
 {
     snprintf(global_str, sizeof (global_str), "%s", str);
     return global_str;
+}
+static size_t
+string_to_str_strlen(void)
+{
+    return 10;  // for no good reason
 }
 
 /**
@@ -704,7 +855,7 @@ string_to_str(const char *const str)
  * @return Textual representation of the record (in static memory).
  */
 static const char *
-mylnf_brec_to_str(const lnf_brec1_t *brec)
+libnf_brec_to_str(const lnf_brec1_t *brec)
 {
     static char res[MAX_STR_LEN];
     char *str_term = res;
@@ -774,6 +925,12 @@ mylnf_brec_to_str(const lnf_brec1_t *brec)
     }
 
     return res;
+}
+static size_t
+libnf_brec_to_str_strlen(void)
+{
+    lnf_brec1_t brec = { 0 };
+    return strlen(libnf_brec_to_str(&brec));
 }
 
 /**
@@ -848,16 +1005,17 @@ get_field_to_str_callback(const int field_id)
             to_str_func = (field_to_str_t)libnf_addr_to_str;
             break;
         case LNF_MAC:
-            to_str_func = (field_to_str_t)mylnf_mac_to_str;
+            to_str_func = (field_to_str_t)libnf_mac_to_str;
             break;
         case LNF_BASIC_RECORD1:
-            to_str_func = (field_to_str_t)mylnf_brec_to_str;
+            to_str_func = (field_to_str_t)libnf_brec_to_str;
             break;
         case LNF_STRING:
             to_str_func = (field_to_str_t)string_to_str;
             break;
         case LNF_NONE:
         case LNF_MPLS:
+        case LNF_ACL:
             assert(!"unimplemented LNF data type");
 
         default:
@@ -885,32 +1043,6 @@ field_to_str(const int field_id, const void *const data)
     return get_field_to_str_callback(field_id)(data);
 }
 
-static void
-print_name(const int field_id, const size_t padding_width, const bool last)
-{
-    const char *const field_name = field_get_name(field_id);
-
-    if (last) {  // last field in record, no trailing spacing or CSV separator
-        puts(field_name);  // puts() appends a newline
-        return;
-    }
-
-    switch (output_params.format) {
-    case OUTPUT_FORMAT_PRETTY:
-        printf("%-*s", (int)padding_width, field_name);
-        break;
-
-    case OUTPUT_FORMAT_CSV:
-        printf("%s%c" , field_name, CSV_SEP);
-        break;
-
-    case OUTPUT_FORMAT_UNSET:
-        assert(!"illegal output format");
-    default:
-        assert(!"unknown output format");
-    }
-}
-
 /**
  * @brief TODO
  *
@@ -918,31 +1050,84 @@ print_name(const int field_id, const size_t padding_width, const bool last)
  * width, it will be padded with spaces on the right. The last field is printed
  * without any alignment or padding.
  *
- * | string_width | space_width |
- * |192.168.1.1~~~|~~~~~~~~~~~~~|
+ * |  col_width   | PROTECTIVE_PADDING |
+ * 192.168.1.1~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
  * @param string
- * @param string_width
+ * @param col_width
  * @param space_width
  * @param last
  */
 static void
-print_field(const char *const string, const size_t string_width,
-            const size_t space_width, const bool last)
+print_field(const char *const string, const int col_width,
+            const alignment_t alignment, const bool last)
 {
-    if (last) {  // last field in record, no trailing spacing or CSV separator
-        puts(string);  // puts() appends a newline
-        return;
-    }
+    assert(string && col_width > 0);
 
     switch (output_params.format) {
     case OUTPUT_FORMAT_PRETTY:
-        printf("%-*s%*s", (int)string_width, string, (int)space_width,
-               PRETTY_PRINT_SEP);
+    {
+        const size_t string_len = strlen(string);
+        const ssize_t col_width_remainder = col_width - string_len;
+        size_t padding_width;
+
+        char aligned_and_padded_string[string_len + col_width_remainder + PROTECTIVE_PADDING];
+        char *pos = aligned_and_padded_string;
+
+        if (col_width_remainder < 0 && output_params.ellipsize) {
+            // not enough space: ellipsize and print the whole padding
+            const size_t copy_len = col_width - STRLEN_STATIC(ELLIPSIS);
+            memcpy(pos, string, copy_len);
+            pos += copy_len;
+            memcpy(pos, ELLIPSIS, STRLEN_STATIC(ELLIPSIS));
+            pos += STRLEN_STATIC(ELLIPSIS);
+            padding_width = PROTECTIVE_PADDING;
+        } else {
+            // enough space or ellipsization disabled: print the whole string
+            // right alignment means spaces on the left
+            if (alignment == ALIGNMENT_RIGHT && col_width_remainder > 0) {
+                memset(pos, ' ', col_width_remainder);
+                pos += col_width_remainder;
+            }
+
+            // the string
+            memcpy(pos, string, string_len);
+            pos += string_len;
+
+            // left alignment means spaces on the right + protective padding
+            if (col_width_remainder >= 0) {
+                if (alignment == ALIGNMENT_LEFT) {
+                    padding_width = col_width_remainder + PROTECTIVE_PADDING;
+                } else {
+                    padding_width = PROTECTIVE_PADDING;
+                }
+            } else if (col_width_remainder <= PROTECTIVE_PADDING) {
+                padding_width = 1;
+            } else {
+                padding_width = PROTECTIVE_PADDING - (-col_width_remainder);
+            }
+        }
+
+        // add trailing spaces if the field is not last one
+        if (!last) {
+            memset(pos, ' ', padding_width);
+            pos += padding_width;
+        }
+
+        // handy to debug output
+        //*pos = '|';
+        //pos++;
+
+        *pos = '\0';  // terminate
+        fputs(aligned_and_padded_string, stdout);
         break;
+    }
 
     case OUTPUT_FORMAT_CSV:
-        printf("%s%c" , string, CSV_SEP);
+        fputs(string, stdout);
+        if (!last) {  // no trailing CSV separator for the last field
+            putchar(CSV_SEP);
+        }
         break;
 
     case OUTPUT_FORMAT_UNSET:
@@ -955,28 +1140,102 @@ print_field(const char *const string, const size_t string_width,
 /**
  * @brief TODO
  *
- * @param data
+ * @param to_str_func
+ *
+ * @return
  */
-static void
-print_rec_names(const uint8_t *const data)
+static size_t
+get_column_width_estimate(field_to_str_t to_str_func)
 {
-    for (size_t i = 0; i < fields->all_cnt; ++i) {
-        const bool last_column = (i == (fields->all_cnt - 1));
-        const char *const header_str = field_get_name(fields->all[i].id);
-        const size_t header_str_len = strlen(header_str);
-        const char *const first_field_str =
-            o_ctx.field_to_str_cb[i](data + o_ctx.field_offset[i]);
-        const size_t first_field_str_len = strlen(first_field_str);
-
-        o_ctx.column_width[i] = MAX(header_str_len, first_field_str_len);
-        o_ctx.column_width[i] += COL_WIDTH_RESERVE;
-
-        print_name(fields->all[i].id, o_ctx.column_width[i]
-                   + PRETTY_PRINT_PADDING_WIDTH - COL_WIDTH_RESERVE,
-                   last_column);
+    if (to_str_func == (field_to_str_t)timestamp_to_str) {
+        return timestamp_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)double_volume_to_str) {
+        return double_volume_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)volume_to_str) {
+        return volume_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)tcp_flags_to_str) {
+        return tcp_flags_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)ip_proto_to_str) {
+        return ip_proto_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)duration_to_str) {
+        return duration_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)libnf_addr_to_str) {
+        return libnf_addr_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)libnf_mac_to_str) {
+        return libnf_mac_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)uint8_t_to_str) {
+        return uint8_t_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)uint16_t_to_str) {
+        return uint16_t_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)uint32_t_to_str) {
+        return uint32_t_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)uint64_t_to_str) {
+        return uint64_t_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)double_to_str) {
+        return double_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)string_to_str) {
+        return string_to_str_strlen();
+    } else if (to_str_func == (field_to_str_t)libnf_brec_to_str) {
+        return libnf_brec_to_str_strlen();
+    } else {
+        assert(!"unknown to_str function");
     }
 }
 
+/**
+ * @brief TODO
+ *
+ * @param to_str_func
+ *
+ * @return
+ */
+static alignment_t
+get_column_alignment(field_to_str_t to_str_func)
+{
+    if (to_str_func == (field_to_str_t)timestamp_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)double_volume_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)volume_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)tcp_flags_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)ip_proto_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)duration_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)libnf_addr_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)libnf_mac_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)uint8_t_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)uint16_t_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)uint32_t_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)uint64_t_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)double_to_str) {
+        return ALIGNMENT_RIGHT;
+    } else if (to_str_func == (field_to_str_t)string_to_str) {
+        return ALIGNMENT_LEFT;
+    } else if (to_str_func == (field_to_str_t)libnf_brec_to_str) {
+        return ALIGNMENT_LEFT;
+    } else {
+        assert(!"unknown to_str function");
+    }
+}
+
+/**
+ * @brief TODO
+ *
+ * @param idx
+ * @param lnf_rec
+ * @param buff
+ *
+ * @return
+ */
 static const char *
 get_field_str(const size_t idx, lnf_rec_t *const lnf_rec, char *const buff)
 {
@@ -998,11 +1257,9 @@ get_field_str(const size_t idx, lnf_rec_t *const lnf_rec, char *const buff)
  *
  * @param lnf_mem
  * @param rec_limit
- * @param field_max_size
  */
 static void
-calc_column_widths(lnf_mem_t *const lnf_mem, const size_t rec_limit,
-                   const size_t field_max_size)
+set_column_widths_exactly(lnf_mem_t *const lnf_mem, const size_t rec_limit)
 {
     // initialize a libnf record
     lnf_rec_t *lnf_rec;
@@ -1016,7 +1273,7 @@ calc_column_widths(lnf_mem_t *const lnf_mem, const size_t rec_limit,
 
     // loop through all records
     uint64_t rec_cntr = 0;  // aka lines counter
-    char buff[field_max_size];
+    char buff[o_ctx.max_field_size];
     while (cursor && rec_limit > rec_cntr++) {
         lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
         assert(lnf_ret == LNF_OK);
@@ -1036,46 +1293,126 @@ calc_column_widths(lnf_mem_t *const lnf_mem, const size_t rec_limit,
 
 /**
  * @brief TODO
- *
- * @param lnf_mem
- * @param rec_limit
- * @param field_max_size
  */
 static void
-print_records(lnf_mem_t *const lnf_mem, const size_t rec_limit,
-              const size_t field_max_size)
+print_names_enriched_aggr(void)
 {
-    // initialize a libnf record
-    lnf_rec_t *lnf_rec;
-    int lnf_ret = lnf_rec_init(&lnf_rec);
-    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+    assert(fields->aggr_keys_cnt > 0);
 
-    // initialize the cursor to point to the first record in the memory
-    lnf_mem_cursor_t *cursor;
-    lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
-    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+    char buff[256];
+    const bool have_sort_key = (fields->sort_key.field != NULL);
+    bool sort_key_is_one_of_aggregation_keys = false;
+    size_t fields_cntr = 0;
 
-    // loop through all records
-    uint64_t rec_cntr = 0;  // aka lines counter
-    char buff[field_max_size];
-    while (cursor && rec_limit > rec_cntr++) {
-        lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
-        assert(lnf_ret == LNF_OK);
+    // loop through aggregation keys
+    for (size_t i = 0; i < fields->aggr_keys_cnt; ++i) {
+        const int field_id = fields->aggr_keys[i].field->id;
+        const char *const field_name = field_get_name(field_id);
 
-        // loop through all fields in the record
-        for (size_t i = 0; i < fields->all_cnt; ++i) {
-            const char *const field_str = get_field_str(i, lnf_rec, buff);
-            const bool last_column = (i == (fields->all_cnt - 1));
-
-            print_field(field_str, o_ctx.column_width[i],
-                        PRETTY_PRINT_PADDING_WIDTH, last_column);
+        if (have_sort_key
+                && fields->sort_key.field == fields->aggr_keys[i].field) {
+            // this aggregation key is also the sort key
+            snprintf(buff, sizeof (buff), "%s (%s){%s}", field_name, "key",
+                    libnf_sort_dir_to_str(fields->sort_key.direction));
+            sort_key_is_one_of_aggregation_keys = true;
+        } else {
+            snprintf(buff, sizeof (buff), "%s (%s)", field_name, "key");
         }
 
-        lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
-        assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+        MAX_ASSIGN(o_ctx.column_width[i], strlen(buff));
+
+        const bool last_column = (i == (fields->all_cnt - 1));
+        print_field(buff, o_ctx.column_width[i], o_ctx.columnt_alignment[i],
+                    last_column);
+        fields_cntr++;
     }
 
-    lnf_rec_free(lnf_rec);
+    // print sort key name if there is a sort key and is not one of aggr. keys
+    if (have_sort_key && !sort_key_is_one_of_aggregation_keys) {
+        snprintf(buff, sizeof (buff), "%s {%s}",
+                field_get_name(fields->sort_key.field->id),
+                libnf_sort_dir_to_str(fields->sort_key.direction));
+
+        MAX_ASSIGN(o_ctx.column_width[fields_cntr], strlen(buff));
+
+        const bool last_column = (fields_cntr == (fields->all_cnt - 1));
+        print_field(buff, o_ctx.column_width[fields_cntr],
+                    o_ctx.columnt_alignment[fields_cntr], last_column);
+        fields_cntr++;
+    }
+
+    // loop through all output fields
+    for (size_t i = 0; i < fields->output_fields_cnt; ++i) {
+        const int id = fields->output_fields[i].field->id;
+        const char *func;
+        if (IN_RANGE_INCL(id, LNF_FLD_CALC_DURATION, LNF_FLD_CALC_BPP)) {
+            func = "calc";
+        } else {
+            func = libnf_aggr_func_to_str(fields->output_fields[i].aggr_func);
+        }
+        snprintf(buff, sizeof (buff), "%s [%s]", field_get_name(id), func);
+
+        MAX_ASSIGN(o_ctx.column_width[fields_cntr], strlen(buff));
+
+        const bool last_column = (fields_cntr  == (fields->all_cnt - 1));
+        print_field(buff, o_ctx.column_width[fields_cntr],
+                    o_ctx.columnt_alignment[fields_cntr], last_column);
+        fields_cntr++;
+    }
+}
+
+/**
+ * @brief TODO
+ */
+static void
+print_names_enriched_sort(void)
+{
+    assert(fields->aggr_keys_cnt == 0 && fields->sort_key.field);
+
+    size_t fields_cntr = 0;
+
+    // print sort key name
+    char buff[256];
+    snprintf(buff, sizeof (buff), "%s {%s}",
+            field_get_name(fields->sort_key.field->id),
+            libnf_sort_dir_to_str(fields->sort_key.direction));
+
+    MAX_ASSIGN(o_ctx.column_width[fields_cntr], strlen(buff));
+
+    bool last_column = (fields_cntr == (fields->all_cnt - 1));
+    print_field(buff, o_ctx.column_width[fields_cntr],
+                o_ctx.columnt_alignment[fields_cntr], last_column);
+    fields_cntr++;
+
+    // loop through all output fields
+    for (size_t i = 0; i < fields->output_fields_cnt; ++i) {
+        const char *const field_name =
+            field_get_name(fields->output_fields[i].field->id);
+
+        MAX_ASSIGN(o_ctx.column_width[fields_cntr], strlen(field_name));
+
+        last_column = (fields_cntr  == (fields->all_cnt - 1));
+        print_field(field_name, o_ctx.column_width[fields_cntr],
+                    o_ctx.columnt_alignment[fields_cntr], last_column);
+        fields_cntr++;
+    }
+}
+
+/**
+ * @brief TODO
+ */
+static void
+print_names_only()
+{
+    for (size_t i = 0; i < fields->all_cnt; ++i) {
+        const bool last_column = (i == (fields->all_cnt - 1));
+        const char *const name_str = field_get_name(fields->all[i].id);
+        const size_t name_str_len = strlen(name_str);
+
+        MAX_ASSIGN(o_ctx.column_width[i], name_str_len);
+        print_field(name_str, o_ctx.column_width[i], o_ctx.columnt_alignment[i],
+                    last_column);
+    }
 }
 
 
@@ -1096,14 +1433,15 @@ output_init(struct output_params op, const struct fields *const fields_param)
     output_params = op;
     fields = fields_param;
 
-    o_ctx.field_to_str_cb = malloc(fields->all_cnt *
-                                   sizeof (*o_ctx.field_to_str_cb));
-    o_ctx.field_offset = malloc(fields->all_cnt *
-                                   sizeof (*o_ctx.field_offset));
-    o_ctx.column_width = malloc(fields->all_cnt *
-                                   sizeof (*o_ctx.column_width));
+    o_ctx.field_to_str_cb = malloc(
+            fields->all_cnt * sizeof (*o_ctx.field_to_str_cb));
+    o_ctx.field_offset = malloc(fields->all_cnt * sizeof (*o_ctx.field_offset));
+
+    o_ctx.column_width = malloc(fields->all_cnt * sizeof (*o_ctx.column_width));
+    o_ctx.columnt_alignment = malloc(
+            fields->all_cnt * sizeof (*o_ctx.columnt_alignment));
     ABORT_IF(!o_ctx.field_to_str_cb || !o_ctx.field_offset
-             || !o_ctx.column_width, E_MEM,
+             || !o_ctx.column_width || !o_ctx.columnt_alignment, E_MEM,
              "output context memory allocation failed");
 
     size_t off = 0;
@@ -1111,6 +1449,12 @@ output_init(struct output_params op, const struct fields *const fields_param)
         o_ctx.field_to_str_cb[i] = get_field_to_str_callback(fields->all[i].id);
         o_ctx.field_offset[i] = off;
         off += fields->all[i].size;
+        MAX_ASSIGN(o_ctx.max_field_size, fields->all[i].size);
+
+        o_ctx.column_width[i] =
+            get_column_width_estimate(o_ctx.field_to_str_cb[i]);
+        o_ctx.columnt_alignment[i] =
+            get_column_alignment(o_ctx.field_to_str_cb[i]);
     }
 
     o_ctx.first_item = true;
@@ -1122,9 +1466,30 @@ output_init(struct output_params op, const struct fields *const fields_param)
 void
 output_free(void)
 {
+    assert(o_ctx.field_to_str_cb);
+
     free(o_ctx.field_to_str_cb);
     free(o_ctx.field_offset);
     free(o_ctx.column_width);
+    free(o_ctx.columnt_alignment);
+}
+
+/**
+ * @brief TODO
+ */
+void
+print_stream_names()
+{
+    assert(o_ctx.field_to_str_cb);
+
+    if (output_params.print_records != OUTPUT_ITEM_YES) {
+        return;
+    }
+
+    o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
+
+    print_names_only();
+    putchar('\n');
 }
 
 /**
@@ -1133,29 +1498,23 @@ output_free(void)
  * @param data
  */
 void
-print_rec(const uint8_t *const data)
+print_stream_next(const uint8_t *const data)
 {
+    assert(o_ctx.field_to_str_cb);
+
     if (output_params.print_records != OUTPUT_ITEM_YES) {
         return;
     }
 
-    static bool first_rec = true;
-    if (first_rec) {
-        first_rec = false;
-        o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
-        print_rec_names(data);
-    }
-
     // loop through the fields in the record
-    // TODO: add width table for certain fields (IP, ...)
     for (size_t i = 0; i < fields->all_cnt; ++i) {
         const bool last_column = (i == (fields->all_cnt - 1));
 
         print_field(o_ctx.field_to_str_cb[i](data + o_ctx.field_offset[i]),
-                    o_ctx.column_width[i],
-                    PRETTY_PRINT_PADDING_WIDTH - COL_WIDTH_RESERVE,
+                    o_ctx.column_width[i], o_ctx.columnt_alignment[i],
                     last_column);
     }
+    putchar('\n');
 }
 
 /**
@@ -1165,8 +1524,10 @@ print_rec(const uint8_t *const data)
  * @param rec_limit
  */
 void
-print_mem(lnf_mem_t *const lnf_mem, uint64_t rec_limit)
+print_batch(lnf_mem_t *const lnf_mem, uint64_t rec_limit)
 {
+    assert(o_ctx.field_to_str_cb);
+
     if (output_params.print_records != OUTPUT_ITEM_YES) {
         return;
     }
@@ -1177,28 +1538,63 @@ print_mem(lnf_mem_t *const lnf_mem, uint64_t rec_limit)
 
     o_ctx.first_item = o_ctx.first_item ? false : (putchar('\n'), false);
 
-    // find out maximum size of the fields and length of the headers
-    size_t field_max_size = 0;  // maximum size in bytes
-    for (size_t i = 0; i < fields->all_cnt; ++i) {
-        const char *const header_str = field_get_name(fields->all[i].id);
-        const size_t header_str_len = strlen(header_str);
-
-        MAX_ASSIGN(field_max_size, fields->all[i].size);
-        MAX_ASSIGN(o_ctx.column_width[i], header_str_len);
+    if (!output_params.ellipsize) {
+        // loop through all records and calculate with of all columns
+        set_column_widths_exactly(lnf_mem, rec_limit);
     }
 
-    // loop through all records and calculate with of all columns
-    calc_column_widths(lnf_mem, rec_limit, field_max_size);
 
-    // loop through all columns and print the headers
-    for (size_t i = 0; i < fields->all_cnt; ++i) {
-        const bool last_column = (i == (fields->all_cnt - 1));
-        print_name(fields->all[i].id,
-                   o_ctx.column_width[i] + PRETTY_PRINT_PADDING_WIDTH,
-                   last_column);
+    /*
+     * Print the header.
+     */
+    if (output_params.rich_header && fields->aggr_keys_cnt > 0) {
+        // at least one aggregation key and possibly a sort key
+        print_names_enriched_aggr();
+    } else if (output_params.rich_header && fields->sort_key.field) {
+        // no aggregation keys, only a sort key
+        print_names_enriched_sort();
+    } else {
+        // no aggregation nor sorting
+        print_names_only();
+    }
+    putchar('\n');  // break line after the header
+
+
+    /*
+     * Print the fields.
+     */
+    // initialize a libnf record
+    lnf_rec_t *lnf_rec;
+    int lnf_ret = lnf_rec_init(&lnf_rec);
+    ABORT_IF(lnf_ret != LNF_OK, E_LNF, "lnf_rec_init()");
+
+    // initialize the cursor to point to the first record in the memory
+    lnf_mem_cursor_t *cursor;
+    lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
+    assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+
+    // loop through all records
+    uint64_t rec_cntr = 0;  // aka lines counter
+    char buff[o_ctx.max_field_size];
+    while (cursor && rec_limit > rec_cntr++) {
+        lnf_ret = lnf_mem_read_c(lnf_mem, cursor, lnf_rec);
+        assert(lnf_ret == LNF_OK);
+
+        // loop through all fields in the record
+        for (size_t i = 0; i < fields->all_cnt; ++i) {
+            const char *const field_str = get_field_str(i, lnf_rec, buff);
+            const bool last_column = (i == (fields->all_cnt - 1));
+
+            print_field(field_str, o_ctx.column_width[i],
+                        o_ctx.columnt_alignment[i], last_column);
+        }
+        putchar('\n');
+
+        lnf_ret = lnf_mem_next_c(lnf_mem, &cursor);
+        assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
     }
 
-    print_records(lnf_mem, rec_limit, field_max_size);
+    lnf_rec_free(lnf_rec);
 }
 
 /**
@@ -1211,6 +1607,8 @@ void
 print_processed_summ(const struct processed_summ *const s,
                      const double duration)
 {
+    assert(o_ctx.field_to_str_cb);
+
     const double flows_per_sec = s->flows / duration;
 
     if (output_params.print_processed_summ != OUTPUT_ITEM_YES) {
@@ -1257,6 +1655,8 @@ print_processed_summ(const struct processed_summ *const s,
 void
 print_metadata_summ(const struct metadata_summ *const s)
 {
+    assert(o_ctx.field_to_str_cb);
+
     if (output_params.print_metadata_summ != OUTPUT_ITEM_YES) {
         return;
     }
