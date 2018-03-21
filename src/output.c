@@ -1052,8 +1052,22 @@ field_to_str(const int field_id, const void *const data)
  * width, it will be padded with spaces on the right. The last field is printed
  * without any alignment or padding.
  *
- * |  col_width   | PROTECTIVE_PADDING |
- * 192.168.1.1~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * col_width = 15
+ * string_len = 11
+ * col_width_remainder = 4
+ * |  col_width  | PROTECTIVE_PADDING |
+ * 192.168.1.1~~~~~~~~~~~~~~~~~~~~~~~~~
+ *           |~~~|
+ *     col_width_remainder = 4
+ *
+ *
+ * col_width = 15
+ * string_len = 21
+ * col_width_remainder = -6
+ * |  col_width  | PROTECTIVE_PADDING |
+ * some very long string|~~~~~~~~~~~~~|
+ *               |~~~~~~|
+ *          col_width_remainder = -6
  *
  * @param string
  * @param col_width
