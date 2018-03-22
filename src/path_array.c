@@ -1,5 +1,6 @@
-/** Preprocessing of user specified paths and creation of array of specific
- * paths flow files from string or time range.
+/**
+ * @brief Preprocessing of user specified paths and creation of array of
+ * specific paths to flow files from string(s) and time range.
  */
 
 /*
@@ -38,6 +39,7 @@
  * if advised of the possibility of such damage.
  */
 
+#include "config.h"                // HAVE_LIBBFINDEX
 #include "path_array.h"
 
 #include <assert.h>                // for assert
@@ -63,151 +65,165 @@
 
 
 #define PATH_ARRAY_INIT_SIZE 50
+// exponential buffer growth strategy
+#define PATH_ARRAY_GROWTH_FACTOR 2
 
 
+/*
+ * Data types declarations.
+ */
 struct path_array_ctx {
-        char **names;
-        size_t names_cnt;
-        size_t names_size;
+    char **names;
+    size_t names_cnt;
+    size_t names_size;
 };
 
 
-/* Add path into the path array. */
-static error_code_t add_file(struct path_array_ctx *pa_ctx, const char *name)
+/*
+ * Private functions.
+ */
+/**
+ * @brief Add path into the path array.
+ *
+ * @param pa_ctx
+ * @param name
+ */
+static void
+add_path(struct path_array_ctx *const pa_ctx, const char *const name)
 {
-        /* Is there a free space in the array for another file? */
-        if (pa_ctx->names_cnt == pa_ctx->names_size) { //no, ask for another space
-                char **new_names;
+    assert(pa_ctx && name && name[0] != '\0');
 
-                new_names = realloc(pa_ctx->names,
-                                pa_ctx->names_size * 2 * sizeof (*pa_ctx->names));
-                if (new_names == NULL) { //failure
-                        ERROR(E_MEM, "realloc()");
-                        return E_MEM;
-                } else { //success
-                        pa_ctx->names = new_names;
-                        pa_ctx->names_size *= 2;
-                }
-        }
+    // is in the array a free space for another file?
+    if (pa_ctx->names_cnt == pa_ctx->names_size) {  // no, allocate more
+        pa_ctx->names_size *= PATH_ARRAY_GROWTH_FACTOR;
+        pa_ctx->names = realloc(pa_ctx->names,
+                                pa_ctx->names_size * sizeof (*pa_ctx->names));
+        ABORT_IF(!pa_ctx->names, E_MEM, "path array reallocation failed");
+    }
 
-        /* Allocate space for the name and copy it there. */
-        pa_ctx->names[pa_ctx->names_cnt] = strdup(name);
-        if (pa_ctx->names[pa_ctx->names_cnt] == NULL) {
-                ERROR(E_MEM, "strdup()");
-                return E_MEM;
-        } else {
-                pa_ctx->names_cnt++;
-                return E_OK;
-        }
+    // allocate space for the name and copy it to the array
+    pa_ctx->names[pa_ctx->names_cnt] = strdup(name);
+    ABORT_IF(!pa_ctx->names[pa_ctx->names_cnt], E_MEM, "path allocation failed");
+    pa_ctx->names_cnt++;
 }
 
 
-static error_code_t fill_from_time(struct path_array_ctx *pa_ctx,
-                char path[PATH_MAX], const struct tm begin,
-                const struct tm end)
+/**
+ * @brief TODO
+ *
+ * @param pa_ctx
+ * @param path[PATH_MAX]
+ * @param begin
+ * @param end
+ */
+static void
+fill_from_time(struct path_array_ctx *const pa_ctx, char path[PATH_MAX],
+               const struct tm begin, const struct tm end)
 {
-        error_code_t ecode = E_OK;
-        size_t offset = strlen(path);
-        struct tm ctx = begin;
-        struct stat stat_buff;
+    assert(pa_ctx && path);
 
+    // make sure there is the terminating slash
+    size_t offset = strlen(path);
+    if (path[offset - 1] != '/') {
+        path[offset++] = '/';
+    }
 
-        /* Make sure there is the terminating slash. */
-        if (path[offset - 1] != '/') {
-                path[offset++] = '/';
+    // loop through the entire time range
+    struct tm ctx = begin;
+    while (tm_diff(end, ctx) > 0) {
+        // construct path string from time
+        if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT, &ctx)
+                == 0)
+        {
+            errno = ENAMETOOLONG;
+            WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+            continue;
         }
 
-        /* Loop through the entire time range. */
-        while (tm_diff(end, ctx) > 0) {
-                /* Construct path string from time. */
-                if (strftime(path + offset, PATH_MAX - offset, FLOW_FILE_FORMAT,
-                                        &ctx) == 0) {
-                        errno = ENAMETOOLONG;
-                        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
-                        continue;
-                }
+        // increment the context by the rotation interval, then normalize
+        ctx.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
+        mktime_utc(&ctx);
 
-                /* Increment context by rotation interval and normalize. */
-                ctx.tm_sec += FLOW_FILE_ROTATION_INTERVAL;
-                mktime_utc(&ctx);
-
-                /* Check file existence. */
-                if (stat(path, &stat_buff) != 0) {
-                        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
-                } else {
-                        ecode = add_file(pa_ctx, path);
-                        if (ecode != E_OK) {
-                                return ecode;
-                        }
-                }
-        }
-
-
-        return E_OK;
-}
-
-static error_code_t fill_from_path(struct path_array_ctx *pa_ctx,
-                const char path[PATH_MAX])
-{
-        error_code_t ecode = E_OK;
-        DIR *dir;
-        struct dirent *entry;
+        // check for file existence
         struct stat stat_buff;
-
-
-        /* Detect file type. */
         if (stat(path, &stat_buff) != 0) {
-                WARNING(E_PATH, "%s `%s'", strerror(errno), path);
-                return E_OK;  // not a fatal error
+            WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+        } else {
+            add_path(pa_ctx, path);
+        }
+    }
+}
+
+/**
+ * @brief TODO
+ *
+ * @param pa_ctx
+ * @param path
+ */
+static void
+fill_from_path(struct path_array_ctx *const pa_ctx, const char path[PATH_MAX])
+{
+    assert(pa_ctx && path);
+
+    // detect file type
+    struct stat stat_buff;
+    if (stat(path, &stat_buff) != 0) {
+        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+        return;
+    }
+
+    if (!S_ISDIR(stat_buff.st_mode)) {  // not a directory
+        add_path(pa_ctx, path);
+        return;
+    }
+
+    // path is a directory
+    DIR *const dir = opendir(path);
+    if (!dir) {
+        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+        return;
+    }
+
+    // loop through all files
+    const struct dirent *entry;
+    while ((entry = readdir(dir))) {
+        char new_path[PATH_MAX];
+
+        // dot starting (hidden) files are ignored
+        if (entry->d_name[0] == '.') {
+            continue;  // skip this file
         }
 
-        if (!S_ISDIR(stat_buff.st_mode)) {
-                /* Path is not a directory. */
-                return add_file(pa_ctx, path);
-        }
-
-        dir = opendir(path);
-        if (dir == NULL) {
-                WARNING(E_PATH, "%s `%s'", strerror(errno), path);
-                return E_OK;  // not a fatal error
-        }
-
-        /* Loop through all the files. */
-        while ((entry = readdir(dir)) != NULL) {
-                char new_path[PATH_MAX];
-
-                /* Dot starting (hidden) files are ignored. */
-                if (entry->d_name[0] == '.') {
-                        continue;  // skip this file
-                }
-                /* bfindex files are ignored. */
 #ifdef HAVE_LIBBFINDEX
-                if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX ".",
-                            STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX ".")) == 0) {
-                        continue;  // skip this file
-                }
-#endif  // HAVE_LIBBFINDEX
-                /* Too long filenames are ignored. */
-                if (strlen(path) + strlen(entry->d_name) + 1 > PATH_MAX) {
-                        errno = ENAMETOOLONG;
-                        WARNING(E_PATH, "%s `%s'", strerror(errno), path);
-                        continue;  // skip this file
-                }
-
-                /* Construct new path: append child to the parent. */
-                strcpy(new_path, path);
-                strcat(new_path, "/");
-                strcat(new_path, entry->d_name);
-
-                ecode = fill_from_path(pa_ctx, new_path);
-                if (ecode != E_OK) {
-                        break;
-                }
+        // bfindex files are ignored
+        if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX ".",
+                    STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX ".")) == 0)
+        {
+            continue;  // skip this file
         }
-        closedir(dir);
+#endif
 
+        // too long file names are ignored
+        const size_t path_len = strlen(path);
+        if (path_len + strlen(entry->d_name) + 1 > PATH_MAX) {
+            errno = ENAMETOOLONG;
+            WARNING(E_PATH, "%s `%s'", strerror(errno), path);
+            continue;  // skip this file
+        }
 
-        return ecode;
+        // construct new path: append the child to the parent
+        strcpy(new_path, path);
+        if (new_path[path_len - 1] != '/') {
+            strcat(new_path, "/");
+        }
+        strcat(new_path, entry->d_name);
+
+        // recursively call for the created path
+        fill_from_path(pa_ctx, new_path);
+    }
+
+    const int ret = closedir(dir);
+    assert(ret == 0);
 }
 
 
@@ -299,6 +315,20 @@ path_preprocessor(const char *format, char path[PATH_MAX])
 }
 
 
+/*
+ * Public functions.
+ */
+/**
+ * @brief TODO
+ *
+ * @param paths
+ * @param paths_cnt
+ * @param begin
+ * @param end
+ * @param out_paths_cnt
+ *
+ * @return 
+ */
 char **
 path_array_gen(char *const paths[], size_t paths_cnt, const struct tm begin,
                const struct tm end, size_t *out_paths_cnt)
@@ -334,15 +364,10 @@ path_array_gen(char *const paths[], size_t paths_cnt, const struct tm begin,
          * start difference is > 0) and new_path is a directory. If new_path is
          * not a directory, process it as a regular file.
          */
-        error_code_t ecode = E_OK;
         if (tm_diff(end, begin) > 0 && S_ISDIR(stat_buff.st_mode)) {
-            ecode = fill_from_time(&pa_ctx, new_path, begin, end);
+            fill_from_time(&pa_ctx, new_path, begin, end);
         } else {
-            ecode = fill_from_path(&pa_ctx, new_path);
-        }
-        if (ecode != E_OK) {
-            path_array_free(pa_ctx.names, pa_ctx.names_cnt);
-            return NULL;
+            fill_from_path(&pa_ctx, new_path);
         }
     }
 

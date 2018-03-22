@@ -102,9 +102,9 @@ error_code_to_str(const error_code_t ecode)
 /**
  * @brief Print an Error/Warning/Info/Debug (EWID) message.
  *
- * First, write output to the string. Than, print that string to the output by a
- * single call of fprintf(). This is to prevent MPI to damage messages by
- * combining output from different ranks in random order.
+ * First, write output to the string. Then, print that string to the output by a
+ * single call of fprintf(). This is to prevent MPI from damaging the messages
+ * by combining output from different ranks in random order.
  *
  * This function may be called directly, but its better to use macros from
  * header file {ERROR,WARNING,INFO,DEBUG}.

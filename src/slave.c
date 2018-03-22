@@ -37,7 +37,7 @@
  * if advised of the possibility of such damage.
  */
 
-#include "config.h"
+#include "config.h"             // HAVE_LIBBFINDEX
 #include "slave.h"
 
 #include <assert.h>             // for assert
@@ -936,7 +936,7 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
     // TODO: open and update metadata counters before or after bfindex?
     int lnf_ret = lnf_open(&t_ctx->lnf_file, ff_path, LNF_READ, NULL);
     if (lnf_ret != LNF_OK) {
-        WARNING(E_LNF, "`%s\': unable to open flow file", ff_path);
+        WARNING(E_LNF, "`%s\': unable to open the flow file", ff_path);
         t_ctx->lnf_file = NULL;
         goto return_label;
     }

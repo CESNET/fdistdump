@@ -1,5 +1,6 @@
-/** Preprocessing of user specified paths and creation of array of specific
- * paths flow files from string or time range.
+/**
+ * @brief Preprocessing of user specified paths and creation of array of
+ * specific paths to flow files from string(s) and time range.
  */
 
 /*
@@ -40,7 +41,7 @@
 
 #pragma once
 
-#include <stddef.h> //size_t
+#include <stddef.h>                // for size_t
 
 
 // forward declarations
