@@ -1,4 +1,5 @@
-/** Slave process functionality.
+/**
+ * @brief Slave process functionality.
  */
 
 /*
@@ -151,17 +152,6 @@ init_bfindex(lnf_filter_t *lnf_filter)
 }
 #endif  // ENABLE_BFINDEX
 
-static void
-slave_ctx_init(struct slave_ctx *const s_ctx)
-{
-    assert(s_ctx);
-}
-
-static void
-slave_ctx_free(struct slave_ctx *const s_ctx)
-{
-    assert(s_ctx);
-}
 
 static void
 thread_ctx_init(struct thread_ctx *const t_ctx)
@@ -218,7 +208,7 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
         break;
 
     default:
-        assert(!"unknown working mode");
+        ABORT(E_INTERNAL, "unknown working mode");
     }
 }
 
@@ -544,10 +534,9 @@ ff_read_and_send(const char *ff_path, struct slave_ctx *s_ctx,
  * ignored.
  */
 static void
-ff_read_and_store(const char *ff_path, struct slave_ctx *s_ctx,
-                   struct thread_ctx *t_ctx)
+ff_read_and_store(const char *ff_path, struct thread_ctx *t_ctx)
 {
-    assert(ff_path && s_ctx && t_ctx);
+    assert(ff_path && t_ctx);
 
     // loop through all records, HOT PATH!
     int lnf_ret;
@@ -719,13 +708,12 @@ progress_report_next(void)
  *
  * Each slave sends the top N items from its memory.
  *
- * @param[in] s_ctx Thread-shared context.
  * @param[in] t_ctx Thread-local context.
  */
 static void
-tput_phase_1(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
+tput_phase_1(struct thread_ctx *const t_ctx)
 {
-    assert(s_ctx && t_ctx);
+    assert(t_ctx);
 
     // send the top N items from the sorted list
     send_raw_mem(t_ctx->lnf_mem, args->rec_limit, TAG_TPUT1, t_ctx->buff,
@@ -980,19 +968,19 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
 
     case MODE_SORT:
         // store records into the thread-local libnf memory (linked list)
-        ff_read_and_store(ff_path, s_ctx, t_ctx);
+        ff_read_and_store(ff_path, t_ctx);
         break;
 
     case MODE_AGGR:
         // aggregate records into the thread-local libnf memory (hash table)
-        ff_read_and_store(ff_path, s_ctx, t_ctx);
+        ff_read_and_store(ff_path, t_ctx);
         break;
 
     case MODE_META:
         // metadata already read
         break;
     default:
-        assert(!"unknown working mode");
+        ABORT(E_INTERNAL, "unknown working mode");
     }
 
 return_label:
@@ -1025,7 +1013,7 @@ postprocess_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
         if (args->use_tput) {
             assert(args->rec_limit);
             // use the TPUT Top-N algorithm
-            tput_phase_1(s_ctx, t_ctx);
+            tput_phase_1(t_ctx);
             tput_phase_2(s_ctx, t_ctx);
             tput_phase_3(s_ctx, t_ctx);
         } else {
@@ -1040,7 +1028,7 @@ postprocess_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
         break;
 
     default:
-        assert(!"unknown working mode");
+        ABORT(E_INTERNAL, "unknown working mode");
     }
 
     DEBUG("postprocess_mt done");
@@ -1067,7 +1055,6 @@ slave_main(const struct cmdline_args *args_local)
     args = args_local;  // share the command-line arguments by a global variable
 
     struct slave_ctx s_ctx = { 0 };
-    slave_ctx_init(&s_ctx);
 
     // generate paths to the specific flow files
     size_t ff_paths_cnt = 0;
@@ -1138,6 +1125,4 @@ slave_main(const struct cmdline_args *args_local)
                MPI_UINT64_T, MPI_SUM, ROOT_PROC, mpi_comm_main);
     MPI_Reduce(&s_ctx.metadata_summ, NULL, STRUCT_METADATA_SUMM_ELEMENTS,
                MPI_UINT64_T, MPI_SUM, ROOT_PROC, mpi_comm_main);
-
-    slave_ctx_free(&s_ctx);
 }

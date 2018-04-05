@@ -400,6 +400,7 @@ libnf_mem_rec_cnt(lnf_mem_t *const lnf_mem)
         assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
         rec_cntr++;
     }
+    (void)lnf_ret;  // to suppress -Wunused-variable with -DNDEBUG
 
     return rec_cntr;
 }
@@ -431,6 +432,7 @@ libnf_mem_rec_len(lnf_mem_t *const lnf_mem)
     lnf_ret = lnf_mem_read_raw_c(lnf_mem, cursor, rec_buff, &rec_len,
                                  sizeof (rec_buff));
     assert(rec_len > 0 && lnf_ret == LNF_OK);
+    (void)lnf_ret;  // to suppress -Wunused-variable with -DNDEBUG
 
     return rec_len;
 }
@@ -452,6 +454,7 @@ libnf_mem_sort(lnf_mem_t *const lnf_mem)
     lnf_mem_cursor_t *cursor;
     int lnf_ret = lnf_mem_first_c(lnf_mem, &cursor);
     assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
+    (void)lnf_ret;  // to suppress -Wunused-variable with -DNDEBUG
 }
 /**
  * @}
@@ -478,7 +481,7 @@ libnf_sort_dir_to_str(const int sort_dir)
     case LNF_SORT_DESC:
         return "desc";
     default:
-        assert(!"unknown sort direction");
+        ABORT(E_INTERNAL, "unknown sort direction");
     }
 }
 
@@ -503,7 +506,7 @@ libnf_aggr_func_to_str(const int aggr_func)
     case LNF_AGGR_OR:
         return "or";
     default:
-        assert(!"unknown aggregation function");
+        ABORT(E_INTERNAL, "unknown aggregation function");
     }
 }
 /**

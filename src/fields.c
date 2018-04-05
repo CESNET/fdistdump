@@ -118,7 +118,9 @@ add_to_all(struct fields *const fields, const int id)
 {
     assert(fields);
     assert(IN_RANGE_EXCL(id, LNF_FLD_ZERO_, LNF_FLD_TERM_));
-    assert(!get_from_all(fields, id));  // make sure it is not present
+    const struct field *const ret = get_from_all(fields, id);
+    assert(ret == NULL);  // make sure it is not present
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
 
     // the array should not be full
     if (fields->all_cnt == ALL_FIELDS_MAX) {
@@ -159,6 +161,7 @@ field_get_type(const int id)
     int type;
     const int ret = lnf_fld_info(id, LNF_FLD_INFO_TYPE, &type, sizeof (type));
     assert(ret == LNF_OK);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
 
     return type;
 }
@@ -180,6 +183,7 @@ field_get_size(const int id)
     int size;
     const int ret = lnf_fld_info(id, LNF_FLD_INFO_SIZE, &size, sizeof (size));
     assert(ret == LNF_OK);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
     assert(size > 0);
 
     return size;
@@ -205,6 +209,7 @@ field_get_name(const int id)
     const int ret = lnf_fld_info(id, LNF_FLD_INFO_NAME, name_buff,
                                  sizeof (name_buff));
     assert(ret == LNF_OK);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
     assert(strlen(name_buff) > 0);
 
     return name_buff;
@@ -229,6 +234,7 @@ field_get_aggr_func(const int id)
     const int ret = lnf_fld_info(id, LNF_FLD_INFO_AGGR, &aggr_func,
                                  sizeof (aggr_func));
     assert(ret == LNF_OK);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
     assert(IN_RANGE_INCL(aggr_func, LNF_AGGR_MIN, LNF_AGGR_KEY));
     if (aggr_func == LNF_AGGR_KEY) {
         // LNF_AGGR_KEY means the field does not have any default aggregation
@@ -258,6 +264,7 @@ field_get_sort_dir(const int id)
     const int ret = lnf_fld_info(id, LNF_FLD_INFO_SORT, &direction,
                                  sizeof (direction));
     assert(ret == LNF_OK);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
     assert(direction == LNF_SORT_NONE || direction == LNF_SORT_ASC
            || direction == LNF_SORT_DESC);
 

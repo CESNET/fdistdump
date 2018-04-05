@@ -171,8 +171,7 @@ build_addr_node(const ff_node_t *ff_node)
                              sizeof (ipv6_mask_unused.data)) != 0);
         break;
     default:
-        assert(!"unknown ff_net->ver");
-        break;
+        ABORT(E_INTERNAL, "unknown ff_net->ver");
     }
 
     if (using_mask) {
@@ -272,7 +271,7 @@ build_oper_node(const ff_node_t *ff_node)
         global_ecode = BFINDEX_E_OK;
         return NULL;
     default:
-        assert(!"unknown ff_node_t.oper");
+        ABORT(E_INTERNAL, "unknown ff_node_t.oper");
     }
 
     struct bfindex_node *const node = malloc(sizeof (*node));
@@ -338,7 +337,7 @@ build_node(const ff_node_t *ff_node)
         global_ecode = BFINDEX_E_OK;
         return NULL;
     default:                   // filter node of some another type
-        assert(!"unknown ff_node_t.type");
+        ABORT(E_INTERNAL, "unknown ff_node_t.type");
     }
 }
 
@@ -372,9 +371,9 @@ bfindex_tree_contains(const bfi_index_ptr_t index_ptr,
                                       sizeof (node->addr));
 
         case NODE_TYPE_UNSET:
-            assert(!"illegal node type");
+            ABORT(E_INTERNAL, "illegal node type");
         default:
-            assert(!"unknown node type");
+            ABORT(E_INTERNAL, "unknown node type");
     }
 }
 
@@ -394,15 +393,18 @@ filter_dump(const ff_node_t *ff_node)
             char buff[INET6_ADDRSTRLEN];
             switch (ff_net->ver) {
                 case 4:
-                    assert(inet_ntop(AF_INET, ff_net->ip.data + 3, buff,
-                                INET6_ADDRSTRLEN));
+                    const char *const ret = inet_ntop(
+                            AF_INET, ff_net->ip.data + 3, buff,
+                            INET6_ADDRSTRLEN);
+                    assert(ret);
                     break;
                 case 6:
-                    assert(inet_ntop(AF_INET6, &ff_net->ip, buff,
-                                INET6_ADDRSTRLEN));
+                    const char *const ret = inet_ntop(
+                            AF_INET6, &ff_net->ip, buff, INET6_ADDRSTRLEN);
+                    assert(ret);
                     break;
                 default:
-                    assert(!"unknown ff_net_t.ver (IP version)");
+                    ABORT(E_INTERNAL, "unknown ff_net_t.ver (IP version)");
             }
             printf("\tIPv%d: %s\n", ff_net->ver, buff);
         }

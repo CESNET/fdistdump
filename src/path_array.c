@@ -224,6 +224,7 @@ fill_from_path(struct path_array_ctx *const pa_ctx, const char path[PATH_MAX])
 
     const int ret = closedir(dir);
     assert(ret == 0);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
 }
 
 

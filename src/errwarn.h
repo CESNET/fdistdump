@@ -64,6 +64,10 @@ extern verbosity_t verbosity;
 /**
  * @brief Print error message and terminate MPI execution environment.
  *
+ * The exit() function after MPI_Abort() will be never called, it serves as a
+ * hint for compilers and static analysis, because they usually dont know what
+ * MPI_Abort() does.
+ *
  * @param[in] ecode  fdistdump error code.
  * @param[in] ...    Additional arguments beginning with a format string.
  */
@@ -71,6 +75,7 @@ extern verbosity_t verbosity;
     do { \
         ewid_print(ecode, "Error", __FILE__, __func__,  __LINE__, __VA_ARGS__); \
         MPI_Abort(MPI_COMM_WORLD, ecode); \
+        exit(ecode); \
     } while (0)
 
 /**

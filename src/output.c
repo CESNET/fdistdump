@@ -361,9 +361,9 @@ timestamp_to_str(const uint64_t *ts)
         break;
     }
     case OUTPUT_TS_CONV_UNSET:
-        assert(!"illegal timestamp conversion");
+        ABORT(E_INTERNAL, "illegal timestamp conversion");
     default:
-        assert(!"unknown timestamp conversion");
+        ABORT(E_INTERNAL, "unknown timestamp conversion");
     }
 
     return global_str;
@@ -377,9 +377,9 @@ timestamp_to_str_strlen(void)
     case OUTPUT_TS_CONV_PRETTY:
         return STRLEN_STATIC("YYYY-MM-DD HH:mm:ss.mls");
     case OUTPUT_TS_CONV_UNSET:
-        assert(!"illegal timestamp conversion");
+        ABORT(E_INTERNAL, "illegal timestamp conversion");
     default:
-        assert(!"unknown timestamp conversion");
+        ABORT(E_INTERNAL, "unknown timestamp conversion");
     }
 }
 
@@ -424,9 +424,9 @@ double_volume_to_str(const double *const volume)
         return global_str;
 
     case OUTPUT_VOLUME_CONV_UNSET:
-        assert(!"illegal volume conversion");
+        ABORT(E_INTERNAL, "illegal volume conversion");
     default:
-        assert(!"unknown volume conversion");
+        ABORT(E_INTERNAL, "unknown volume conversion");
     }
 }
 static size_t
@@ -443,9 +443,9 @@ double_volume_to_str_strlen(void)
                         BINARY_PREFIX_THRESHOLD - 0.1, binary_unit_table[0]);
 
     case OUTPUT_VOLUME_CONV_UNSET:
-        assert(!"illegal volume conversion");
+        ABORT(E_INTERNAL, "illegal volume conversion");
     default:
-        assert(!"unknown volume conversion");
+        ABORT(E_INTERNAL, "unknown volume conversion");
     }
 }
 
@@ -483,9 +483,9 @@ volume_to_str(const uint64_t *const volume)
         return global_str;
 
     case OUTPUT_VOLUME_CONV_UNSET:
-        assert(!"illegal volume conversion");
+        ABORT(E_INTERNAL, "illegal volume conversion");
     default:
-        assert(!"unknown volume conversion");
+        ABORT(E_INTERNAL, "unknown volume conversion");
     }
 }
 static size_t
@@ -504,9 +504,9 @@ volume_to_str_strlen(void)
                         BINARY_PREFIX_THRESHOLD - 0.1, binary_unit_table[0]);
 
     case OUTPUT_VOLUME_CONV_UNSET:
-        assert(!"illegal volume conversion");
+        ABORT(E_INTERNAL, "illegal volume conversion");
     default:
-        assert(!"unknown volume conversion");
+        ABORT(E_INTERNAL, "unknown volume conversion");
     }
 }
 
@@ -537,9 +537,9 @@ tcp_flags_to_str(const uint8_t *const flags)
         break;
     }
     case OUTPUT_TCP_FLAGS_CONV_UNSET:
-        assert(!"illegal IP protocol conversion");
+        ABORT(E_INTERNAL, "illegal IP protocol conversion");
     default:
-        assert(!"unknown IP protocol conversion");
+        ABORT(E_INTERNAL, "unknown IP protocol conversion");
     }
 
     return global_str;
@@ -553,9 +553,9 @@ tcp_flags_to_str_strlen(void)
     case OUTPUT_TCP_FLAGS_CONV_STR:
         return ARRAY_SIZE(tcp_flags_table);
     case OUTPUT_TCP_FLAGS_CONV_UNSET:
-        assert(!"illegal IP protocol conversion");
+        ABORT(E_INTERNAL, "illegal IP protocol conversion");
     default:
-        assert(!"unknown IP protocol conversion");
+        ABORT(E_INTERNAL, "unknown IP protocol conversion");
     }
 }
 
@@ -582,9 +582,9 @@ ip_proto_to_str(const uint8_t *const proto)
         }
 
     case OUTPUT_IP_PROTO_CONV_UNSET:
-        assert(!"illegal ip protocol conversion");
+        ABORT(E_INTERNAL, "illegal ip protocol conversion");
     default:
-        assert(!"unknown ip protocol conversion");
+        ABORT(E_INTERNAL, "unknown ip protocol conversion");
     }
 }
 static size_t
@@ -596,9 +596,9 @@ ip_proto_to_str_strlen(void)
     case OUTPUT_IP_PROTO_CONV_STR:
         return 9;  // for no good reason
     case OUTPUT_IP_PROTO_CONV_UNSET:
-        assert(!"illegal ip protocol conversion");
+        ABORT(E_INTERNAL, "illegal ip protocol conversion");
     default:
-        assert(!"unknown ip protocol conversion");
+        ABORT(E_INTERNAL, "unknown ip protocol conversion");
     }
 }
 
@@ -633,9 +633,9 @@ duration_to_str(const uint64_t *const duration)
     }
 
     case OUTPUT_DURATION_CONV_UNSET:
-        assert(!"illegal duration conversion");
+        ABORT(E_INTERNAL, "illegal duration conversion");
     default:
-        assert(!"unknown duration conversion");
+        ABORT(E_INTERNAL, "unknown duration conversion");
     }
 
     return global_str;
@@ -649,9 +649,9 @@ duration_to_str_strlen(void)
     case OUTPUT_DURATION_CONV_STR:
         return STRLEN_STATIC("00:00:00.000");
     case OUTPUT_DURATION_CONV_UNSET:
-        assert(!"illegal duration conversion");
+        ABORT(E_INTERNAL, "illegal duration conversion");
     default:
-        assert(!"unknown duration conversion");
+        ABORT(E_INTERNAL, "unknown duration conversion");
     }
 }
 
@@ -690,9 +690,9 @@ libnf_addr_to_str(const lnf_ip_t *const addr)
         break;
     }
     case OUTPUT_IP_ADDR_CONV_UNSET:
-        assert(!"illegal IP address conversion");
+        ABORT(E_INTERNAL, "illegal IP address conversion");
     default:
-        assert(!"unknown IP address conversion");
+        ABORT(E_INTERNAL, "unknown IP address conversion");
     }
 
     return global_str;
@@ -708,9 +708,9 @@ libnf_addr_to_str_strlen(void)
     case OUTPUT_IP_ADDR_CONV_STR:
         return STRLEN_STATIC("255.255.255.255");  // IPv6 will be ellipsized
     case OUTPUT_IP_ADDR_CONV_UNSET:
-        assert(!"illegal IP address conversion");
+        ABORT(E_INTERNAL, "illegal IP address conversion");
     default:
-        assert(!"unknown IP address conversion");
+        ABORT(E_INTERNAL, "unknown IP address conversion");
     }
 }
 
@@ -921,9 +921,9 @@ libnf_brec_to_str(const lnf_brec1_t *brec)
         break;
 
     case OUTPUT_FORMAT_UNSET:
-        assert(!"illegal output format");
+        ABORT(E_INTERNAL, "illegal output format");
     default:
-        assert(!"unknown output format");
+        ABORT(E_INTERNAL, "unknown output format");
     }
 
     return res;
@@ -1018,10 +1018,10 @@ get_field_to_str_callback(const int field_id)
         case LNF_NONE:
         case LNF_MPLS:
         case LNF_ACL:
-            assert(!"unimplemented LNF data type");
+            ABORT(E_INTERNAL, "unimplemented LNF data type");
 
         default:
-            assert(!"unknown LNF data type");
+            ABORT(E_INTERNAL, "unknown LNF data type");
         }
     }
 
@@ -1147,9 +1147,9 @@ print_field(const char *const string, const int col_width,
         break;
 
     case OUTPUT_FORMAT_UNSET:
-        assert(!"illegal output format");
+        ABORT(E_INTERNAL, "illegal output format");
     default:
-        assert(!"unknown output format");
+        ABORT(E_INTERNAL, "unknown output format");
     }
 }
 
@@ -1194,7 +1194,7 @@ get_column_width_estimate(field_to_str_t to_str_func)
     } else if (to_str_func == (field_to_str_t)libnf_brec_to_str) {
         return libnf_brec_to_str_strlen();
     } else {
-        assert(!"unknown to_str function");
+        ABORT(E_INTERNAL, "unknown to_str function");
     }
 }
 
@@ -1239,7 +1239,7 @@ get_column_alignment(field_to_str_t to_str_func)
     } else if (to_str_func == (field_to_str_t)libnf_brec_to_str) {
         return ALIGNMENT_LEFT;
     } else {
-        assert(!"unknown to_str function");
+        ABORT(E_INTERNAL, "unknown to_str function");
     }
 }
 
@@ -1264,7 +1264,7 @@ get_field_str(const size_t idx, lnf_rec_t *const lnf_rec, char *const buff)
     case LNF_ERR_NOTSET:
         return ABSENT_STR;
     default:
-        assert(!"invalid return code from lnf_rec_fget()");
+        ABORT(E_INTERNAL, "invalid return code from lnf_rec_fget()");
     }
 }
 
@@ -1657,9 +1657,9 @@ print_processed_summ(const struct processed_summ *const s,
         break;
 
     case OUTPUT_FORMAT_UNSET:
-        assert(!"illegal output format");
+        ABORT(E_INTERNAL, "illegal output format");
     default:
-        assert(!"unknown output format");
+        ABORT(E_INTERNAL, "unknown output format");
     }
 }
 
@@ -1733,8 +1733,8 @@ print_metadata_summ(const struct metadata_summ *const s)
         break;
 
     case OUTPUT_FORMAT_UNSET:
-        assert(!"illegal output format");
+        ABORT(E_INTERNAL, "illegal output format");
     default:
-        assert(!"unknown output format");
+        ABORT(E_INTERNAL, "unknown output format");
     }
 }

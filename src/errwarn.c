@@ -89,9 +89,9 @@ error_code_to_str(const error_code_t ecode)
     case E_BFINDEX:
         return "bfindex";
     case E_HELP:
-        assert(!"illegal error code");
+        ABORT(E_INTERNAL, "illegal error code");
     default:
-        assert(!"unknown error code");
+        ABORT(E_INTERNAL, "unknown error code");
     };
 }
 

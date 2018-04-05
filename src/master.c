@@ -213,10 +213,9 @@ progress_bar_print(const struct progress_bar_ctx *const pb_ctx)
 
     case PROGRESS_BAR_NONE: // fall through
     case PROGRESS_BAR_UNSET:
-        assert(!"illegal progress bar type");
+        ABORT(E_INTERNAL, "illegal progress bar type");
     default:
-        assert(!"unknown progress bar type");
-        break;
+        ABORT(E_INTERNAL, "unknown progress bar type");
     }
 
     // handle different behavior for streams and for files
@@ -520,8 +519,6 @@ static uint64_t
 tput_phase_1(struct master_ctx *const m_ctx, lnf_mem_t *const lnf_mem)
 {
     assert(m_ctx && lnf_mem);
-    const uint64_t lnf_mem_rec_cnt = libnf_mem_rec_cnt(lnf_mem);
-    assert(lnf_mem_rec_cnt == 0);
 
     // receive the top N items from each source and aggregate (aggregation will
     // calculate the partial sums)
@@ -618,6 +615,8 @@ tput_phase_3(struct master_ctx *const m_ctx, lnf_mem_t **const lnf_mem)
         lnf_ret = lnf_mem_next_c(*lnf_mem, &cursor);
         assert((cursor && lnf_ret == LNF_OK) || (!cursor && lnf_ret == LNF_EOF));
     }
+    (void)lnf_ret;  // to suppress -Wunused-variable with -DNDEBUG
+
     // broadcast all records at once
     MPI_Bcast(rec_buff, rec_buff_size, MPI_BYTE, ROOT_PROC, mpi_comm_main);
     free(rec_buff);
@@ -741,7 +740,7 @@ master_main_thread(void)
         // receive only the progress
         break;
     default:
-        assert(!"unknown working mode");
+        ABORT(E_INTERNAL, "unknown working mode");
     }
 
     output_free();

@@ -1390,30 +1390,28 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             return E_ARG;
         }
     } else {  // output fields not specidied, use default values
+        bool ret;
         switch (args->working_mode) {
         case MODE_LIST:
-        {
-            char tmp[] = DEFAULT_LIST_FIELDS;  // modifiable copy
-            assert(parse_fields(tmp, &args->fields, false));
+            // compound literal is used to create a modifiable copy
+            ret = parse_fields((char []){DEFAULT_LIST_FIELDS}, &args->fields,
+                               false);
             break;
-        }
         case MODE_SORT:
-        {
-            char tmp[] = DEFAULT_SORT_FIELDS;
-            assert(parse_fields(tmp, &args->fields, false));
+            ret = parse_fields((char []){DEFAULT_SORT_FIELDS}, &args->fields,
+                               false);
             break;
-        }
         case MODE_AGGR:
-        {
-            char tmp[] = DEFAULT_AGGR_FIELDS;
-            assert(parse_fields(tmp, &args->fields, false));
+            ret = parse_fields((char []){DEFAULT_AGGR_FIELDS}, &args->fields,
+                               false);
             break;
-        }
         case MODE_META:
             break;
         default:
-            assert(!"unknown working mode");
+            ABORT(E_INTERNAL, "unknown working mode");
         }
+        assert(ret);
+        (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
     }
 
     // set default output format and conversion parameters
@@ -1484,9 +1482,9 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         break;
 
     case OUTPUT_FORMAT_UNSET:
-        assert(!"illegal output parameters format");
+        ABORT(E_INTERNAL, "illegal output parameters format");
     default:
-        assert(!"unkwnown output parameters format");
+        ABORT(E_INTERNAL, "unkwnown output parameters format");
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -1510,7 +1508,10 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         }
     }
 
-    assert(fields_check(&args->fields));
+    const bool ret = fields_check(&args->fields);
+    assert(ret);
+    (void)ret;  // to suppress -Wunused-variable with -DNDEBUG
+
     ////////////////////////////////////////////////////////////////////////////
     if (root_proc && verbosity >= VERBOSITY_DEBUG) {
         fields_print_debug(&args->fields);

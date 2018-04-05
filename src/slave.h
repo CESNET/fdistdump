@@ -1,4 +1,5 @@
-/** Slave process declarations.
+/**
+ * @brief Slave process declarations.
  */
 
 /*
