@@ -37,7 +37,7 @@
  * if advised of the possibility of such damage.
  */
 
-#include "config.h"             // for HAVE_LIBBFINDEX
+#include "config.h"             // for ENABLE_BFINDEX
 #include "slave.h"
 
 #include <assert.h>             // for assert
@@ -53,9 +53,9 @@
 #include <omp.h>
 
 #include "arg_parse.h"          // for cmdline_args
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
 #include "bfindex.h"            // for bfindex_contains, bfindex_flow_to_ind...
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
 #include "common.h"             // for metadata_summ, ROOT_PROC, mpi_comm_main
 #include "errwarn.h"            // for error/warning/info/debug messages, ...
 #include "fields.h"         // for fields, sort_key, field
@@ -106,10 +106,10 @@ struct thread_ctx {
     struct processed_summ processed_summ;  // summary of processed records
     struct metadata_summ metadata_summ;    // summary of flow files metadata
 
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
     struct bfindex_node *bfindex_root;  // indexing IP address tree root
                                         // (created from the the libnf filter)
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
 };
 
 
@@ -132,7 +132,7 @@ init_filter(lnf_filter_t **lnf_filter, char *filter_str)
              filter_str);
 }
 
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
 /**
  * @brief TODO
  *
@@ -149,7 +149,7 @@ init_bfindex(lnf_filter_t *lnf_filter)
     assert(filter_tree && filter_tree->root);
     return bfindex_init(filter_tree->root);  // return NULL is OK
 }
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
 
 static void
 slave_ctx_init(struct slave_ctx *const s_ctx)
@@ -172,7 +172,7 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
     if (args->filter_str) {
         init_filter(&t_ctx->lnf_filter, args->filter_str);
 
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
         if (args->use_bfindex) {
             t_ctx->bfindex_root = init_bfindex(t_ctx->lnf_filter);
             if (t_ctx->bfindex_root) {
@@ -183,7 +183,7 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
         } else {
             INFO("Bloom filter indexes disabled voluntarily");
         }
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
     }
 
     // initialize the libnf record, only once for each thread
@@ -230,11 +230,11 @@ thread_ctx_free(struct thread_ctx *const t_ctx)
     if (t_ctx->lnf_filter) {
         lnf_filter_free(t_ctx->lnf_filter);
     }
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
     if (t_ctx->bfindex_root){
         bfindex_free(t_ctx->bfindex_root);
     }
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
 
     lnf_rec_free(t_ctx->lnf_rec);
 
@@ -944,7 +944,7 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
     // read and update the thread-private metadata summary counters
     metadata_summ_update(&t_ctx->metadata_summ, t_ctx->lnf_file);
 
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
     if (t_ctx->bfindex_root) {  // Bloom filter indexing is enabled
         char *bfindex_file_path = bfindex_flow_to_index_path(ff_path);
         if (bfindex_file_path) {
@@ -965,7 +965,7 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
                     ff_path);
         }
     }
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
 
     // process the file according to the working mode
     switch (args->working_mode) {

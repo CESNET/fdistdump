@@ -39,7 +39,7 @@
  * if advised of the possibility of such damage.
  */
 
-#include "config.h"                // for HAVE_LIBBFINDEX
+#include "config.h"                // for ENABLE_BFINDEX
 #include "path_array.h"
 
 #include <assert.h>                // for assert
@@ -57,9 +57,9 @@
 #include <sys/stat.h>              // for stat, S_ISDIR
 #include <unistd.h>                // for gethostname
 
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
 #include "bfindex.h"
-#endif  // HAVE_LIBBFINDEX
+#endif  // ENABLE_BFINDEX
 #include "common.h"                // for ::E_OK, ::E_PATH, error_code_t
 #include "errwarn.h"            // for error/warning/info/debug messages, ...
 
@@ -194,7 +194,7 @@ fill_from_path(struct path_array_ctx *const pa_ctx, const char path[PATH_MAX])
             continue;  // skip this file
         }
 
-#ifdef HAVE_LIBBFINDEX
+#ifdef ENABLE_BFINDEX
         // bfindex files are ignored
         if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX ".",
                     STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX ".")) == 0)

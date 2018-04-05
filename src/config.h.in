@@ -1,5 +1,5 @@
 /**
- * @brief Build configuration.
+ * @brief Template for the build system to create a build configuration.
  */
 
 /*
@@ -42,3 +42,5 @@
 
 #cmakedefine PROJECT_NAME "@PROJECT_NAME@"
 #cmakedefine PROJECT_VERSION "@PROJECT_VERSION@"
+
+#cmakedefine ENABLE_BFINDEX

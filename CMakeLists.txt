@@ -16,6 +16,10 @@ include(cmake/functions.cmake)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)  # TODO: remove
 
+# command-line option() usage: -Doption=ON or -Doption=OFF
+option(ENABLE_BFINDEX
+       "Enable/disable support for the Bloom filter indexing library"
+       ON)
 
 ################################################################################
 # Setup options for the C compiler, preprocessor, and linker.
@@ -81,6 +85,10 @@ message("Project:\n"
         "\tbinary dir  = ${PROJECT_BINARY_DIR}"
         )
 
+message("Options:\n"
+        "\tbfindex = ${ENABLE_BFINDEX} (change by -DENABLE_BFINDEX=<ON|OFF>)\n"
+        )
+
 message(STATUS)
 message("C build environment:\n"
         "\tinstall prefix = ${CMAKE_INSTALL_PREFIX}\n"
@@ -102,6 +110,7 @@ message("MPI:\n"
         "\tcompile definitions = ${MPI_C_COMPILE_DEFINITIONS}\n"
         "\tinclude dirs        = ${MPI_C_INCLUDE_DIRS}\n"
         "\tlink flags          = ${MPI_C_LINK_FLAGS}\n"
-        "\tlibraries           = ${MPI_C_LIBRARIES}\n")
+        "\tlibraries           = ${MPI_C_LIBRARIES}\n"
+        )
 
 message(STATUS "CMAKE_SYSTEM     = ${CMAKE_SYSTEM}")

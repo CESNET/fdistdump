@@ -1,6 +1,8 @@
 include(CheckIncludeFile)
 
-set(SRC_LIST
+################################################################################
+# create a list of source files
+set(SOURCE_LIST
     arg_parse.c arg_parse.h
     common.c common.h
     errwarn.c errwarn.h
@@ -10,13 +12,19 @@ set(SRC_LIST
     output.c output.h
     path_array.c path_array.h
     slave.c slave.h
-    bfindex.c bfindex.h
     )
-add_executable(fdistdump ${SRC_LIST})
+if(ENABLE_BFINDEX)
+    list(APPEND SOURCE_LIST bfindex.c bfindex.h)
+endif(ENABLE_BFINDEX)
 
-# generate configuration header file from a template
+# add an executable to the project using the source files
+add_executable(fdistdump ${SOURCE_LIST})
+
+################################################################################
+# generate configuration header file from a template and add to the include dirs
 configure_file("${PROJECT_SOURCE_DIR}/src/config.h.in"
-               "${PROJECT_BINARY_DIR}/src/config.h")
+               "${PROJECT_BINARY_DIR}/src/config.h"
+               @ONLY)
 include_directories("${PROJECT_BINARY_DIR}/src/")
 
 
@@ -54,23 +62,36 @@ endif (LIBNF_LIB STREQUAL "LIBNF_LIB-NOTFOUND")
 # find and link with the libnf library
 find_library(LIBNF_LIB nf)
 if (LIBNF_LIB STREQUAL "LIBNF_LIB-NOTFOUND")
-    message(FATAL_ERROR "libnf library not found (see https://github.com/VUTBR/libnf)")
+    message(FATAL_ERROR
+            "libnf library not found\n"
+            "project URL: from https://github.com/VUTBR/libnf")
 else()
     target_link_libraries(fdistdump PRIVATE nf)
 endif ()
+
 CHECK_INCLUDE_FILE("libnf.h" LIBNF_HEADER)
 if (NOT LIBNF_HEADER)
-    message(FATAL_ERROR "libnf.h not found (see https://github.com/VUTBR/libnf)")
+    message(FATAL_ERROR "libnf.h not found "
+            "(see https://github.com/VUTBR/libnf)")
 endif()
 
-# find and link with the bfindex library
-find_library(BFINDEX_LIB bfindex)
-if (BFINDEX_LIB STREQUAL "BFINDEX_LIB-NOTFOUND")
-    message(FATAL_ERROR "bfindex library not found (see https://github.com/CESNET/bloom-filter-index)")
-else()
-    target_link_libraries(fdistdump PRIVATE bfindex)
-endif ()
-CHECK_INCLUDE_FILE("bf_index.h" BFINDEX_HEADER)
-if (NOT BFINDEX_HEADER)
-    message(FATAL_ERROR "bf_index.h not found (https://github.com/CESNET/bloom-filter-index)")
-endif()
+# find and link with the bfindex library (if enabled)
+if (ENABLE_BFINDEX)
+    find_library(BFINDEX_LIB bfindex)
+    if (BFINDEX_LIB STREQUAL "BFINDEX_LIB-NOTFOUND")
+        message(FATAL_ERROR
+                "bfindex library not found\n"
+                "install or disable by -DENABLE_BFINDEX=OFF\n"
+                "project URL: https://github.com/CESNET/bloom-filter-index")
+    else()
+        target_link_libraries(fdistdump PRIVATE bfindex)
+    endif ()
+
+    CHECK_INCLUDE_FILE("bf_index.h" BFINDEX_HEADER)
+    if (NOT BFINDEX_HEADER)
+        message(FATAL_ERROR
+                "bf_index.h not found\n"
+                "install or disable by -DENABLE_BFINDEX=OFF\n"
+                "project URL: https://github.com/CESNET/bloom-filter-index")
+    endif()
+endif(ENABLE_BFINDEX)
