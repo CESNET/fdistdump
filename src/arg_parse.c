@@ -40,7 +40,7 @@
 
 #define _XOPEN_SOURCE           // strptime()
 
-#include "config.h"             // for PACKAGE_NAME, PACKAGE_STRING
+#include "config.h"             // for PROJECT_NAME, PROJECT_VERSION
 
 #include <assert.h>             // for assert
 #include <ctype.h>              // for isspace
@@ -115,11 +115,11 @@ enum {  // command line options
  * Global variables.
  */
 static const char *const USAGE_STRING =
-"Usage: mpiexec [MPI_options] " PACKAGE_NAME " [options] path ...\n"
+"Usage: mpiexec [MPI_options] " PROJECT_NAME " [options] path ...\n"
 "       mpiexec [global_MPI_options] \\\n"
-"               [local_MPI_options] " PACKAGE_NAME " [options] : \\\n"
-"               [local_MPI_options] " PACKAGE_NAME " [options] path1 ... : \\\n"
-"               [local_MPI_options] " PACKAGE_NAME " [options] path2 ... :  ...";
+"               [local_MPI_options] " PROJECT_NAME " [options] : \\\n"
+"               [local_MPI_options] " PROJECT_NAME " [options] path1 ... : \\\n"
+"               [local_MPI_options] " PROJECT_NAME " [options] path2 ... :  ...";
 
 // variables for getopt_long() setup
 static const char *const short_opts = "a:f:l:o:s:t:T:v:";
@@ -1272,13 +1272,13 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         case OPT_HELP:
             if (root_proc) {
                 printf("%s\n\n", USAGE_STRING);
-                printf("For the complete documentation see man 1 " PACKAGE_NAME
+                printf("For the complete documentation see man 1 " PROJECT_NAME
                        ".\n");
             }
             return E_HELP;
         case OPT_VERSION:  // version
             if (root_proc) {
-                printf("%s\n", PACKAGE_STRING);
+                printf("%s %s\n", PROJECT_NAME, PROJECT_VERSION);
             }
             return E_HELP;
 

@@ -39,7 +39,7 @@
  * if advised of the possibility of such damage.
  */
 
-#include "config.h"                // HAVE_LIBBFINDEX
+#include "config.h"                // for HAVE_LIBBFINDEX
 #include "path_array.h"
 
 #include <assert.h>                // for assert

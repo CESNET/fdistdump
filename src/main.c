@@ -42,8 +42,6 @@
  * if advised of the possibility of such damage.
  */
 
-#include "config.h"
-
 #include <stdlib.h>     // for EXIT_SUCCESS
 
 #include <mpi.h>        // for MPI_Abort, MPI_COMM_WORLD, MPI_Comm_rank, MPI...
@@ -87,8 +85,8 @@ main(int argc, char *argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     // check if there are at least two processes
-    ABORT_IF(world_size < 2, E_MPI, PACKAGE_NAME
-             " requires at least 2 copies of the program to run "
+    ABORT_IF(world_size < 2, E_MPI,
+             " at least 2 copies of the program are required "
              "(one for the master and the others for the slaves). "
              "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
 

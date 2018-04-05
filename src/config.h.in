@@ -40,5 +40,5 @@
 
 #pragma once
 
-#cmakedefine PROJECT_NAME
-#cmakedefine PROJECT_VERSION
+#cmakedefine PROJECT_NAME "@PROJECT_NAME@"
+#cmakedefine PROJECT_VERSION "@PROJECT_VERSION@"
