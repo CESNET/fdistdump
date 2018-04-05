@@ -16,10 +16,17 @@ include(cmake/functions.cmake)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)  # TODO: remove
 
-# command-line option() usage: -Doption=ON or -Doption=OFF
+# option(): an option that the user can optionally select by -Doption=<ON|OFF>
+# -DENABLE_BFINDEX=<ON|OFF>
 option(ENABLE_BFINDEX
-       "Enable/disable support for the Bloom filter indexing library"
-       ON)
+       "Enable/disable support for the Bloom filter indexing library" ON)
+
+# select build type by -DCMAKE_BUILD_TYPE=<Debug|Release|RelWithDebInfo|MinSizeRel>
+# single-configuration generators are Makefile Generators, Ninja, ...
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE_UPPER)
 
 ################################################################################
 # Setup options for the C compiler, preprocessor, and linker.
@@ -56,53 +63,39 @@ check_and_add_compile_options("${advanced_warning_options}")
 
 
 # find a Message Passing Interface (MPI) implementation for all enabled languag.
-find_package(MPI REQUIRED)
-set(mpi_c_version_needed 2.0)
-if (MPI_C_VERSION VERSION_LESS mpi_c_version_needed)
-    message(FATAL_ERROR
-            "MPI v${MPI_C_VERSION} detected, but at least v${mpi_c_version_needed} is required")
-endif()
+find_package(MPI 2.0 REQUIRED)
 
 # find OpenMP support for all enabled languages
-find_package(OpenMP REQUIRED)
-set(openmp_version_needed 3.0)
-if (OpenMP_C_VERSION VERSION_LESS openmp_version_needed)
-    message(FATAL_ERROR
-            "OpenMP v${OpenMP_C_VERSION} detected, but at least v${openmp_version_needed} is required")
-endif()
+find_package(OpenMP 3.0 REQUIRED)
 
 
 ################################################################################
 add_subdirectory(src)
 
 ################################################################################
-message(STATUS)
 message("Project:\n"
         "\tname        = ${PROJECT_NAME}\n"
         "\tdescription = ${PROJECT_DESCRIPTION}\n"
         "\tversion     = ${PROJECT_VERSION}\n"
         "\tsource dir  = ${PROJECT_SOURCE_DIR}\n"
-        "\tbinary dir  = ${PROJECT_BINARY_DIR}"
+        "\tbinary dir  = ${PROJECT_BINARY_DIR}\n"
         )
-
 message("Options:\n"
         "\tbfindex = ${ENABLE_BFINDEX} (change by -DENABLE_BFINDEX=<ON|OFF>)\n"
         )
-
-message(STATUS)
 message("C build environment:\n"
-        "\tinstall prefix = ${CMAKE_INSTALL_PREFIX}\n"
-        "\tbuild type     = ${BUILD_TYPE_UPPER}\n"
-        "\n"
         "\tcompiler ID      = ${CMAKE_C_COMPILER_ID}\n"
         "\tcompiler version = ${CMAKE_C_COMPILER_VERSION}\n"
         "\tcompiler path    = ${CMAKE_C_COMPILER}\n"
+        "\n"
+        "\tbuild type       = ${CMAKE_BUILD_TYPE}\n"
+        "\tgeneral flags    = ${CMAKE_C_FLAGS}\n"
+        "\tbuild type flags = ${CMAKE_C_FLAGS_${BUILD_TYPE_UPPER}}\n"
         "\n"
         "\tOpenMP version   = ${OpenMP_C_VERSION}\n"
         "\tOpenMP flags     = ${OpenMP_C_FLAGS}\n"
         "\tOpenMP libraries = ${OpenMP_C_LIB_NAMES}\n"
         )
-message(STATUS)
 message("MPI:\n"
         "\tversion             = ${MPI_C_VERSION}\n"
         "\tcompiler (not used) = ${MPI_C_COMPILER}\n"
@@ -110,7 +103,6 @@ message("MPI:\n"
         "\tcompile definitions = ${MPI_C_COMPILE_DEFINITIONS}\n"
         "\tinclude dirs        = ${MPI_C_INCLUDE_DIRS}\n"
         "\tlink flags          = ${MPI_C_LINK_FLAGS}\n"
-        "\tlibraries           = ${MPI_C_LIBRARIES}\n"
+        "\tlibraries           = ${MPI_C_LIB_NAMES}\n"
         )
-
-message(STATUS "CMAKE_SYSTEM     = ${CMAKE_SYSTEM}")
+message("CMAKE_SYSTEM = ${CMAKE_SYSTEM}")
