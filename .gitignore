@@ -1,35 +1,4 @@
-#"autoreconf -i" products
-Makefile.in
-/aclocal.m4
-/autom4te.cache/
-/config.h.in
-/configure
-/depcomp
-/install-sh
-/missing
-/test-driver
-/compile
-
-#"./configure" products
-Makefile
-.deps/
-/config.h
-/config.log
-/config.status
-/stamp-h1
-.dirstamp
-
-#vim
+# vim
 *~
 *.swp
 *.swo
-
-#tests
-*.log
-*.trs
-
-#object files
-*.o
-
-#ctags
-tags
