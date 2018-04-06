@@ -1,11 +1,10 @@
 .\" Man page for fdistdump
-.\" Author: Jan Wrona, <wrona@cesnet.cz>
-.TH FDISTDUMP 1 "2018-03-22" "0.4.1" "fdistdump manual"
+.TH @PROJECT_NAME_UPPER@ 1 "@DATE@" "@PROJECT_VERSION@" "@PROJECT_NAME@ manual"
 
 
 .\" NAME section ---------------------------------------------------------------
 .SH NAME
-fdistdump \- a tool to query IP flow records on a distributed system
+@PROJECT_NAME@ \- @PROJECT_DESCRIPTION@
 
 
 .\" SYNOPSIS section -----------------------------------------------------------
