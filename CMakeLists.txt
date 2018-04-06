@@ -1,25 +1,31 @@
 # set the minimum required version of cmake
 cmake_minimum_required(VERSION 3.5)
 
-# set a name and version for the project
+################################################################################
+# setup a the project
 project(fdistdump
         VERSION 0.4.1
         DESCRIPTION "a tool to query IP flow records on a distributed system"
         LANGUAGES C)
 
-# check the current system/platform
-if(NOT UNIX)
-    message(FATAL_ERROR "only UNIX-like OS's (including Apple OS X and CygWin) are supported")
-endif()
-
+##### includes (load and run CMake code from a file or module)
+# common functions
 include(cmake/functions.cmake)
+# provides a macro to check if a header file can be included in C
+include(CheckIncludeFile)
+# define GNU standard installation directories (vars later passed to install())
+include(GNUInstallDirs)
 
-set(CMAKE_VERBOSE_MAKEFILE ON)  # TODO: remove
-
-# option(): an option that the user can optionally select by -Doption=<ON|OFF>
+##### options that the user can optionally select by e.g., -Doption=<ON|OFF>
 # -DENABLE_BFINDEX=<ON|OFF>
 option(ENABLE_BFINDEX
        "Enable/disable support for the Bloom filter indexing library" ON)
+
+# check the current system/platform
+if(NOT UNIX)
+    message(FATAL_ERROR
+            "only UNIX-like OS's (including Apple OS X and CygWin) are supported")
+endif()
 
 # select build type by -DCMAKE_BUILD_TYPE=<Debug|Release|RelWithDebInfo|MinSizeRel>
 # single-configuration generators are Makefile Generators, Ninja, ...
@@ -62,6 +68,7 @@ set(advanced_warning_options
 check_and_add_compile_options("${advanced_warning_options}")
 
 
+################################################################################
 # find a Message Passing Interface (MPI) implementation for all enabled languag.
 find_package(MPI 2.0 REQUIRED)
 
@@ -71,8 +78,14 @@ find_package(OpenMP 3.0 REQUIRED)
 
 ################################################################################
 add_subdirectory(src)
+add_subdirectory(doc)
 
 ################################################################################
+# generate instalation rules for the license file
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_FULL_DOCDIR}")
+
+################################################################################
+# finally print usefull informations
 message("Project:\n"
         "\tname        = ${PROJECT_NAME}\n"
         "\tdescription = ${PROJECT_DESCRIPTION}\n"
@@ -82,6 +95,12 @@ message("Project:\n"
         )
 message("Options:\n"
         "\tbfindex = ${ENABLE_BFINDEX} (change by -DENABLE_BFINDEX=<ON|OFF>)\n"
+        )
+message("Installation directories:\n"
+        "\tprefix = ${CMAKE_INSTALL_PREFIX} (change by -DCMAKE_INSTALL_PREFIX=<path>)\n"
+        "\tbin    = ${CMAKE_INSTALL_FULL_BINDIR}\n"
+        "\tman    = ${CMAKE_INSTALL_FULL_MANDIR}\n"
+        "\tdoc    = ${CMAKE_INSTALL_FULL_DOCDIR}\n"
         )
 message("C build environment:\n"
         "\tcompiler ID      = ${CMAKE_C_COMPILER_ID}\n"
@@ -105,4 +124,4 @@ message("MPI:\n"
         "\tlink flags          = ${MPI_C_LINK_FLAGS}\n"
         "\tlibraries           = ${MPI_C_LIB_NAMES}\n"
         )
-message("CMAKE_SYSTEM = ${CMAKE_SYSTEM}")
+message("CMAKE_SYSTEM = ${CMAKE_SYSTEM}")  # TODO: remove?

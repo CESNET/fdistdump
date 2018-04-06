@@ -1,6 +1,3 @@
-include(CheckIncludeFile)
-
-################################################################################
 # create a list of source files
 set(SOURCE_LIST
     arg_parse.c arg_parse.h
@@ -105,3 +102,7 @@ if(ENABLE_BFINDEX)
                 "project URL: https://github.com/CESNET/bloom-filter-index")
     endif()
 endif(ENABLE_BFINDEX)
+
+################################################################################
+# generate instalation rules for the target
+install(TARGETS fdistdump RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
