@@ -9,15 +9,18 @@ project(fdistdump
         LANGUAGES C)
 
 ##### includes (load and run CMake code from a file or module)
-# common functions
-include(cmake/functions.cmake)
 # provides a macro to check if a header file can be included in C
 include(CheckIncludeFile)
 # define GNU standard installation directories (vars later passed to install())
 include(GNUInstallDirs)
 
-##### options that the user can optionally select by e.g., -Doption=<ON|OFF>
-# -DENABLE_BFINDEX=<ON|OFF>
+# common functions
+include(cmake/functions.cmake)
+# setup and include CPack model
+include(CMakeCPack.cmake)
+
+##### options that the user can optionally select by e.g., -D option=<ON|OFF>
+# -D ENABLE_BFINDEX=<ON|OFF>
 option(ENABLE_BFINDEX
        "Enable/disable support for the Bloom filter indexing library" ON)
 
@@ -27,7 +30,7 @@ if(NOT UNIX)
             "only UNIX-like OS's (including Apple OS X and CygWin) are supported")
 endif()
 
-# select build type by -DCMAKE_BUILD_TYPE=<Debug|Release|RelWithDebInfo|MinSizeRel>
+# select build type by -D CMAKE_BUILD_TYPE=<Debug|Release|RelWithDebInfo|MinSizeRel>
 # single-configuration generators are Makefile Generators, Ninja, ...
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -82,7 +85,9 @@ add_subdirectory(doc)
 
 ################################################################################
 # generate instalation rules for the license file
-install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_FULL_DOCDIR}")
+install(FILES LICENSE
+        DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+        COMPONENT "Documentation")
 
 ################################################################################
 # finally print usefull informations
@@ -94,10 +99,10 @@ message("Project:\n"
         "\tbinary dir  = ${PROJECT_BINARY_DIR}\n"
         )
 message("Options:\n"
-        "\tbfindex = ${ENABLE_BFINDEX} (change by -DENABLE_BFINDEX=<ON|OFF>)\n"
+        "\tbfindex = ${ENABLE_BFINDEX} (change by -D ENABLE_BFINDEX=<ON|OFF>)\n"
         )
 message("Installation directories:\n"
-        "\tprefix = ${CMAKE_INSTALL_PREFIX} (change by -DCMAKE_INSTALL_PREFIX=<path>)\n"
+        "\tprefix = ${CMAKE_INSTALL_PREFIX} (change by -D CMAKE_INSTALL_PREFIX=PATH<path>)\n"
         "\tbin    = ${CMAKE_INSTALL_FULL_BINDIR}\n"
         "\tman    = ${CMAKE_INSTALL_FULL_MANDIR}\n"
         "\tdoc    = ${CMAKE_INSTALL_FULL_DOCDIR}\n"

@@ -19,8 +19,8 @@ add_executable(fdistdump ${SOURCE_LIST})
 
 ################################################################################
 # generate configuration header file from a template and update the include dirs
-configure_file("${PROJECT_SOURCE_DIR}/src/config.h.in"
-               "${PROJECT_BINARY_DIR}/src/config.h"
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/config.h.in"
+               "${CMAKE_CURRENT_BINARY_DIR}/config.h"
                @ONLY)
 include_directories("${PROJECT_BINARY_DIR}/src/")
 
@@ -105,4 +105,6 @@ endif(ENABLE_BFINDEX)
 
 ################################################################################
 # generate instalation rules for the target
-install(TARGETS fdistdump RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(TARGETS fdistdump
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        COMPONENT "Runtime")
