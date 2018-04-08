@@ -34,27 +34,39 @@ include_directories("${PROJECT_BINARY_DIR}/src/")
 
 ################################################################################
 # setup MPI compilation environment (variables set by FindMPI module)
-foreach(option ${MPI_C_COMPILE_OPTIONS})
-    target_compile_options(fdistdump PRIVATE ${option})  # no need to check
-endforeach(option)
-foreach(definition ${MPI_C_COMPILE_DEFINITIONS})
-    target_compile_definitions(fdistdump PRIVATE ${definition})
-endforeach(definition)
-# add include directories
-target_include_directories(fdistdump PRIVATE ${MPI_C_INCLUDE_DIRS})
+# XXX: target_compile_* commands treats options with spaces as single options
+#      and can handle a list -- do not expand lists.
+#      Other target_* commands works somewhat magically.
+
+# the FindMPI module was improved in CMake 3.10
+if(CMAKE_VERSION VERSION_LESS 3.10)
+    # add compilation options (cannot use target_compile_options because
+    # MPI_C_COMPILE_FLAGS are space separated)
+    string(APPEND CMAKE_C_FLAGS " ${MPI_C_COMPILE_FLAGS}")
+
+    # add include directories
+    target_include_directories(fdistdump PRIVATE "${MPI_C_INCLUDE_PATH}")
+else()
+    # add compilation options and definitiones (both lists)
+    target_compile_options(fdistdump PRIVATE "${MPI_C_COMPILE_OPTIONS}")
+    target_compile_definitions(fdistdump PRIVATE "${MPI_C_COMPILE_DEFINITIONS}")
+
+    # add include directories
+    target_include_directories(fdistdump PRIVATE "${MPI_C_INCLUDE_DIRS}")
+endif(CMAKE_VERSION VERSION_LESS 3.10)
 
 # add libraries and flags to use when linking
-target_link_libraries(fdistdump PRIVATE ${MPI_C_LINK_FLAGS})
-foreach(lib_name ${MPI_C_LIB_NAMES})
-    target_link_libraries(fdistdump PRIVATE "${MPI_${lib_name}_LIBRARY}")
-endforeach(lib_name ${MPI_C_LIB_NAMES})
+# strip whitespaces to satisfy policy CMP0004
+string(STRIP "${MPI_C_LINK_FLAGS}" MPI_C_LINK_FLAGS)
+target_link_libraries(fdistdump PRIVATE "${MPI_C_LINK_FLAGS}")
+target_link_libraries(fdistdump PRIVATE "${MPI_C_LIBRARIES}")
 
 ################################################################################
 # setup OpenMP compilation environment (variables set by FindOpenMP module)
-target_compile_options(fdistdump PRIVATE ${OpenMP_C_FLAGS})
-foreach(lib_name ${OpenMP_C_LIB_NAMES})
-    target_link_libraries(fdistdump PRIVATE "${OpenMP_${lib_name}_LIBRARY}")
-endforeach(lib_name)
+# Add compilation options. Cannot use target_compile_options because
+# MPI_C_COMPILE_FLAGS are space separated. CMAKE_C_FLAGS are also used when
+# linking, so no additional libraries have to be added.
+string(APPEND CMAKE_C_FLAGS " ${OpenMP_C_FLAGS}")
 
 ################################################################################
 # Search for libraries to use when linking. Add full paths to a library files to

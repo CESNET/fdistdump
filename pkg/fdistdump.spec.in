@@ -55,7 +55,7 @@ BuildArch:      noarch
 Summary:        Fdistdump compiled against Open MPI
 BuildRequires:  %{common_build_requires}
 BuildRequires:  openmpi-devel
-# require explicitly to guarantee the pickup of the right runtime
+# require openmpi explicitly to guarantee the pickup of the right runtime
 Requires:       openmpi
 Requires:       %{name}-common = %{version}-%{release}
 
@@ -66,8 +66,8 @@ Requires:       %{name}-common = %{version}-%{release}
 %package        mpich
 Summary:        Fdistdump compiled against MPICH
 BuildRequires:  %{common_build_requires}
-BuildRequires:  libnf-devel
-# require explicitly to guarantee the pickup of the right runtime
+BuildRequires:  mpich-devel
+# require mpich explicitly to guarantee the pickup of the right runtime
 Requires:       mpich
 Requires:       %{name}-common = %{version}-%{release}
 

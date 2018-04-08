@@ -2,11 +2,12 @@
 cmake_minimum_required(VERSION 3.5)
 
 ################################################################################
-# setup a the project
+# setup a the project (DESCRIPTION directive is not supported since 3.9)
 project(fdistdump
         VERSION 0.4.1
-        DESCRIPTION "a tool to query IP flow records on a distributed system"
         LANGUAGES C)
+set(PROJECT_DESCRIPTION
+    "a tool to query IP flow records on a distributed system")
 set(PROJECT_DESCRIPTION_LONG "\
 Fdistdump is a fast, scalable, distributed tool to query Internet Protocol \
 flow record files. The master/slave communication model allows it to run jobs \
@@ -86,11 +87,9 @@ check_and_add_compile_options("${advanced_warning_options}")
 
 ################################################################################
 # find a Message Passing Interface (MPI) implementation for all enabled languag.
-# TODO: add backward compatibility for CMake 3.5
 find_package(MPI 2.0 REQUIRED)
 
 # find OpenMP support for all enabled languages
-# TODO: add backward compatibility for CMake 3.5
 find_package(OpenMP 3.0 REQUIRED)
 
 
@@ -129,23 +128,34 @@ message("C build environment:\n"
         "\tcompiler version = ${CMAKE_C_COMPILER_VERSION}\n"
         "\tcompiler path    = ${CMAKE_C_COMPILER}\n"
         "\n"
-        "\tbuild type       = ${CMAKE_BUILD_TYPE}\n"
-        "\tgeneral flags    = ${CMAKE_C_FLAGS}\n"
-        "\tbuild type flags = ${CMAKE_C_FLAGS_${BUILD_TYPE_UPPER}}\n"
+        "\tbuild type         = ${CMAKE_BUILD_TYPE}\n"
+        "\tgeneral options    = ${CMAKE_C_FLAGS}\n"
+        "\tbuild type options = ${CMAKE_C_FLAGS_${BUILD_TYPE_UPPER}}\n"
         "\n"
-        "\tOpenMP version   = ${OpenMP_C_VERSION}\n"
-        "\tOpenMP flags     = ${OpenMP_C_FLAGS}\n"
-        "\tOpenMP libraries = ${OpenMP_C_LIB_NAMES}\n"
+        "\tOpenMP version   = ${OpenMP_C_VERSION}\n"  # since 3.9
+        "\tOpenMP options   = ${OpenMP_C_FLAGS}\n"
+        "\tOpenMP libraries = ${OpenMP_C_LIB_NAMES}\n"  # since 3.9
         )
-message("MPI:\n"
-        "\tversion             = ${MPI_C_VERSION}\n"
-        "\tcompiler (not used) = ${MPI_C_COMPILER}\n"
-        "\tcompile options     = ${MPI_C_COMPILE_OPTIONS}\n"
-        "\tcompile definitions = ${MPI_C_COMPILE_DEFINITIONS}\n"
-        "\tinclude dirs        = ${MPI_C_INCLUDE_DIRS}\n"
-        "\tlink flags          = ${MPI_C_LINK_FLAGS}\n"
-        "\tlibraries           = ${MPI_C_LIB_NAMES}\n"
-        )
+if(CMAKE_VERSION VERSION_LESS 3.10)
+    # the FindMPI module was improved in CMake 3.10
+    message("MPI:\n"
+            "\tcompiler (not used) = ${MPI_C_COMPILER}\n"
+            "\tcompile options     = ${MPI_C_COMPILE_FLAGS}\n"
+            "\tinclude path        = ${MPI_C_INCLUDE_PATH}\n"
+            "\tlinker options      = ${MPI_C_LINK_FLAGS}\n"
+            "\tlibraries           = ${MPI_C_LIBRARIES}\n"
+            )
+else()
+    message("MPI:\n"
+            "\tversion             = ${MPI_C_VERSION}\n"
+            "\tcompiler (not used) = ${MPI_C_COMPILER}\n"
+            "\tcompile options     = ${MPI_C_COMPILE_OPTIONS}\n"
+            "\tcompile definitions = ${MPI_C_COMPILE_DEFINITIONS}\n"
+            "\tinclude dirs        = ${MPI_C_INCLUDE_DIRS}\n"
+            "\tlinker options      = ${MPI_C_LINK_FLAGS}\n"
+            "\tlibraries           = ${MPI_C_LIB_NAMES}\n"
+            )
+endif(CMAKE_VERSION VERSION_LESS 3.10)
 message("Various:\n"
         "\tCMake version  = ${CMAKE_VERSION}\n"
         "\tsystem name    = ${CMAKE_SYSTEM_NAME}\n"
