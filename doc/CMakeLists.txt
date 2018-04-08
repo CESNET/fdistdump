@@ -8,5 +8,5 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/man/${PROJECT_NAME}.1.in"
 
 # generate instalation rules for the documentation
 install(FILES "${PROJECT_BINARY_DIR}/doc/man/${PROJECT_NAME}.1"
-        DESTINATION "${CMAKE_INSTALL_MANDIR}"
-        COMPONENT "Documentation")
+        DESTINATION "${CMAKE_INSTALL_MANDIR}/man1"
+        COMPONENT "man-pages")

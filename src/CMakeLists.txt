@@ -17,6 +17,13 @@ endif(ENABLE_BFINDEX)
 # add an executable to the project using the source files
 add_executable(fdistdump ${SOURCE_LIST})
 
+# Change the executable suffix. Fedora-based distros require executables to be
+# suffixed with $MPI_SUFFIX. CMAKE_EXECUTABLE_SUFFIX variable does not work as
+# expected (it is read-only).
+if(EXECUTABLE_SUFFIX)
+    set_target_properties(fdistdump PROPERTIES SUFFIX "${EXECUTABLE_SUFFIX}")
+endif(EXECUTABLE_SUFFIX)
+
 ################################################################################
 # generate configuration header file from a template and update the include dirs
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/config.h.in"
@@ -88,7 +95,7 @@ if(ENABLE_BFINDEX)
     if(LIB_BFINDEX STREQUAL "LIB_BFINDEX-NOTFOUND")
         message(FATAL_ERROR
                 "bfindex library not found\n"
-                "install or disable by -DENABLE_BFINDEX=OFF\n"
+                "install or disable by -D ENABLE_BFINDEX=OFF\n"
                 "project URL: https://github.com/CESNET/bloom-filter-index")
     else()
         target_link_libraries(fdistdump PRIVATE "${LIB_BFINDEX}")
@@ -98,7 +105,7 @@ if(ENABLE_BFINDEX)
     if(NOT BFINDEX_HEADER)
         message(FATAL_ERROR
                 "bf_index.h not found\n"
-                "install or disable by -DENABLE_BFINDEX=OFF\n"
+                "install or disable by -D ENABLE_BFINDEX=OFF\n"
                 "project URL: https://github.com/CESNET/bloom-filter-index")
     endif()
 endif(ENABLE_BFINDEX)
@@ -107,4 +114,4 @@ endif(ENABLE_BFINDEX)
 # generate instalation rules for the target
 install(TARGETS fdistdump
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-        COMPONENT "Runtime")
+        COMPONENT "executables")

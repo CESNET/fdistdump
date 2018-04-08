@@ -38,11 +38,7 @@
 
 .\" DESCRIPTION section --------------------------------------------------------
 .SH DESCRIPTION
-\fBfdistdump\fR is a fast, scalable, distributed tool to query Internet Protocol flow record files.
-The master/slave communication model allows it to run jobs on unlimited number of nodes, including a single local node.
-Message Passing Interface (MPI) is used as an underlying communication protocol.
-Its basic features include listing, filtering, sorting, and aggregating records.
-\fBfdistdump\fR also implements an algorithm to quickly answer Top-N queries (e.g., find the N objects with the highest aggregate values) on a distributed system.
+@PROJECT_DESCRIPTION_LONG@
 
 
 .\" INVOCATION section ------------------------------------------------------------

@@ -1,38 +1,3 @@
-# get all propreties that cmake supports
-execute_process(COMMAND cmake --help-property-list
-    OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
-# convert command output into a CMake list
-string(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-string(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-
-# print all properties that cmake supports
-function(print_properties)
-    message ("CMAKE_PROPERTY_LIST = ${CMAKE_PROPERTY_LIST}")
-endfunction(print_properties)
-
-# print all properties of the given target
-function(print_target_properties tgt)
-    if(NOT TARGET ${tgt})
-        message("There is no target named '${tgt}'")
-        return()
-    endif()
-
-    foreach (prop ${CMAKE_PROPERTY_LIST})
-        string(REPLACE "<CONFIG>" "${CMAKE_BUILD_TYPE}" prop ${prop})
-        if(prop STREQUAL "LOCATION" OR prop MATCHES "^LOCATION_"
-                OR prop MATCHES "_LOCATION$")
-            continue()
-        endif()
-
-        get_property(propval TARGET ${tgt} PROPERTY ${prop} SET)
-        if (propval)
-            get_target_property(propval ${tgt} ${prop})
-            message ("${tgt} ${prop} = ${propval}")
-        endif()
-    endforeach(prop)
-endfunction(print_target_properties)
-
-
 # For every option in the list, check whether the C compiler supports the
 # option. If yes, add that option to the compilation of source files. If no,
 # print warning and skip the option.
@@ -53,3 +18,12 @@ function(check_and_add_compile_options option_list)
         endif(${option_name})
     endforeach(option)
 endfunction(check_and_add_compile_options)
+
+# Capitalize the given string str and save the result in the res_var.
+function(string_capitalize str res_var)
+    string(SUBSTRING "${str}" 0  1 first_letter)
+    string(SUBSTRING "${str}" 1 -1 rest)
+    string(TOUPPER "${first_letter}" first_letter_upper)
+    string(CONCAT str_capitalized "${first_letter_upper}" "${rest}")
+    set("${res_var}" "${str_capitalized}" PARENT_SCOPE)
+endfunction(string_capitalize)

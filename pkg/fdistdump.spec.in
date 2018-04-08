@@ -1,0 +1,148 @@
+# user-defined macros ##########################################################
+# make a common out-of-source build
+%define common_build \
+  rm -rf common; \
+  mkdir common; \
+  cd common; \
+  %cmake "../@CPACK_SOURCE_PACKAGE_FILE_NAME@"; \
+  %make_build ; \
+  cd ..
+
+# make an out-of-source build specific for the MPI environment
+%define mpi_build \
+  rm -rf "$MPI_COMPILER"; \
+  mkdir "$MPI_COMPILER"; \
+  cd "$MPI_COMPILER"; \
+  %cmake -D CMAKE_INSTALL_PREFIX:PATH="$MPI_HOME" \\\
+         -D CMAKE_INSTALL_BINDIR:PATH="$MPI_BIN" \\\
+         -D CMAKE_INSTALL_MANDIR:PATH="$MPI_MAN" \\\
+         -D EXECUTABLE_SUFFIX="$MPI_SUFFIX" \\\
+         "../@CPACK_SOURCE_PACKAGE_FILE_NAME@"; \
+  %make_build ; \
+  cd ..
+
+# CMake install file (used directly instead of through make)
+%define cmake_install_file cmake_install.cmake
+
+# common BuildRequires for all MPI subpackages
+%define common_build_requires gcc cmake3 >= 3.5 make libnf-devel bloom_filter_indexes
+
+
+# preamble #####################################################################
+# shared
+Name:           @CPACK_PACKAGE_NAME@
+Version:        @CPACK_PACKAGE_VERSION@
+Release:        @CPACK_RPM_PACKAGE_RELEASE@%{?dist}
+Summary:        @CPACK_PACKAGE_DESCRIPTION_SUMMARY@
+
+License:        GPLv3+
+URL:            https://github.com/CESNET/fdistdump
+Source0:        %{url}/releases/download/v%{version}/@CPACK_SOURCE_PACKAGE_FILE_NAME@@RPM_SOURCE_PACKAGE_SUFFIX@
+
+%description
+@CPACK_PACKAGE_DESCRIPTION@
+
+# preamble for the common subpackage
+%package        common
+Summary:        @CPACK_PACKAGE_DESCRIPTION_SUMMARY@, common files
+BuildArch:      noarch
+
+%description    common
+@CPACK_PACKAGE_DESCRIPTION@
+
+# preamble for the Open MPI subpackage
+%package        openmpi
+Summary:        Fdistdump compiled against Open MPI
+BuildRequires:  %{common_build_requires}
+BuildRequires:  openmpi-devel
+# require explicitly to guarantee the pickup of the right runtime
+Requires:       openmpi
+Requires:       %{name}-common = %{version}-%{release}
+
+%description    openmpi
+@CPACK_PACKAGE_DESCRIPTION@
+
+# preamble for the MPICH subpackage
+%package        mpich
+Summary:        Fdistdump compiled against MPICH
+BuildRequires:  %{common_build_requires}
+BuildRequires:  libnf-devel
+# require explicitly to guarantee the pickup of the right runtime
+Requires:       mpich
+Requires:       %{name}-common = %{version}-%{release}
+
+%description    mpich
+@CPACK_PACKAGE_DESCRIPTION@
+
+
+# shared prep section ##########################################################
+%prep
+# setup macro is used to unpack the original sources
+%setup -q -n "@CPACK_SOURCE_PACKAGE_FILE_NAME@"
+
+
+# shared build section #########################################################
+%build
+cd ..  # step out of the source tree
+
+%{_openmpi_load}
+# Configure for the common subpackage (only because of man pages). This has to
+# be inside MPI environment, otherwise CMake would fail. Then build for the Open
+# MPI subpackage.
+%common_build
+%mpi_build
+%{_openmpi_unload}
+
+%{_mpich_load}
+# Build for the MPICH subpackage.
+%mpi_build
+%{_mpich_unload}
+
+
+# shared install section #######################################################
+%install
+cd ..  # step out of the source tree
+
+# install files for the common subpackage -- only man-pages CMake component
+DESTDIR="%{buildroot}" cmake -D COMPONENT:STRING=man-pages \
+                             -P "common/%{cmake_install_file}"
+
+# install files for the Open MPI subpackage -- only executables CMake component
+%{_openmpi_load}
+DESTDIR="%{buildroot}" cmake -D COMPONENT:STRING=executables \
+                             -P "$MPI_COMPILER/%{cmake_install_file}"
+%{_openmpi_unload}
+
+# install files for the MPICH subpackage -- only executables CMake component
+%{_mpich_load}
+DESTDIR="%{buildroot}" cmake -D COMPONENT:STRING=executables \
+                             -P "$MPI_COMPILER/%{cmake_install_file}"
+%{_mpich_unload}
+
+
+# files section ################################################################
+%files common
+%doc LICENSE README.md
+%{_mandir}/man1/%{name}.1.gz
+
+%files openmpi
+%{_libdir}/openmpi/bin/%{name}_openmpi
+
+%files mpich
+%{_libdir}/mpich/bin/%{name}_mpich
+
+
+# changelog section ############################################################
+%changelog
+* Sun Jan 21 2018 Jan Wrona <wrona@cesnet.cz> 0.2.2-1
+- Fix missing build dependencies: gcc autoconf automake libtool make.
+- Add new build dependency: bloom_filter_indexes. Support for Bloom filter base
+  indexes has been integrated into fdistdump using bloom-filter-index library
+  (https://github.com/CESNET/bloom-filter-index).
+
+* Thu Sep 1 2016 Jan Wrona <wrona@cesnet.cz> 0.1.0-2
+- Changed install paths, because MPI implementation specific files MUST be
+  installed in the directories used by the used MPI compiler.
+
+* Tue Aug 30 2016 Jan Wrona <wrona@cesnet.cz> 0.1.0-1
+- First vesrion of the specfile.

@@ -7,6 +7,15 @@ project(fdistdump
         VERSION 0.4.1
         DESCRIPTION "a tool to query IP flow records on a distributed system"
         LANGUAGES C)
+set(PROJECT_DESCRIPTION_LONG "\
+Fdistdump is a fast, scalable, distributed tool to query Internet Protocol \
+flow record files. The master/slave communication model allows it to run jobs \
+on unlimited number of nodes, including a single local node. Message Passing \
+Interface (MPI) is used as an underlying communication protocol. Its basic \
+features include listing, filtering, sorting, and aggregating records. \
+Fdistdump also implements algorithm to quickly answer Top-N queries (e.g., \
+find the N objects with the highest aggregate values) on a distributed system.\
+")
 
 ##### includes (load and run CMake code from a file or module)
 # provides a macro to check if a header file can be included in C
@@ -16,13 +25,17 @@ include(GNUInstallDirs)
 
 # common functions
 include(cmake/functions.cmake)
-# setup and include CPack model
-include(CMakeCPack.cmake)
 
 ##### options that the user can optionally select by e.g., -D option=<ON|OFF>
-# -D ENABLE_BFINDEX=<ON|OFF>
+# -D ENABLE_BFINDEX=<ON|OFF>, defaults to ON
 option(ENABLE_BFINDEX
        "Enable/disable support for the Bloom filter indexing library" ON)
+# -D EXECUTABLE_SUFFIX:STRING=<suffix>, defaults to empty string
+set(EXECUTABLE_SUFFIX CACHE STRING "Set the executable suffix.")
+
+##### various project settings and checks
+# always use relative path for install() DESTINATIONs
+set(CMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION ON)
 
 # check the current system/platform
 if(NOT UNIX)
@@ -73,21 +86,24 @@ check_and_add_compile_options("${advanced_warning_options}")
 
 ################################################################################
 # find a Message Passing Interface (MPI) implementation for all enabled languag.
+# TODO: add backward compatibility for CMake 3.5
 find_package(MPI 2.0 REQUIRED)
 
 # find OpenMP support for all enabled languages
+# TODO: add backward compatibility for CMake 3.5
 find_package(OpenMP 3.0 REQUIRED)
 
 
 ################################################################################
 add_subdirectory(src)
 add_subdirectory(doc)
+add_subdirectory(pkg)
 
 ################################################################################
 # generate instalation rules for the license file
 install(FILES LICENSE
         DESTINATION "${CMAKE_INSTALL_DOCDIR}"
-        COMPONENT "Documentation")
+        COMPONENT "documentation")
 
 ################################################################################
 # finally print usefull informations
@@ -99,10 +115,11 @@ message("Project:\n"
         "\tbinary dir  = ${PROJECT_BINARY_DIR}\n"
         )
 message("Options:\n"
-        "\tbfindex = ${ENABLE_BFINDEX} (change by -D ENABLE_BFINDEX=<ON|OFF>)\n"
+        "\tbfindex           = ${ENABLE_BFINDEX} (set by -D ENABLE_BFINDEX=<ON|OFF>)\n"
+        "\texecutable suffix = ${EXECUTABLE_SUFFIX} (set by -D EXECUTABLE_SUFFIX:STRING=<suffix>)\n"
         )
 message("Installation directories:\n"
-        "\tprefix = ${CMAKE_INSTALL_PREFIX} (change by -D CMAKE_INSTALL_PREFIX=PATH<path>)\n"
+        "\tprefix = ${CMAKE_INSTALL_PREFIX} (set by -D CMAKE_INSTALL_PREFIX:PATH=<path>)\n"
         "\tbin    = ${CMAKE_INSTALL_FULL_BINDIR}\n"
         "\tman    = ${CMAKE_INSTALL_FULL_MANDIR}\n"
         "\tdoc    = ${CMAKE_INSTALL_FULL_DOCDIR}\n"
@@ -129,4 +146,8 @@ message("MPI:\n"
         "\tlink flags          = ${MPI_C_LINK_FLAGS}\n"
         "\tlibraries           = ${MPI_C_LIB_NAMES}\n"
         )
-message("CMAKE_SYSTEM = ${CMAKE_SYSTEM}")  # TODO: remove?
+message("Various:\n"
+        "\tCMake version  = ${CMAKE_VERSION}\n"
+        "\tsystem name    = ${CMAKE_SYSTEM_NAME}\n"
+        "\tsystem version = ${CMAKE_SYSTEM_VERSION}\n"
+        )
