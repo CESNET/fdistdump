@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 ################################################################################
-# setup a the project (DESCRIPTION directive is not supported since 3.9)
+# setup a the project (DESCRIPTION directive is not supported until 3.9)
 project(fdistdump
         VERSION 0.4.1
         LANGUAGES C)

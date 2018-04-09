@@ -18,7 +18,6 @@ sudo make install
 cd ..
 
 # install the Bloom filter indexing library
-sudo apt-get install -qq flex bison libbz2-dev
 git clone "https://github.com/CESNET/bloom-filter-index.git"
 cd bloom-filter-index/
 autoreconf -i

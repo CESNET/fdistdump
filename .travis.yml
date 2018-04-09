@@ -22,19 +22,13 @@ env:
 before_install:
     # update, upgrade, and install common prerequisites
     - sudo apt-get -qq update
-    - sudo apt-get -qq install autoconf autoconf-archive automake libtool
-    - sudo apt-get -qq install gcc make
+    # - sudo apt-get -qq install gcc cmake3 make
     # install fdistdump's dependencies
     - extras/install_dependencies_ubuntu.sh
 
-    - export OMPI_CC="$CC"   # CC set by travis as OMPI underlying compiler
-    - export MPICH_CC="$CC"  # CC set by travis as MPICH underlying compiler
-    - unset CC  # otherwise ./configure would not set mpicc as a CC
-
 install:
-    - autoreconf -i
-    - ./configure
-    - make
+    - cmake .
+    - cmake --build .
 
 # before_script:
 
@@ -44,8 +38,7 @@ script:
 
 # after_success:
 
-after_failure:
-    - ./tests/print_logs.sh
+# after_failure:
 
 # after_script:
 
