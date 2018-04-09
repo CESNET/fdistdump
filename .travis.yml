@@ -24,9 +24,9 @@ env:
 
 before_install:
     # update, upgrade, and install additional dependencies such as Ubuntu packages
-    - sudo apt-get -qq update
+    - sudo apt-get -y update
     # package rpm provides rpmbuild
-    - sudo apt-get install rpm
+    - sudo apt-get -y install rpm
 
 install:
     # dependency installation commands
