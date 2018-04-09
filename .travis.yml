@@ -13,6 +13,9 @@ env:
     global:
         # don't waste travis resources, limit threads count
         - OMP_NUM_THREADS=4
+        # set common CMake variables
+        - CMAKE_COMMON_VARS="-D CMAKE_VERBOSE_MAKEFILE=ON"
+
         # coverity related
         - secure: "ZPncDzOLt2e9rb3wCrycqPJHNNtPDjEwJ61dspYbmcLBflHBzoAwTLp3e2UH8p1PufOsf4nNj2SA27Fm47/V0lRZ4TPllwsAzKmWSjVlGWczjpIFT/TMFt6B1rDZ+RLF7J2PQW8t2ZAOJ5wqpHobHijcVtSz4wfiRsGY5Yiavbs0bdGo+CDTl+o8uGqQW5kU66H+C9wBvt2y5WKyp2HnDfojOk7Cp6+Ti5Kcox1AuhwyuQT2iXkmWwKUnTLDuqfHH0kUAnLZMGCAnsg5xnfPKr4/+SZ4QvTnK+Pk8uO6O6Mx3/n3fPyo9i6Gy+Ks7+BGSB173T45CUbWyLd1tu7KSdb2s24lUvK582t4yQ7SJzNnEDg1ENgP9TfjFuLFBEkdlWSVjP4XjrXVujKFzX9hAa2iaquPvFiWvLM6D+a+PVrbuWicRjTpewGFavk0p+Ik+ltFOQMlEcG7P/3iIQZgOF/FQHGYIt3ByOahDUmbyWKQ8DBDc+xPwqlnnDPev/3RIIoAiQPMy/qsJqbCMV8CWmtrMhpSRJdmwtv1n0gpx0DWc7m5Qp/Z1rnmYMmS5Di2oOFm1xfCiLtjX8JLuUlq2rrLrvKiF15CcckpHMmsClv/GztcVNdKCzGx2TcQPDF98SJ0An0bz+Lcao/9OTaBFVtMf2W8edYApAQVzJ82Ex4="
     matrix:
@@ -20,35 +23,40 @@ env:
         - MPI=mpich
 
 before_install:
-    # update, upgrade, and install common prerequisites
+    # update, upgrade, and install additional dependencies such as Ubuntu packages
     - sudo apt-get -qq update
-    # install fdistdump's dependencies
-    - extras/install_dependencies_ubuntu.sh
 
 install:
-    # step out of the source tree
-    - cd ..
+    # dependency installation commands
+    - extras/install_dependencies_ubuntu.sh
 
+before_script:
+    # step out of the source tree and create build directories
+    - cd ..
+    - mkdir debug_build release_build
+
+script:
     # do a debug out-of-source build
-    - mkdir debug_build
     - cd debug_build
-    - cmake -D CMAKE_VERBOSE_MAKEFILE=ON -D CMAKE_BUILD_TYPE:STRING=Debug ../fdistdump
+    - cmake $CMAKE_COMMON_VARS -D CMAKE_BUILD_TYPE:STRING=Debug -D ENABLE_BFINDEX=ON ../fdistdump
+    - cmake --build .
+
+    - rm -rf *
+    - cmake $CMAKE_COMMON_VARS -D CMAKE_BUILD_TYPE:STRING=Debug -D ENABLE_BFINDEX=OFF ../fdistdump
     - cmake --build .
     - cd ..
 
     # do a release out-of-source build
-    - mkdir release_build
     - cd release_build
-    - cmake -D CMAKE_VERBOSE_MAKEFILE=ON -D CMAKE_BUILD_TYPE:STRING=Release ../fdistdump
+    - cmake $CMAKE_COMMON_VARS -D CMAKE_BUILD_TYPE:STRING=Release -D ENABLE_BFINDEX=ON ../fdistdump
     - cmake --build .
+
+    - rm -rf *
+    - cmake $CMAKE_COMMON_VARS -D CMAKE_BUILD_TYPE:STRING=Release -D ENABLE_BFINDEX=OFF ../fdistdump
     - cd ..
 
-# before_script:
-
-# script:
-# no tests available yet
-
 # after_success:
+    # no tests available yet
 
 # after_failure:
 
