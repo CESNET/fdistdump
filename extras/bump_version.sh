@@ -42,7 +42,7 @@ main() {
     local -r LATEST_VERSION_STR=${LATEST_TAG#v}
     IFS="." read -ra LATEST_VERSION_ARR <<<"$LATEST_VERSION_STR"
     [[ ${#LATEST_VERSION_ARR[@]} -ne 3 ]] \
-        && die "invalid number of version string components"
+        && die "invalid count of version string components"
 
     # increment specified component, preserve higher level components, clear
     # lower level components
@@ -72,43 +72,16 @@ main() {
     echo lastest version string: "$LATEST_VERSION_STR"
     echo new version string:     "$NEW_VERSION_STR"
 
-    local FILE_PATH
-    # configure.ac #############################################################
-    FILE_PATH="configure.ac"
-    if ! grep "AC_INIT" "$FILE_PATH" | grep -q "$LATEST_VERSION_STR"; then
+    # root CMakeLists.txt #############################################################
+    local -r FILE_PATH="CMakeLists.txt"
+    if ! grep -q "VERSION\s\+$LATEST_VERSION_STR" "$FILE_PATH"; then
         die "latest version string not found in $FILE_PATH"
     fi
-    sed -i "/AC_INIT/ s/${LATEST_VERSION_STR}/${NEW_VERSION_STR}/" "$FILE_PATH"
-    if grep "AC_INIT" "$FILE_PATH" | grep "$LATEST_VERSION_STR"; then
+    sed -i "/VERSION\s\+$LATEST_VERSION_STR/ \
+        s/${LATEST_VERSION_STR}/${NEW_VERSION_STR}/" "$FILE_PATH"
+    if grep "VERSION\s\+$LATEST_VERSION_STR" "$FILE_PATH"; then
         warn "latest version string found in $FILE_PATH after substitution"
     fi
-
-    # man page fdistdump.1 #####################################################
-    FILE_PATH="doc/man/fdistdump.1"
-    if ! grep "\.TH FDISTDUMP 1" "$FILE_PATH" \
-        | grep -q "$LATEST_VERSION_STR"; then
-        die "latest version string not found in $FILE_PATH"
-    fi
-    sed -i "/\.TH FDISTDUMP 1/ \
-            { \
-              s/[[:digit:]]\{4\}-[[:digit:]]\{1,2\}-[[:digit:]]\{1,2\}/$(date -I)/ ;
-              s/${LATEST_VERSION_STR}/${NEW_VERSION_STR}/ \
-            }" "$FILE_PATH"
-
-    # fdistdump.spec ###########################################################
-    FILE_PATH="fdistdump.spec"
-    if ! grep -q "Version:[[:space:]]*$LATEST_VERSION_STR" "$FILE_PATH"; then
-        die "latest version string not found in $FILE_PATH"
-    fi
-    SPEC_DATE="$(LC_ALL=c date "+%a %b %d %Y")"
-    GIT_NAME="$(git config --get user.name)"
-    GIT_EMAIL="$(git config --get user.email)"
-    HEADER="* $SPEC_DATE $GIT_NAME <$GIT_EMAIL> - $NEW_VERSION_STR-1"
-    BODY="- $1 version bump ($LATEST_VERSION_STR -> $NEW_VERSION_STR)"
-    sed -i -e "/Version:/ s/${LATEST_VERSION_STR}/${NEW_VERSION_STR}/" \
-           -e "/Release:/ s/\(Release:[[:space:]]\+\)[[:digit:]]\+/\11/" \
-           -e "/%changelog/a $HEADER\n$BODY\n" \
-        "$FILE_PATH"
 
     ############################################################################
     echo
