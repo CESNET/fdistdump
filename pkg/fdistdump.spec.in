@@ -4,7 +4,7 @@
   rm -rf common; \
   mkdir common; \
   cd common; \
-  %cmake "../@CPACK_SOURCE_PACKAGE_FILE_NAME@"; \
+  %cmake3 "../@CPACK_SOURCE_PACKAGE_FILE_NAME@"; \
   %make_build ; \
   cd ..
 
@@ -13,7 +13,7 @@
   rm -rf "$MPI_COMPILER"; \
   mkdir "$MPI_COMPILER"; \
   cd "$MPI_COMPILER"; \
-  %cmake -D CMAKE_INSTALL_PREFIX:PATH="$MPI_HOME" \\\
+  %cmake3 -D CMAKE_INSTALL_PREFIX:PATH="$MPI_HOME" \\\
          -D CMAKE_INSTALL_BINDIR:PATH="$MPI_BIN" \\\
          -D CMAKE_INSTALL_MANDIR:PATH="$MPI_MAN" \\\
          -D EXECUTABLE_SUFFIX="$MPI_SUFFIX" \\\
@@ -104,19 +104,19 @@ cd ..  # step out of the source tree
 cd ..  # step out of the source tree
 
 # install files for the common subpackage -- only man-pages CMake component
-DESTDIR="%{buildroot}" cmake -D COMPONENT:STRING=man-pages \
-                             -P "common/%{cmake_install_file}"
+DESTDIR="%{buildroot}" cmake3 -D COMPONENT:STRING=man-pages \
+                              -P "common/%{cmake_install_file}"
 
 # install files for the Open MPI subpackage -- only executables CMake component
 %{_openmpi_load}
-DESTDIR="%{buildroot}" cmake -D COMPONENT:STRING=executables \
-                             -P "$MPI_COMPILER/%{cmake_install_file}"
+DESTDIR="%{buildroot}" cmake3 -D COMPONENT:STRING=executables \
+                              -P "$MPI_COMPILER/%{cmake_install_file}"
 %{_openmpi_unload}
 
 # install files for the MPICH subpackage -- only executables CMake component
 %{_mpich_load}
-DESTDIR="%{buildroot}" cmake -D COMPONENT:STRING=executables \
-                             -P "$MPI_COMPILER/%{cmake_install_file}"
+DESTDIR="%{buildroot}" cmake3 -D COMPONENT:STRING=executables \
+                              -P "$MPI_COMPILER/%{cmake_install_file}"
 %{_mpich_unload}
 
 
