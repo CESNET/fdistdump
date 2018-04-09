@@ -25,6 +25,8 @@ env:
 before_install:
     # update, upgrade, and install additional dependencies such as Ubuntu packages
     - sudo apt-get -qq update
+    # package rpm provides rpmbuild
+    - sudo apt-get install rpm
 
 install:
     # dependency installation commands
@@ -53,19 +55,24 @@ script:
 
     - rm -rf *
     - cmake $CMAKE_COMMON_VARS -D CMAKE_BUILD_TYPE:STRING=Release -D ENABLE_BFINDEX=OFF ../fdistdump
+    - cmake --build .
     - cd ..
 
-# after_success:
-    # no tests available yet
+after_success:
+    # no tests available yet, at least build packages
+    - cd release_build
+    - cmake --build . --target package
+    - cmake --build . --target package_source
+    - cmake --build . --target package_rpm
+    - cmake --build . --target package_srpm
 
 # after_failure:
 
 # after_script:
 
 # notifications:
-# By default, email notifications are sent to the committer and the commit
-# author when they are members of the repository.
-
+    # By default, email notifications are sent to the committer and the commit
+    # author when they are members of the repository.
 
 # coverity related
 addons:
