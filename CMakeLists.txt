@@ -1,5 +1,5 @@
 # set the minimum required version of cmake
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.6)
 
 ################################################################################
 # setup a the project (DESCRIPTION directive is not supported until 3.9)

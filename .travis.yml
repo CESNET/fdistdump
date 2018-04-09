@@ -22,19 +22,31 @@ env:
 before_install:
     # update, upgrade, and install common prerequisites
     - sudo apt-get -qq update
-    # - sudo apt-get -qq install gcc cmake3 make
     # install fdistdump's dependencies
     - extras/install_dependencies_ubuntu.sh
 
 install:
-    - cmake .
+    # step out of the source tree
+    - cd ..
+
+    # do a debug out-of-source build
+    - mkdir debug_build
+    - cd debug_build
+    - cmake -D CMAKE_VERBOSE_MAKEFILE=ON -D CMAKE_BUILD_TYPE:STRING=Debug ../fdistdump
     - cmake --build .
+    - cd ..
+
+    # do a release out-of-source build
+    - mkdir release_build
+    - cd release_build
+    - cmake -D CMAKE_VERBOSE_MAKEFILE=ON -D CMAKE_BUILD_TYPE:STRING=Release ../fdistdump
+    - cmake --build .
+    - cd ..
 
 # before_script:
 
-script:
-    - make check
-    - make distcheck
+# script:
+# no tests available yet
 
 # after_success:
 
@@ -42,8 +54,10 @@ script:
 
 # after_script:
 
-notifications:
-    email: false
+# notifications:
+# By default, email notifications are sent to the committer and the commit
+# author when they are members of the repository.
+
 
 # coverity related
 addons:
