@@ -1,4 +1,5 @@
-/** Master process functionality.
+/**
+ * @brief Master process functionality.
  */
 
 /*

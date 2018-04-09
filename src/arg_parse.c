@@ -1390,7 +1390,7 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
             return E_ARG;
         }
     } else {  // output fields not specidied, use default values
-        bool ret;
+        bool ret = true;
         switch (args->working_mode) {
         case MODE_LIST:
             // compound literal is used to create a modifiable copy

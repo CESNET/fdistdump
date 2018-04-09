@@ -1,4 +1,5 @@
-/** Various macros and declarations needed in multiple translation units.
+/**
+ * @brief Various macros and declarations needed in multiple translation units.
  */
 
 /*

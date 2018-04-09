@@ -1,4 +1,5 @@
-/** Various functions and variables needed in multiple translation units.
+/**
+ * @brief Various functions and variables needed in multiple translation units.
  */
 
 /*

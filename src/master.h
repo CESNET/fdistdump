@@ -1,4 +1,5 @@
-/** Master process declarations.
+/**
+ * @brief Master process declarations.
  */
 
 /*

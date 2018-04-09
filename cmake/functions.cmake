@@ -2,7 +2,7 @@
 # option. If yes, add that option to the compilation of source files. If no,
 # print warning and skip the option.
 include(CheckCCompilerFlag)
-function(check_and_add_compile_options option_list)
+function(check_and_add_C_compile_options option_list)
     message(STATUS "Checking compiler options ${option_list}")
     foreach(option ${option_list})
         # create a name meeting the CMake variable identifier grammar rules
@@ -17,7 +17,7 @@ function(check_and_add_compile_options option_list)
             message(WARNING "Option `${option}' not supported")
         endif(${option_name})
     endforeach(option)
-endfunction(check_and_add_compile_options)
+endfunction(check_and_add_C_compile_options)
 
 # Capitalize the given string str and save the result in the res_var.
 function(string_capitalize str res_var)

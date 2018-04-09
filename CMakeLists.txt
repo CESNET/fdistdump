@@ -66,7 +66,7 @@ set(basic_warning_options
     -Wextra     # some extra warning flags that are not enabled by -Wall
     -Wpedantic  # all the warnings demanded by strict ISO C and ISO C++
     )
-check_and_add_compile_options("${basic_warning_options}")
+check_and_add_C_compile_options("${basic_warning_options}")
 
 set(advanced_warning_options
     -Winit-self  # uninitialized variables that are initialized with themselves
@@ -82,7 +82,7 @@ set(advanced_warning_options
     -Wformat=2 -Wno-format-y2k  # format warnings, disable buggy Y2K warnings
     -fstack-protector -fstack-protector-strong  # emit code to check for buffer overflows
     )
-check_and_add_compile_options("${advanced_warning_options}")
+check_and_add_C_compile_options("${advanced_warning_options}")
 
 
 ################################################################################
