@@ -1,21 +1,34 @@
-# create a list of source files
-set(SOURCE_LIST
-    arg_parse.c arg_parse.h
-    common.c common.h
-    errwarn.c errwarn.h
-    fields.c fields.h
+# create a list of C source files and header files
+set(SOURCE_FILES
+    arg_parse.c
+    common.c
+    errwarn.c
+    fields.c
     main.c
-    master.c master.h
-    output.c output.h
-    path_array.c path_array.h
-    slave.c slave.h
+    master.c
+    output.c
+    path_array.c
+    slave.c
+    )
+set(HEADER_FILES
+    arg_parse.h
+    common.h
+    errwarn.h
+    fields.h
+    master.h
+    output.h
+    path_array.h
+    slave.h
     )
 if(ENABLE_BFINDEX)
-    list(APPEND SOURCE_LIST bfindex.c bfindex.h)
+    list(APPEND SOURCE_FILES bfindex.c)
+    list(APPEND HEADER_FILES bfindex.h)
 endif(ENABLE_BFINDEX)
 
-# add an executable to the project using the source files
-add_executable(fdistdump ${SOURCE_LIST})
+# add an executable to the project using the source files (list also header
+# files, so they are considered part of the project, and will be listed as such
+# in IDEs)
+add_executable(fdistdump ${SOURCE_FILES} ${HEADER_FILES})
 
 # Change the executable suffix. Fedora-based distros require executables to be
 # suffixed with $MPI_SUFFIX. CMAKE_EXECUTABLE_SUFFIX variable does not work as

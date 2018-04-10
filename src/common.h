@@ -93,6 +93,7 @@ typedef enum { //error return codes
 } error_code_t;
 
 typedef enum { //working modes
+        MODE_UNSET,
         MODE_LIST, //list unmodified flow records
         MODE_SORT, //list ordered flow records
         MODE_AGGR, //aggregation and statistic
@@ -100,6 +101,7 @@ typedef enum { //working modes
 } working_mode_t;
 
 enum {  // MPI point-to-point communication tags
+    TAG_UNSET,
     TAG_LIST,
     TAG_SORT,
     TAG_AGGR,

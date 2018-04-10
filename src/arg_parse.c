@@ -738,16 +738,20 @@ set_time_range(struct cmdline_args *const args, char *const range_str)
  * @return True on success, false on failure.
  */
 static bool
-parse_fields(char *const fields_spec, struct fields *const fields,
+parse_fields(const char *const fields_spec, struct fields *const fields,
              const bool are_aggr_keys)
 {
     assert(fields_spec && fields);
 
-    DEBUG("args: parsing fields spec `%s'", fields_spec);
+    // make a modifiable copy of the fields_spec string
+    char *const fields_spec_mod = strdup(fields_spec);
+    ABORT_IF(!fields_spec_mod, E_MEM, strerror(errno));
+
+    DEBUG("args: parsing fields spec `%s'", fields_spec_mod);
 
     size_t fields_found = 0;
     char *saveptr = NULL;
-    for (char *token = strtok_r(fields_spec, FIELDS_DELIM, &saveptr);
+    for (char *token = strtok_r(fields_spec_mod, FIELDS_DELIM, &saveptr);
             token != NULL;
             token = strtok_r(NULL, FIELDS_DELIM, &saveptr))
     {
@@ -771,6 +775,7 @@ parse_fields(char *const fields_spec, struct fields *const fields,
         }
         fields_found++;
     }
+    free(fields_spec_mod);
 
     if (are_aggr_keys && fields_found == 0) {
         ERROR(E_ARG, "aggregation enabled, but no aggregation key specified");
@@ -796,17 +801,22 @@ parse_fields(char *const fields_spec, struct fields *const fields,
  * @return True on success, false otherwise.
  */
 static bool
-parse_sort_spec(char *const sort_spec, struct fields *const fields)
+parse_sort_spec(const char *const sort_spec, struct fields *const fields)
 {
     assert(sort_spec && fields);
 
     DEBUG("args: parsing sort spec `%s'", sort_spec);
 
+    int field_id;
+    int field_alignment;
+    int ipv6_alignment;
     int direction = LNF_SORT_NONE;
-    char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find the first #
+    const char *const delim_pos = strchr(sort_spec, SORT_DELIM);  // find the first #
     if (delim_pos) {  // delimiter found, direction should follow
-        *delim_pos = '\0';  // to distinguish between the field and direction
-        char *const direction_str = delim_pos + 1;
+        char *field_str = strndup(sort_spec, delim_pos - sort_spec);
+        ABORT_IF(!field_str, E_MEM, strerror(errno));
+
+        const char *const direction_str = delim_pos + 1;
         DEBUG("args: sort spec delimiter found, using `%s' as a sort key and `%s' as a direction",
               sort_spec, direction_str);
         if (strcmp(direction_str, "asc") == 0) {  // ascending direction
@@ -817,16 +827,23 @@ parse_sort_spec(char *const sort_spec, struct fields *const fields)
             ERROR(E_ARG, "invalid sort direction `%s'", direction_str);
             return E_ARG;
         }
+
+        // parse sort key from string; netmask is pointless in case of sort key
+        if (!field_parse(field_str, &field_id, &field_alignment,
+                         &ipv6_alignment))
+        {
+            return false;
+        }
+        free(field_str);
     } else {  // delimiter not found, direction not specified; use the default
         DEBUG("args: sort spec delimiter not found, using whole sort spec as a sort key and its default direction");
-    }
 
-    // parse sort key from string; netmask is pointless in case of sort key
-    int field_id;
-    int field_alignment;
-    int ipv6_alignment;
-    if (!field_parse(sort_spec, &field_id, &field_alignment, &ipv6_alignment)) {
-        return false;
+        // parse sort key from string; netmask is pointless in case of sort key
+        if (!field_parse(sort_spec, &field_id, &field_alignment,
+                         &ipv6_alignment))
+        {
+            return false;
+        }
     }
 
     return fields_set_sort_key(fields, field_id, direction);
@@ -847,8 +864,8 @@ parse_sort_spec(char *const sort_spec, struct fields *const fields)
  * @param[out] limit_optarg Pointer to the limit optarg string destination.
  */
 static void
-parse_stat_spec(char *stat_optarg, char *aggr_optarg[], char *sort_optarg[],
-                char *limit_optarg[])
+parse_stat_spec(char *stat_optarg, const char *aggr_optarg[],
+                const char *sort_optarg[], const char *limit_optarg[])
 {
     assert(stat_optarg && aggr_optarg && sort_optarg && limit_optarg);
 
@@ -1169,10 +1186,10 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         opterr = 0;
     }
 
-    char *aggr_optarg = NULL;
+    const char *aggr_optarg = NULL;
+    const char *limit_optarg = NULL;
+    const char *sort_optarg = NULL;
     char *filter_optarg = NULL;
-    char *limit_optarg = NULL;
-    char *sort_optarg = NULL;
     char *time_point_optarg = NULL;
     char *time_range_optarg = NULL;
     char *output_fields_optarg = NULL;
@@ -1393,20 +1410,18 @@ arg_parse(struct cmdline_args *args, int argc, char *const argv[],
         bool ret = true;
         switch (args->working_mode) {
         case MODE_LIST:
-            // compound literal is used to create a modifiable copy
-            ret = parse_fields((char []){DEFAULT_LIST_FIELDS}, &args->fields,
-                               false);
+            ret = parse_fields(DEFAULT_LIST_FIELDS, &args->fields, false);
             break;
         case MODE_SORT:
-            ret = parse_fields((char []){DEFAULT_SORT_FIELDS}, &args->fields,
-                               false);
+            ret = parse_fields(DEFAULT_SORT_FIELDS, &args->fields, false);
             break;
         case MODE_AGGR:
-            ret = parse_fields((char []){DEFAULT_AGGR_FIELDS}, &args->fields,
-                               false);
+            ret = parse_fields(DEFAULT_AGGR_FIELDS, &args->fields, false);
             break;
         case MODE_META:
             break;
+        case MODE_UNSET:
+            ABORT(E_INTERNAL, "invalid working mode");
         default:
             ABORT(E_INTERNAL, "unknown working mode");
         }

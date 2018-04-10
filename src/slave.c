@@ -207,6 +207,8 @@ thread_ctx_init(struct thread_ctx *const t_ctx)
         // no storage required
         break;
 
+    case MODE_UNSET:
+        ABORT(E_INTERNAL, "invalid working mode");
     default:
         ABORT(E_INTERNAL, "unknown working mode");
     }
@@ -240,58 +242,59 @@ thread_ctx_free(struct thread_ctx *const t_ctx)
 /**
  * @brief TODO
  *
- * @param private
+ * @param ps_private
  * @param lnf_rec
  */
 static void
-processed_summ_update(struct processed_summ *private, lnf_rec_t *lnf_rec)
+processed_summ_update(struct processed_summ *ps_private, lnf_rec_t *lnf_rec)
 {
-    assert(private && lnf_rec);
+    assert(ps_private && lnf_rec);
 
     uint64_t tmp;
 
     lnf_rec_fget(lnf_rec, LNF_FLD_AGGR_FLOWS, &tmp);
-    private->flows += tmp;
+    ps_private->flows += tmp;
 
     lnf_rec_fget(lnf_rec, LNF_FLD_DPKTS, &tmp);
-    private->pkts += tmp;
+    ps_private->pkts += tmp;
 
     lnf_rec_fget(lnf_rec, LNF_FLD_DOCTETS, &tmp);
-    private->bytes += tmp;
+    ps_private->bytes += tmp;
 }
 
 /**
  * @brief TODO
  *
- * @param shared
- * @param private
+ * @param ps_shared
+ * @param ps_private
  */
 static void
-processed_summ_share(struct processed_summ *shared,
-                     const struct processed_summ *private)
+processed_summ_share(struct processed_summ *ps_shared,
+                     const struct processed_summ *ps_private)
 {
-    assert(shared && private);
+    assert(ps_shared && ps_private);
 
     #pragma omp atomic
-    shared->flows += private->flows;
+    ps_shared->flows += ps_private->flows;
     #pragma omp atomic
-    shared->pkts += private->pkts;
+    ps_shared->pkts += ps_private->pkts;
     #pragma omp atomic
-    shared->bytes += private->bytes;
+    ps_shared->bytes += ps_private->bytes;
 }
 
 /**
  * @brief TODO
  *
- * Read to the temporary variable, check validity, and update private counsters.
+ * Read to the temporary variable, check validity, and update the thread-private
+ * counters.
  *
- * @param private
+ * @param ms_private
  * @param lnf_file
  */
 static void
-metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
+metadata_summ_update(struct metadata_summ *ms_private, lnf_file_t *lnf_file)
 {
-    assert(private && lnf_file);
+    assert(ms_private && lnf_file);
 
     struct metadata_summ tmp;
     int lnf_ret = LNF_OK;
@@ -314,11 +317,11 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
         WARNING(E_LNF, "metadata flow count mismatch (total != TCP + UDP + ICMP + other)");
     }
 
-    private->flows += tmp.flows;
-    private->flows_tcp += tmp.flows_tcp;
-    private->flows_udp += tmp.flows_udp;
-    private->flows_icmp += tmp.flows_icmp;
-    private->flows_other += tmp.flows_other;
+    ms_private->flows += tmp.flows;
+    ms_private->flows_tcp += tmp.flows_tcp;
+    ms_private->flows_udp += tmp.flows_udp;
+    ms_private->flows_icmp += tmp.flows_icmp;
+    ms_private->flows_other += tmp.flows_other;
 
     // packets
     lnf_ret |= lnf_info(lnf_file, LNF_INFO_PACKETS, &tmp.pkts,
@@ -338,11 +341,11 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
         WARNING(E_LNF, "metadata packet count mismatch (total != TCP + UDP + ICMP + other)");
     }
 
-    private->pkts += tmp.pkts;
-    private->pkts_tcp += tmp.pkts_tcp;
-    private->pkts_udp += tmp.pkts_udp;
-    private->pkts_icmp += tmp.pkts_icmp;
-    private->pkts_other += tmp.pkts_other;
+    ms_private->pkts += tmp.pkts;
+    ms_private->pkts_tcp += tmp.pkts_tcp;
+    ms_private->pkts_udp += tmp.pkts_udp;
+    ms_private->pkts_icmp += tmp.pkts_icmp;
+    ms_private->pkts_other += tmp.pkts_other;
 
     // bytes
     lnf_ret |= lnf_info(lnf_file, LNF_INFO_BYTES, &tmp.bytes,
@@ -362,57 +365,57 @@ metadata_summ_update(struct metadata_summ *private, lnf_file_t *lnf_file)
         WARNING(E_LNF, "metadata bytes count mismatch (total != TCP + UDP + ICMP + other)");
     }
 
-    private->bytes += tmp.bytes;
-    private->bytes_tcp += tmp.bytes_tcp;
-    private->bytes_udp += tmp.bytes_udp;
-    private->bytes_icmp += tmp.bytes_icmp;
-    private->bytes_other += tmp.bytes_other;
+    ms_private->bytes += tmp.bytes;
+    ms_private->bytes_tcp += tmp.bytes_tcp;
+    ms_private->bytes_udp += tmp.bytes_udp;
+    ms_private->bytes_icmp += tmp.bytes_icmp;
+    ms_private->bytes_other += tmp.bytes_other;
 }
 
 /**
  * @brief TODO
  *
  * @param shared
- * @param private
+ * @param ms_private
  */
 static void
 metadata_summ_share(struct metadata_summ *shared,
-                    const struct metadata_summ *private)
+                    const struct metadata_summ *ms_private)
 {
-    assert(shared && private);
+    assert(shared && ms_private);
 
     #pragma omp atomic
-    shared->flows += private->flows;
+    shared->flows += ms_private->flows;
     #pragma omp atomic
-    shared->flows_tcp += private->flows_tcp;
+    shared->flows_tcp += ms_private->flows_tcp;
     #pragma omp atomic
-    shared->flows_udp += private->flows_udp;
+    shared->flows_udp += ms_private->flows_udp;
     #pragma omp atomic
-    shared->flows_icmp += private->flows_icmp;
+    shared->flows_icmp += ms_private->flows_icmp;
     #pragma omp atomic
-    shared->flows_other += private->flows_other;
+    shared->flows_other += ms_private->flows_other;
 
     #pragma omp atomic
-    shared->pkts += private->pkts;
+    shared->pkts += ms_private->pkts;
     #pragma omp atomic
-    shared->pkts_tcp += private->pkts_tcp;
+    shared->pkts_tcp += ms_private->pkts_tcp;
     #pragma omp atomic
-    shared->pkts_udp += private->pkts_udp;
+    shared->pkts_udp += ms_private->pkts_udp;
     #pragma omp atomic
-    shared->pkts_icmp += private->pkts_icmp;
+    shared->pkts_icmp += ms_private->pkts_icmp;
     #pragma omp atomic
-    shared->pkts_other += private->pkts_other;
+    shared->pkts_other += ms_private->pkts_other;
 
     #pragma omp atomic
-    shared->bytes += private->bytes;
+    shared->bytes += ms_private->bytes;
     #pragma omp atomic
-    shared->bytes_tcp += private->bytes_tcp;
+    shared->bytes_tcp += ms_private->bytes_tcp;
     #pragma omp atomic
-    shared->bytes_udp += private->bytes_udp;
+    shared->bytes_udp += ms_private->bytes_udp;
     #pragma omp atomic
-    shared->bytes_icmp += private->bytes_icmp;
+    shared->bytes_icmp += ms_private->bytes_icmp;
     #pragma omp atomic
-    shared->bytes_other += private->bytes_other;
+    shared->bytes_other += ms_private->bytes_other;
 }
 
 
@@ -979,6 +982,9 @@ process_file_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx,
     case MODE_META:
         // metadata already read
         break;
+
+    case MODE_UNSET:
+        ABORT(E_INTERNAL, "invalid working mode");
     default:
         ABORT(E_INTERNAL, "unknown working mode");
     }
@@ -1027,6 +1033,8 @@ postprocess_mt(struct slave_ctx *const s_ctx, struct thread_ctx *const t_ctx)
         // nothing to do, not even the terminator
         break;
 
+    case MODE_UNSET:
+        ABORT(E_INTERNAL, "invalid working mode");
     default:
         ABORT(E_INTERNAL, "unknown working mode");
     }

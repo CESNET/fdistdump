@@ -66,7 +66,7 @@ verbosity_t verbosity = VERBOSITY_WARNING;  // default is warning
  *
  * @return Static read-only string.
  */
-static char *
+static const char *
 error_code_to_str(const error_code_t ecode)
 {
     switch (ecode) {

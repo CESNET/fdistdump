@@ -246,7 +246,7 @@ progress_bar_thread(progress_bar_type_t type, char *dest)
 
     ////////////////////////////////////////////////////////////////////////////
     // initialization
-    struct progress_bar_ctx pb_ctx = { 0 };
+    struct progress_bar_ctx pb_ctx = { .type = PROGRESS_BAR_UNSET };
     pb_ctx.type = type;
     int comm_size;
     MPI_Comm_size(mpi_comm_progress, &comm_size);
@@ -740,6 +740,8 @@ master_main_thread(void)
     case MODE_META:
         // receive only the progress
         break;
+    case MODE_UNSET:
+        ABORT(E_INTERNAL, "invalid working mode");
     default:
         ABORT(E_INTERNAL, "unknown working mode");
     }

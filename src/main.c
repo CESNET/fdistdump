@@ -91,7 +91,7 @@ main(int argc, char *argv[])
              "Did you use MPI process manager, e.g., mpiexec, mpirun, ...?");
 
     // parse command line arguments in all processes
-    struct cmdline_args args = { 0 };
+    struct cmdline_args args = { .working_mode = MODE_UNSET };
     error_code_t ecode = arg_parse(&args, argc, argv, world_rank == ROOT_PROC);
     if (ecode == E_HELP) {
         MPI_Finalize();
