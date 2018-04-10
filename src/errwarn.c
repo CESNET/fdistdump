@@ -23,7 +23,6 @@
 
 #include "errwarn.h"
 
-#include <assert.h>  // for assert
 #include <stdarg.h>  // for va_arg, va_end, va_list, va_start
 #include <stdio.h>   // for fputs, vsnprintf, size_t, stderr
 

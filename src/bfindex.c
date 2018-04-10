@@ -37,6 +37,7 @@
 #include <assert.h>             // for assert
 #include <inttypes.h>           // for fixed-width integer types
 #include <stdbool.h>            // for bool, true
+#include <stdint.h>             // for UINT32_MAX
 #include <stdio.h>              // for NULL, size_t
 #include <stdlib.h>             // for free, malloc
 #include <string.h>             // for strlen, memcmp, strcat, memcpy, strncmp

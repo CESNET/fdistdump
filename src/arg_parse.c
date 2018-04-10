@@ -39,6 +39,7 @@
 #include <omp.h>                // for omp_set_num_threads
 #include <getopt.h>             // for required_argument, no_argument, getop...
 #include <libnf.h>              // for lnf_fld_info, LNF_FLD_ZERO_, LNF_SORT...
+#include <unistd.h>             // for optarg, optind, opterr
 
 #include "arg_parse.h"
 #include "common.h"             // for ::E_ARG, ::E_OK, error_code_t
@@ -58,6 +59,10 @@
 #define DEFAULT_AGGR_FIELDS "duration,flows,packets,bytes,flags,bps,pps,bpp"
 #define DEFAULT_STAT_SORT_KEY "flows"
 #define DEFAULT_STAT_REC_LIMIT "10"
+
+
+// forward delcarations
+struct tm;  // make IWYU happy
 
 
 /*

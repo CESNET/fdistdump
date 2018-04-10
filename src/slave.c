@@ -29,7 +29,6 @@
 #include <stdbool.h>            // for bool, true, false
 #include <stdint.h>             // for SIZE_MAX, UINT32_MAX
 #include <stdlib.h>             // for free, malloc
-#include <string.h>             // for size_t, NULL, strlen
 
 #include <ffilter.h>            // for ff_t
 #include <libnf.h>              // for lnf_info, LNF_OK, lnf_rec_fget, LNF_EOF
@@ -42,7 +41,7 @@
 #endif  // ENABLE_BFINDEX
 #include "common.h"             // for metadata_summ, ROOT_PROC, mpi_comm_main
 #include "errwarn.h"            // for error/warning/info/debug messages, ...
-#include "fields.h"         // for fields, sort_key, field
+#include "fields.h"             // for fields, sort_key, field
 #include "path_array.h"         // for path_array_free
 
 

@@ -27,7 +27,6 @@
 #include <assert.h>   // for assert
 #include <stdbool.h>  // for false, true, bool
 #include <stddef.h>   // for size_t
-#include <string.h>   // for strlen
 
 #include <libnf.h>
 

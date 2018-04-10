@@ -26,6 +26,7 @@
 #include <assert.h>             // for assert
 #include <errno.h>              // for errno
 #include <inttypes.h>           // for fixed-width integer types
+#include <stdint.h>             // for UINT32_MAX, UINT64_MAX, UINT8_MAX, ...
 #include <stdio.h>              // for printf, snprintf, putchar, puts
 #include <stdlib.h>             // for free, malloc
 #include <string.h>             // for strlen
@@ -46,6 +47,7 @@
 #include <features.h>           // for __GLIBC_MINOR__, __GLIBC__
 #include <netinet/in.h>         // for ntohl, INET6_ADDRSTRLEN, IN6_IS_ADDR_...
 #include <sys/socket.h>         // for AF_INET, AF_INET6
+#include <sys/types.h>          // for ssize_t
 
 #include "common.h"             // for metadata_summ, processed_summ, ARRAY_...
 #include "errwarn.h"            // for error/warning/info/debug messages, ...

@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <stdlib.h>   // for exit
+
 #include <mpi.h>      // for MPI_COMM_WORLD
 
 #include "common.h"   // for error_code_t
