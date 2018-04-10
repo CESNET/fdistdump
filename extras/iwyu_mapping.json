@@ -1,0 +1,12 @@
+[
+    { "include": ["<bits/stdint-uintn.h>", "private", "<inttypes.h>", "public"] },
+
+    { "symbol": ["tm", "private", "<time.h>", "public"] },
+    { "symbol": ["struct tm", "private", "<time.h>", "public"] },
+    { "symbol": ["time_t", "private", "<time.h>", "public"] },
+    { "symbol": ["timespec", "private", "<time.h>", "public"] },
+
+    { "symbol": ["optarg", "private", "<unistd.h>", "public"] },
+    { "symbol": ["opterr", "private", "<unistd.h>", "public"] },
+    { "symbol": ["optind", "private", "<unistd.h>", "public"] }
+]

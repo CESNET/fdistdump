@@ -52,6 +52,21 @@ option(ENABLE_BFINDEX
 # -D EXECUTABLE_SUFFIX:STRING=<suffix>, defaults to empty string
 set(EXECUTABLE_SUFFIX CACHE STRING "Set the executable suffix.")
 
+# include-what-you-use: https://include-what-you-use.org/
+option(USE_IWYU
+       "Use/do't use include-what-you-use tool, which will run along with the compiler"
+       OFF)
+if(USE_IWYU)
+    find_program(IWYU_PATH NAMES iwyu include-what-you-use)
+    if(IWYU_PATH STREQUAL "IWYU_PATH-NOTFOUND")
+        message(WARNING "include-what-you-use executable not found, disabling")
+    else()
+        message(INFO "include-what-you-use executable found, enabling")
+        set(CMAKE_C_INCLUDE_WHAT_YOU_USE "${IWYU_PATH}" "-Xiwyu"
+            "--mapping_file=${CMAKE_SOURCE_DIR}/extras/iwyu_mapping.json")
+    endif(IWYU_PATH STREQUAL "IWYU_PATH-NOTFOUND")
+endif(USE_IWYU)
+
 ##### various project settings and checks
 # always use relative path for install() DESTINATIONs
 set(CMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION ON)
@@ -153,6 +168,9 @@ message("C build environment:\n"
         "\tOpenMP version   = ${OpenMP_C_VERSION}\n"  # since 3.9
         "\tOpenMP options   = ${OpenMP_C_FLAGS}\n"
         "\tOpenMP libraries = ${OpenMP_C_LIB_NAMES}\n"  # since 3.9
+        "\n"
+        "\tIWYU             = ${USE_IWYU}\n"
+        "\tIWYU command     = ${CMAKE_C_INCLUDE_WHAT_YOU_USE}\n"
         )
 if(CMAKE_VERSION VERSION_LESS 3.10)
     # the FindMPI module was improved in CMake 3.10
