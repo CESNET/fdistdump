@@ -1,3 +1,21 @@
+# Copyright 2018 CESNET
+#
+# This file is part of Fdistdump.
+#
+# Fdistdump is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Fdistdump is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Fdistdump.  If not, see <http://www.gnu.org/licenses/>.
+
+
 ##### CPack variables
 set(CPACK_PACKAGE_VENDOR "CESNET")
 set(CPACK_PACKAGE_CONTACT "wrona@cesnet.cz")
@@ -10,7 +28,7 @@ set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_PACKAGE_CHECKSUM SHA256)
 
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/COPYING")
 
 set(CPACK_GENERATOR "TGZ" "TXZ")
 set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM}")

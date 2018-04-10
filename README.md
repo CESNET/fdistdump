@@ -109,7 +109,7 @@ tree -L 2
 │   ├── doc
 │   ├── examples
 │   ├── extras
-│   ├── LICENSE
+│   ├── COPYING
 │   ├── pkg
 │   ├── README.md
 │   ├── src
