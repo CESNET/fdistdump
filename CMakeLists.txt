@@ -53,19 +53,29 @@ option(ENABLE_BFINDEX
 set(EXECUTABLE_SUFFIX CACHE STRING "Set the executable suffix.")
 
 # include-what-you-use: https://include-what-you-use.org/
-option(USE_IWYU
-       "Use/do't use include-what-you-use tool, which will run along with the compiler"
-       OFF)
+option(USE_IWYU "Use/don't use the include-what-you-use tool." OFF)
 if(USE_IWYU)
     find_program(IWYU_PATH NAMES iwyu include-what-you-use)
     if(IWYU_PATH STREQUAL "IWYU_PATH-NOTFOUND")
         message(WARNING "include-what-you-use executable not found, disabling")
     else()
-        message(INFO "include-what-you-use executable found, enabling")
+        message(STATUS "include-what-you-use executable found, enabling")
         set(CMAKE_C_INCLUDE_WHAT_YOU_USE "${IWYU_PATH}" "-Xiwyu"
             "--mapping_file=${CMAKE_SOURCE_DIR}/extras/iwyu_mapping.json")
     endif(IWYU_PATH STREQUAL "IWYU_PATH-NOTFOUND")
 endif(USE_IWYU)
+
+# clang-tidy: http://clang.llvm.org/extra/clang-tidy/
+option(USE_CLANG_TIDY "Use/don't use the clang-tidy tool." OFF)
+if(USE_CLANG_TIDY)
+    find_program(CLANG_TIDY_PATH clang-tidy)
+    if(CLANG_TIDY_PATH STREQUAL "CLANG_TIDY_PATH-NOTFOUND")
+        message(WARNING "clang-tidy executable not found, disabling")
+    else()
+        message(STATUS "clang-tidy executable found, enabling")
+        set(CMAKE_C_CLANG_TIDY "${CLANG_TIDY_PATH}")
+    endif(CLANG_TIDY_PATH STREQUAL "CLANG_TIDY_PATH-NOTFOUND")
+endif(USE_CLANG_TIDY)
 
 ##### various project settings and checks
 # always use relative path for install() DESTINATIONs
@@ -170,7 +180,10 @@ message("C build environment:\n"
         "\tOpenMP libraries = ${OpenMP_C_LIB_NAMES}\n"  # since 3.9
         "\n"
         "\tIWYU             = ${USE_IWYU}\n"
-        "\tIWYU command     = ${CMAKE_C_INCLUDE_WHAT_YOU_USE}\n"
+        "\tIWYU cmd         = ${CMAKE_C_INCLUDE_WHAT_YOU_USE}\n"
+        "\n"
+        "\tclang-tidy       = ${USE_CLANG_TIDY}\n"
+        "\tclang-tidy cmd   = ${CMAKE_C_CLANG_TIDY}\n"
         )
 if(CMAKE_VERSION VERSION_LESS 3.10)
     # the FindMPI module was improved in CMake 3.10

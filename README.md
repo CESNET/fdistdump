@@ -140,14 +140,24 @@ cache entry directly from the command-line using options
 
 Fdistdump-defined variables are:
 - `ENABLE_BFINDEX=<ON|OFF>`: Enables/disables the bloom-filter-index library.
-   Enabled by default.
+  Enabled by default.
 - `EXECUTABLE_SUFFIX:STRING`: Appends `value` to every produced
-   executable. Disabled by default.
+  executable. Disabled by default.
+
+Fdistdump-defined variables intended for developers are:
+- `USE_IWYU=<ON|OFF>`: Uses/does not use the include-what-you-use tool. If
+  enabled, the Makefile Generators and the Ninja generator will run this tool
+  along with the compiler and report a warning if the tool reports any problems.
+  Disabled by default.
+- `USE_CLANG_TIDY=<ON|OFF>`: Uses/does not use the clang-tidy tool. If
+  enabled, the Makefile Generators and the Ninja generator will run this tool
+  along with the compiler and report a warning if the tool reports any problems.
+  Disabled by default.
 
 There are also many [CMake-defined variables](https://cmake.org/cmake/help/latest/manual/cmake-variables.7.html),
 the most useful are:
 - `CMAKE_BUILD_TYPE:STRING`: Specifies the build type on single-configuration
-   generators. Possible values are Debug, Release, RelWithDebInfo, MinSizeRel.
+  generators. Possible values are Debug, Release, RelWithDebInfo, MinSizeRel.
    Defaults to Release.
 - `CMAKE_INSTALL_PREFIX:PATH`: Installation directory. Defaults to `/usr/local`.
 
