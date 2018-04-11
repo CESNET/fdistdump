@@ -22,7 +22,7 @@ cmake_minimum_required(VERSION 3.6)
 ################################################################################
 # setup a the project (DESCRIPTION directive is not supported until 3.9)
 project(fdistdump
-        VERSION 0.4.1
+        VERSION 0.5.0
         LANGUAGES C)
 set(PROJECT_DESCRIPTION
     "a tool to query IP flow records on a distributed system")
