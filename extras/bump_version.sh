@@ -104,7 +104,7 @@ main() {
     echo
     echo To finalize the process, inspect changes made by thit script and run \
          the following commands:
-    echo git add configure.ac doc/man/fdistdump.1 fdistdump.spec
+    echo git add CMakeLists.txt
     echo git commit -m "\"VERSION BUMP: $1 ($LATEST_VERSION_STR -> $NEW_VERSION_STR)\""
     echo git tag -a "v$NEW_VERSION_STR"
     echo git checkout master
