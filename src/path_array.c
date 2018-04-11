@@ -179,8 +179,8 @@ fill_from_path(struct path_array_ctx *const pa_ctx, const char path[PATH_MAX])
 
 #ifdef ENABLE_BFINDEX
         // bfindex files are ignored
-        if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX ".",
-                    STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX ".")) == 0)
+        if (strncmp(entry->d_name, BFINDEX_FILE_NAME_PREFIX,
+                    STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX)) == 0)
         {
             continue;  // skip this file
         }

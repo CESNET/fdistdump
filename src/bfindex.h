@@ -29,7 +29,7 @@
 #include <ffilter.h>  // for ff_node_t
 
 
-#define BFINDEX_FILE_NAME_PREFIX "bfi" /**< bfindex file prefix */
+#define BFINDEX_FILE_NAME_PREFIX "bfi." /**< bfindex file prefix */
 
 
 // forward declarations

@@ -813,13 +813,14 @@ parse_sort_spec(const char *const sort_spec, struct fields *const fields)
             direction = LNF_SORT_DESC;
         } else {  // invalid sort direction
             ERROR(E_ARG, "invalid sort direction `%s'", direction_str);
+            free(field_str);
             return E_ARG;
         }
 
         // parse sort key from string; netmask is pointless in case of sort key
         if (!field_parse(field_str, &field_id, &field_alignment,
-                         &ipv6_alignment))
-        {
+                         &ipv6_alignment)) {
+            free(field_str);
             return false;
         }
         free(field_str);

@@ -467,17 +467,25 @@ bfindex_flow_to_index_path(const char *flow_file_path)
     char *const index_path = malloc(
             dir_name_len  // directory name with terminating slash
             + STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX)  // bfindex prefix
-            + 1  // dot separator
             + file_name_len  // (rest of the) original file name
             + 1);  // terminating null-byte
     if (!index_path) {
         ERROR(E_MEM, "path string allocation");
         return NULL;
     }
-    strncpy(index_path, dir_name, dir_name_len);
-    index_path[dir_name_len] = '\0';
-    strcat(index_path, BFINDEX_FILE_NAME_PREFIX ".");
-    strcat(index_path, file_name);
+
+    char *index_path_pos = index_path;
+    memcpy(index_path_pos, dir_name, dir_name_len);  // add the directory name
+    index_path_pos += dir_name_len;
+
+    memcpy(index_path_pos, BFINDEX_FILE_NAME_PREFIX,
+           STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX));  // add the prefix
+    index_path_pos += STRLEN_STATIC(BFINDEX_FILE_NAME_PREFIX);
+
+    memcpy(index_path_pos, file_name, file_name_len); // add the file name
+    index_path_pos += file_name_len;
+
+    *index_path_pos = '\0';  // add the terminating null-byte
 
     return index_path;
 }
